@@ -1,0 +1,487 @@
+/* 
+  Localizable.strings (Hebrew)
+  WearIt
+  
+  Hebrew localization strings
+*/
+
+// MARK: - Tab Bar
+"tab_outfits" = "לוקים";
+"tab_calendar" = "יומן";
+"tab_wardrobe" = "ארון";
+"tab_add" = "הוסף";
+"tab_stats" = "סטטיסטיקה";
+"tab_profile" = "פרופיל";
+"planner_weather_summary" = "מזג אוויר";
+"planner_weather_default_hint" = "אין צורך בהתאמות מיוחדות.";
+"planner_recommendations_title" = "המלצות";
+"planner_show_recommendations" = "המלצות";
+"planner_hide_recommendations" = "הסתר המלצות";
+"planner_reco_layering_yes" = "מומלץ להתלבש בשכבות";
+"planner_reco_layering_no" = "אין צורך בשכבות נוספות";
+"planner_reco_guidance_evening_jacket" = "ערב קריר — מומלץ להוסיף מעיל";
+"planner_reco_guidance_rain" = "סיכוי לגשם — מומלץ לקחת שכבה";
+"planner_remove_outerwear" = "הסר עליון";
+"signin_continue_offline" = "המשך במצב לא מקוון";
+"signin_icloud_guidance" = "גיבוי דורש iCloud פעיל בהגדרות. התחברות עם Apple בלבד לא מספיקה.";
+"backup_cta_title" = "התחבר כדי להפעיל גיבוי iCloud";
+"backup_cta_subtitle" = "התחבר כדי לסנכרן את הארון בין מכשירים.";
+"backup_cta_icloud_off" = "iCloud כבוי — הפעילו בהגדרות כדי לגבות.";
+"backup_cta_action" = "התחבר";
+"profile_cloud_status_unavailable" = "לא זמין";
+"profile_cloud_status_syncing" = "מסנכרן…";
+"profile_cloud_status_synced" = "סונכרן";
+"profile_cloud_status_error" = "שגיאת סנכרון";
+"profile_cloud_guidance" = "יש להפעיל iCloud בהגדרות לצורך גיבוי וסנכרון.";
+"profile_icloud_signin_separate" = "גיבוי iCloud נפרד מהתחברות לאפליקציה.";
+"profile_sign_in" = "התחבר";
+"profile_sign_out" = "התנתק";
+"profile_signed_in" = "מחובר";
+"profile_signed_out" = "לא מחובר";
+"profile_signout_title" = "להתנתק?";
+"profile_signout_message" = "בחרו איך להמשיך.";
+"profile_signout_stay_offline" = "הישאר במצב לא מקוון (שמירת גישה)";
+"profile_signout_go_to_signin" = "עבור למסך התחברות";
+"wardrobe_sort_title" = "מיון";
+"wardrobe_sort_newest" = "מהחדש לישן";
+"wardrobe_sort_oldest" = "מהישן לחדש";
+"wardrobe_sort_name" = "שם א–ת";
+"wardrobe_sort_brand" = "מותג א–ת";
+"wardrobe_sort_category" = "קטגוריה";
+
+// MARK: - Navigation Titles
+"nav_outfit_planner" = "מתכנן הלוקים";
+"nav_wardrobe" = "הארון שלי";
+"nav_add_item" = "הוסף פריט";
+"nav_edit_item" = "עריכת פריט";
+"nav_calendar" = "יומן לבוש";
+"nav_stats" = "סטטיסטיקה";
+"nav_profile" = "פרופיל";
+
+// MARK: - Common Actions
+"action_save" = "שמור";
+"action_cancel" = "ביטול";
+"action_delete" = "מחק";
+"action_edit" = "ערוך";
+"action_done" = "סיום";
+"action_back" = "חזרה";
+"action_refresh" = "רענן";
+"action_clear" = "נקה";
+"action_add" = "הוסף";
+"action_remove" = "הסר";
+"action_close" = "סגור";
+"action_confirm" = "אישור";
+
+// MARK: - Days
+"day_today" = "היום";
+"day_tomorrow" = "מחר";
+
+// MARK: - Outfit Planner
+"planner_recommended_outfit" = "הלוק המומלץ";
+"planner_manual_adjustments" = "התאמות ידניות";
+"planner_adjust" = "התאם";
+"planner_reset" = "איפוס";
+"planner_reset_to_forecast" = "חזור לתחזית";
+"planner_no_outfit" = "אין לוק זמין";
+"planner_add_more_items" = "הוסף עוד פריטים לארון";
+"planner_limited_wardrobe" = "ארון מוגבל";
+"planner_not_enough_items" = "אין מספיק פריטים להימנע מחזרות";
+"planner_what_do_you_think" = "מה אתה חושב?";
+"planner_wear_this" = "ללבוש";
+"planner_love_it" = "אהבתי";
+"planner_skip" = "דלג";
+"planner_using_forecast" = "לפי תחזית מזג האוויר";
+"planner_manual_active" = "התאמות ידניות פעילות";
+
+// MARK: - Weather
+"weather_rain_expected" = "צפוי גשם";
+"weather_no_rain" = "ללא גשם";
+"weather_sunny" = "שמשי";
+"weather_partly_cloudy" = "מעונן חלקית";
+"weather_cloudy" = "מעונן";
+"weather_rainy" = "גשום";
+"weather_stormy" = "סוער";
+"weather_snow" = "שלג";
+"weather_temperature" = "טמפרטורה";
+"weather_formality" = "פורמליות";
+
+// MARK: - Smart Hints
+"hint_layering_recommended" = "שינוי גדול בטמפרטורה היום — שכבות מומלצות";
+"hint_evening_jacket" = "צפוי ערב קר — כדאי להוסיף ז׳קט";
+"hint_warm_afternoon_cool_morning" = "צהריים חמים, בוקר קריר — עדיף בלי עליונית כבדה";
+"hint_rain_expected" = "סיכוי לגשם — מומלץ נעליים עמידות למים";
+"hint_fit_tight_cold" = "גזרה צמודה בקור — שקול שכבות";
+"hint_fit_oversized_hot" = "אוברסייז בחום — עדיף שכבות קלות";
+
+// MARK: - Fit & Size
+"fit_size_title" = "גזרה ומידה";
+"fit_label" = "גזרה";
+"size_label" = "מידה";
+"fit_skinny" = "סקיני";
+"fit_slim" = "צמוד";
+"fit_regular" = "רגיל";
+"fit_relaxed" = "משוחרר";
+"fit_oversized" = "אוברסייז";
+"size_xs" = "XS";
+"size_s" = "S";
+"size_m" = "M";
+"size_l" = "L";
+"size_xl" = "XL";
+"size_xxl" = "XXL";
+
+// MARK: - Temperature Feedback
+"temp_feedback_title" = "איך הרגשת עם הטמפרטורה?";
+"temp_too_cold" = "קר מדי";
+"temp_too_hot" = "חם מדי";
+"temp_just_right" = "בדיוק";
+
+// MARK: - Wardrobe
+"wardrobe_empty_title" = "הארון ריק";
+"wardrobe_empty_message" = "לחץ על + להוספת הפריט הראשון";
+"wardrobe_filter_all" = "הכל";
+"wardrobe_filter_season" = "עונה";
+"wardrobe_clear_filters" = "נקה פילטרים";
+"wardrobe_suitable_for_temp" = "מתאים ל-%@°";
+"wardrobe_delete_confirm_title" = "למחוק את הפריט?";
+"wardrobe_delete_confirm_message" = "לא ניתן לבטל פעולה זו.";
+
+// MARK: - Add/Edit Garment
+"garment_add_title" = "הוסף לארון";
+"garment_add_subtitle" = "צלם או בחר מהגלריה";
+"garment_take_photo" = "צלם תמונה";
+"garment_choose_library" = "בחר מהגלריה";
+"garment_category" = "קטגוריה";
+"garment_item_type" = "סוג פריט";
+"item_type_tshirt" = "טי-שרט";
+"item_type_shirt" = "חולצה";
+"item_type_polo" = "פולו";
+"item_type_blouse" = "חולצה מכופתרת";
+"item_type_tank" = "גופייה";
+"item_type_sweater" = "סוודר";
+"item_type_hoodie" = "קפוצ׳ון";
+"item_type_cardigan" = "קרדיגן";
+"item_type_vest" = "וסט";
+"item_type_jeans" = "ג׳ינס";
+"item_type_chinos" = "צ׳ינו";
+"item_type_trousers" = "מכנסיים";
+"item_type_shorts" = "שורטים";
+"item_type_skirt" = "חצאית";
+"item_type_leggings" = "טייץ";
+"item_type_joggers" = "ג׳וגרים";
+"item_type_sweatpants" = "מכנסי טרנינג";
+"item_type_sneakers" = "סניקרס";
+"item_type_boots" = "מגפיים";
+"item_type_loafers" = "לופרס";
+"item_type_sandals" = "סנדלים";
+"item_type_heels" = "עקבים";
+"item_type_flats" = "נעליים שטוחות";
+"item_type_oxfords" = "אוקספורד";
+"item_type_slippers" = "נעלי בית";
+"item_type_jacket" = "ג׳קט";
+"item_type_coat" = "מעיל";
+"item_type_blazer" = "בלייזר";
+"item_type_parka" = "פארקה";
+"item_type_raincoat" = "מעיל גשם";
+"item_type_windbreaker" = "מעיל רוח";
+"item_type_puffer" = "פאפר";
+"item_type_denim_jacket" = "ג׳קט ג׳ינס";
+"item_type_hat" = "כובע";
+"item_type_cap" = "כובע מצחייה";
+"item_type_scarf" = "צעיף";
+"item_type_belt" = "חגורה";
+"item_type_watch" = "שעון";
+"item_type_bag" = "תיק";
+"item_type_sunglasses" = "משקפי שמש";
+"item_type_jewelry" = "תכשיטים";
+"item_type_tie" = "עניבה";
+"item_type_other" = "אחר";
+"garment_colors" = "צבעים";
+"garment_brand" = "מותג";
+"garment_brand_placeholder" = "למשל Nike, Zara, Levi's";
+"brand_add_suggestion" = "הוסף \"%@\"";
+"garment_temperature_range" = "טווח טמפרטורה";
+"garment_attributes" = "מאפיינים";
+"garment_warmth" = "חום";
+"garment_formality" = "רשמיות";
+"garment_love" = "אהבה";
+"garment_more_options" = "אפשרויות נוספות";
+"garment_pattern" = "דוגמה";
+"action_save_changes" = "שמור שינויים";
+"action_delete_item" = "מחק פריט";
+"planner_evening_empty" = "מראה ערב יופיע כאן";
+"garment_no_image" = "אין תמונה";
+"garment_add_photo" = "הוסף תמונה";
+"action_remove_photo" = "הסר";
+"garment_change_image" = "החלף תמונה";
+"planner_show_details" = "פרטים";
+"planner_hide_details" = "הסתר פרטים";
+"planner_day_header_format" = "%@ · %@ · %@ · %d°–%d° · %@";
+"planner_day_header_no_forecast_format" = "%@ · %@";
+"planner_add_item_category_mismatch" = "הפריט לא מתאים לקטגוריית המשבצת.";
+"garment_colors" = "צבעים";
+"garment_colors_recommended" = "מומלץ";
+"tag_bilingual_hint" = "הוסיפו תגיות בעברית ובאנגלית (למשל \"קפוצ׳ון, hoodie\")";
+"color_black" = "שחור";
+"color_white" = "לבן";
+"color_gray" = "אפור";
+"color_navy" = "כחול נייבי";
+"color_blue" = "כחול";
+"color_light_blue" = "כחול בהיר";
+"color_red" = "אדום";
+"color_pink" = "ורוד";
+"color_orange" = "כתום";
+"color_yellow" = "צהוב";
+"color_green" = "ירוק";
+"color_olive" = "זית";
+"color_brown" = "חום";
+"color_beige" = "בז׳";
+"color_cream" = "שמנת";
+"color_burgundy" = "בורדו";
+"color_purple" = "סגול";
+"color_multicolor" = "רב־צבעוני";
+"color_denim" = "דנים";
+"size_w28" = "28";
+"size_w30" = "30";
+"size_w32" = "32";
+"size_w34" = "34";
+"size_w36" = "36";
+"size_w38" = "38";
+"size_w40" = "40";
+"size_eu39" = "EU 39";
+"size_eu40" = "EU 40";
+"size_eu41" = "EU 41";
+"size_eu42" = "EU 42";
+"size_eu43" = "EU 43";
+"size_eu44" = "EU 44";
+"size_eu45" = "EU 45";
+"size_eu46" = "EU 46";
+"size_eu47" = "EU 47";
+"profile_data_management" = "נתונים";
+"brand_management_title" = "ניהול מותגים";
+"brand_list_title" = "מותגים";
+"brand_merge_duplicates" = "מיזוג כפילויות";
+"brand_items_count_format" = "%d פריטים";
+"brand_rename_title" = "שינוי שם מותג";
+"brand_name_placeholder" = "שם מותג";
+"brand_merge_title" = "מיזוג מותג";
+"brand_merge_target" = "מיזוג אל";
+"brand_merge_select_target" = "בחרו מותג יעד למיזוג.";
+"brand_delete_in_use" = "המותג בשימוש בפריטים. מומלץ למזג במקום למחוק.";
+"action_rename" = "שינוי שם";
+"action_merge" = "מיזוג";
+"garment_season" = "עונה";
+"garment_save_success" = "הפריט נוסף לארון.";
+"garment_edit_title" = "שם מותאם";
+"garment_use_auto_title" = "השתמש בשם אוטומטי";
+
+// MARK: - Categories
+"category_tops" = "חולצות";
+"category_bottoms" = "מכנסיים";
+"category_outerwear" = "עליוניות";
+"category_footwear" = "נעליים";
+"category_accessories" = "אביזרים";
+"category_other" = "אחר";
+
+// MARK: - Seasons
+"season_summer" = "קיץ";
+"season_winter" = "חורף";
+"season_transitional" = "מעבר";
+"season_all_season" = "כל העונות";
+
+// MARK: - Calendar
+"calendar_title" = "יומן לבוש";
+"calendar_outfit_log" = "יומן לוקים";
+"calendar_no_outfit" = "אין לוק ליום זה";
+"calendar_add_photos" = "הוסף תמונות לתיעוד מה לבשת";
+"calendar_worn_on" = "נלבש ב-%@";
+"calendar_photos_count" = "%d תמונות";
+"calendar_mark_as_worn" = "סמן כנלבש";
+"calendar_plan_outfit" = "תכנן לוק";
+"calendar_outfit_for_day" = "הלוק ליום זה";
+"calendar_select_worn_items" = "בחר פריטים מהארון שלך";
+"calendar_lock_garment" = "נעל ליום זה";
+"calendar_unlock_garment" = "בטל נעילה";
+"calendar_past_day" = "עבר";
+"calendar_future_day" = "מתוכנן";
+
+// MARK: - Stats
+"stats_title" = "סטטיסטיקה";
+"stats_total_items" = "פריטים";
+"stats_avg_love" = "אהבה ממוצעת";
+"stats_active" = "פעילים";
+"stats_by_category" = "לפי קטגוריה";
+"stats_havent_worn" = "לא לבשת לאחרונה";
+"stats_all_worn_recently" = "כל הפריטים נלבשו לאחרונה!";
+"stats_never_worn" = "אף פעם";
+"stats_days_ago" = "לפני %d ימים";
+
+// MARK: - Profile
+"profile_title" = "פרופיל";
+"profile_account" = "חשבון";
+"profile_display_name" = "שם תצוגה";
+"profile_display_name_placeholder" = "השם שלך";
+"profile_email" = "אימייל";
+"profile_email_placeholder" = "email@example.com";
+"profile_phone" = "טלפון (אופציונלי)";
+"profile_phone_placeholder" = "050-1234567";
+"profile_use_apple_info" = "השתמש בפרטי Apple";
+"profile_style_preferences" = "העדפות סגנון";
+"profile_formality" = "פורמליות";
+"profile_warmth_sensitivity" = "רגישות לחום";
+"profile_rain_tolerance" = "סובלנות לגשם";
+"profile_casual" = "קז׳ואל";
+"profile_smart" = "אלגנטי";
+"profile_run_cold" = "מתקרר בקלות";
+"profile_run_hot" = "מתחמם בקלות";
+"profile_avoid_rain" = "נמנע מגשם";
+"profile_dont_mind" = "לא מפריע";
+"profile_cloud_sync" = "סנכרון ענן";
+"profile_local_storage" = "אחסון מקומי (SwiftData)";
+"profile_save_changes" = "שמור שינויים";
+"profile_default_name" = "אני";
+
+// MARK: - Language
+"language_section_title" = "שפה";
+"language_system_label" = "שפת מערכת";
+"language_system_note" = "לפי שפת המערכת של iOS";
+
+// MARK: - Loading
+"loading_preparing" = "מכין את הארון שלך";
+"loading_setting_up" = "מגדיר";
+"loading_weather" = "בודק את מזג האוויר";
+"loading_ready" = "מכין הכל";
+
+// MARK: - Errors
+"error_title" = "שגיאה";
+"error_generic" = "משהו השתבש.";
+"error_save_failed" = "השמירה נכשלה";
+"error_load_failed" = "הטעינה נכשלה";
+
+// MARK: - Success
+"success_title" = "הצלחה";
+"success_saved" = "נשמר!";
+"success_deleted" = "נמחק";
+"success_updated" = "עודכן";
+
+// MARK: - Outfit Slots
+"slot_top" = "עליון";
+"slot_bottom" = "תחתון";
+"slot_shoes" = "נעליים";
+"slot_outer" = "מעיל";
+"slot_accessory" = "אביזר";
+
+// MARK: - Planner Board
+"planner_board_title" = "מתכנן 3 ימים";
+"planner_refresh_day" = "רענן";
+"planner_clear_day" = "נקה";
+"planner_drop_here" = "שחרר כאן";
+"planner_empty_slot" = "ריק";
+"planner_lock_item" = "נעל פריט";
+"planner_unlock_item" = "בטל נעילה";
+"planner_remove_item" = "הסר פריט";
+
+// MARK: - Swap & Drag Errors
+"swap_error_different_slots" = "ניתן להחליף רק בין אותו סוג משבצות";
+"swap_error_locked" = "משבצת זו נעולה";
+"swap_error_duplicate" = "פריט כבר בשימוש ביום אחר";
+"assign_error_unavailable" = "פריט זה לא זמין כרגע";
+
+// MARK: - Availability
+"availability_mark_unavailable" = "סמן כלא זמין";
+"availability_mark_available" = "סמן כזמין";
+"availability_unavailable_badge" = "לא זמין";
+"availability_replace_item" = "החלף פריט";
+
+// MARK: - Planner Header
+"greeting_morning" = "בוקר טוב";
+"greeting_afternoon" = "צהריים טובים";
+"greeting_evening" = "ערב טוב";
+"planner_header_subtitle" = "זה התכנון שלך לשלושת הימים הקרובים";
+"location_label" = "מזג אוויר עבור: %@";
+"location_unavailable" = "המיקום לא זמין";
+
+// MARK: - Forecast
+"forecast_label" = "תחזית •";
+"rain_chance_format" = "גשם • %d%%";
+
+// MARK: - Planner Item Actions
+"planner_item_actions" = "פעולות לפריט";
+"planner_mark_unavailable_now" = "סמן כלא זמין עכשיו";
+"planner_mark_available_now" = "סמן כזמין עכשיו";
+"planner_go_to_item" = "מעבר לעמוד הפריט";
+"planner_last_worn_format" = "נלבש לאחרונה: %@";
+"planner_never_worn" = "נלבש לאחרונה: אף פעם";
+"planner_mark_worn_today" = "סמן כנלבש היום";
+"planner_replace_single_item" = "החלף רק את הפריט הזה";
+"planner_unavailable_1d" = "יום אחד";
+"planner_unavailable_2d" = "יומיים";
+"planner_unavailable_1w" = "שבוע";
+"planner_days_ago_format" = "לפני %d ימים";
+"planner_no_replacement" = "אין פריט חלופי זמין";
+"planner_add_accessory" = "הוסף אביזר";
+"planner_search_placeholder" = "חפש פריטים";
+"planner_filter_season" = "עונה";
+"planner_filter_color" = "צבע";
+"planner_add_item_title" = "הוסף פריט";
+"planner_add_new_item" = "הוסף פריט חדש";
+"planner_confirm_day" = "אשר";
+"planner_undo_confirm" = "בטל אישור";
+"planner_evening_look" = "לוק ערב";
+"inspire_favorites" = "בהשראת המועדפים שלך.";
+"inspire_evening_jacket" = "כי מתקרר בהמשך היום, השארנו אופציית ז׳קט קל.";
+"inspire_color" = "בהשראת פריטים בצבע %@.";
+
+// MARK: - Garment Details
+"garment_detail_category" = "קטגוריה";
+"garment_detail_type" = "סוג";
+"garment_detail_colors" = "צבעים";
+"garment_detail_fit" = "גזרה";
+"garment_detail_size" = "מידה";
+"garment_detail_warmth" = "חום";
+"garment_detail_formality" = "פורמליות";
+"garment_detail_notes" = "הערות";
+
+// MARK: - Unavailable Items
+"unavailable_title" = "פריטים לא זמינים";
+"unavailable_empty_title" = "הכל תקין";
+"unavailable_empty_message" = "אין כרגע פריטים לא זמינים.";
+"unavailable_blocked" = "חסום";
+"unavailable_until_format" = "לא זמין עד %@";
+"unavailable_mark_available" = "סמן כזמין";
+"unavailable_extend" = "הארך";
+"garment_meta_default" = "כל העונות";
+
+// MARK: - Notifications UI
+"notifications_section_title" = "התראות";
+"notifications_section_subtext" = "WearIt שולחת מעט התראות מועילות בלבד. אפשר לשלוט כאן בהכל.";
+"notifications_morning_title" = "תכנון בוקר";
+"notifications_morning_help" = "קבל את הלוק של היום לפי מזג האוויר והארון שלך.";
+"notifications_weather_title" = "שינויים במזג האוויר";
+"notifications_weather_help" = "נודיע רק כשזה באמת משנה מה כדאי ללבוש.";
+"notifications_confirm_title" = "אישור לבוש";
+"notifications_confirm_help" = "עוזר ל‑WearIt ללמוד מה עובד לך ולשפר המלצות.";
+"notifications_learn_more" = "ככל שתאשר מה לבשת (ומה דילגת), ההמלצות ישתפרו.";
+"notifications_time_label" = "שעה";
+
+// MARK: - Notification Copy
+"notif_morning_title" = "בוקר טוב · %@ · %d°–%d°";
+"notif_morning_title_fallback" = "בוקר טוב";
+"notif_morning_body" = "הלוק שלך להיום מוכן";
+"notif_weather_title" = "עדכון מזג אוויר";
+"notif_weather_body" = "מתקרר בערב — כדאי להוסיף ז׳קט";
+"notif_confirm_title" = "איך היה הלוק של היום?";
+"notif_confirm_body" = "לחיצה קצרה תשפר את ההמלצות הבאות";
+
+// MARK: - Notification Actions
+"notif_action_open_planner" = "פתח מתכנן";
+"notif_action_update_outfit" = "עדכן לוק";
+"notif_action_mark_worn" = "סמן כנלבש";
+"notif_action_skip" = "דלג";
+
+// MARK: - Widget
+"widget_open_planner" = "פתח מתכנן";
+"widget_mark_worn" = "סמן כנלבש";
+"widget_confirmed" = "אושר";
+"widget_not_confirmed" = "לא אושר";
+"widget_empty_title" = "אין לוק עדיין";
+"widget_empty_body" = "פתח את WearIt כדי ליצור את לוק היום.";

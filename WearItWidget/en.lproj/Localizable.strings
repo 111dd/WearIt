@@ -1,0 +1,8 @@
+/* WearItWidget Localizable (English) */
+"location_unavailable" = "Location unavailable";
+"widget_open_planner" = "Open Planner";
+"widget_mark_worn" = "Mark worn";
+"widget_confirmed" = "Confirmed";
+"widget_not_confirmed" = "Not confirmed";
+"widget_empty_title" = "No outfit yet";
+"widget_empty_body" = "Open WearIt to generate today’s look.";

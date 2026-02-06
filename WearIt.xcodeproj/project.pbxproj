@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		376B19BB2F317E3200CBDD64 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 376B19BA2F317E3200CBDD64 /* WidgetKit.framework */; };
+		376B19BD2F317E3200CBDD64 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 376B19BC2F317E3200CBDD64 /* SwiftUI.framework */; };
+		376B19CA2F317E3300CBDD64 /* WearItWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 376B19B82F317E3200CBDD64 /* WearItWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		3781B3492E6A5B130064BE46 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -23,15 +29,61 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		376B19CF2F317E3300CBDD64 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				376B19CA2F317E3300CBDD64 /* WearItWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		376B19B82F317E3200CBDD64 /* WearItWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WearItWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		376B19BA2F317E3200CBDD64 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		376B19BC2F317E3200CBDD64 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		376B19D22F31800100CBDD64 /* WearItWidgetExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WearItWidgetExtension.entitlements; sourceTree = "<group>"; };
 		3781B3392E6A5B120064BE46 /* WearIt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WearIt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3781B3482E6A5B130064BE46 /* WearItTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WearItTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3781B3522E6A5B130064BE46 /* WearItUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WearItUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		376B19CB2F317E3300CBDD64 /* Exceptions for "WearItWidget" folder in "WearItWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 376B19B72F317E3200CBDD64 /* WearItWidgetExtension */;
+		};
+		376B1CC82F34D65E00CBDD64 /* Exceptions for "WearIt" folder in "WearIt" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3781B3382E6A5B120064BE46 /* WearIt */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		376B19BE2F317E3200CBDD64 /* WearItWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				376B19CB2F317E3300CBDD64 /* Exceptions for "WearItWidget" folder in "WearItWidgetExtension" target */,
+			);
+			path = WearItWidget;
+			sourceTree = "<group>";
+		};
 		3781B33B2E6A5B120064BE46 /* WearIt */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				376B1CC82F34D65E00CBDD64 /* Exceptions for "WearIt" folder in "WearIt" target */,
+			);
 			path = WearIt;
 			sourceTree = "<group>";
 		};
@@ -48,6 +100,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		376B19B52F317E3200CBDD64 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				376B19BD2F317E3200CBDD64 /* SwiftUI.framework in Frameworks */,
+				376B19BB2F317E3200CBDD64 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		3781B3362E6A5B120064BE46 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -72,12 +133,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		376B19B92F317E3200CBDD64 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				376B19BA2F317E3200CBDD64 /* WidgetKit.framework */,
+				376B19BC2F317E3200CBDD64 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		3781B3302E6A5B120064BE46 = {
 			isa = PBXGroup;
 			children = (
+				376B19D22F31800100CBDD64 /* WearItWidgetExtension.entitlements */,
 				3781B33B2E6A5B120064BE46 /* WearIt */,
 				3781B34B2E6A5B130064BE46 /* WearItTests */,
 				3781B3552E6A5B130064BE46 /* WearItUITests */,
+				376B19BE2F317E3200CBDD64 /* WearItWidget */,
+				376B19B92F317E3200CBDD64 /* Frameworks */,
 				3781B33A2E6A5B120064BE46 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +161,7 @@
 				3781B3392E6A5B120064BE46 /* WearIt.app */,
 				3781B3482E6A5B130064BE46 /* WearItTests.xctest */,
 				3781B3522E6A5B130064BE46 /* WearItUITests.xctest */,
+				376B19B82F317E3200CBDD64 /* WearItWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,6 +169,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		376B19B72F317E3200CBDD64 /* WearItWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 376B19CC2F317E3300CBDD64 /* Build configuration list for PBXNativeTarget "WearItWidgetExtension" */;
+			buildPhases = (
+				376B19B42F317E3200CBDD64 /* Sources */,
+				376B19B52F317E3200CBDD64 /* Frameworks */,
+				376B19B62F317E3200CBDD64 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				376B19BE2F317E3200CBDD64 /* WearItWidget */,
+			);
+			name = WearItWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = WearItWidgetExtension;
+			productReference = 376B19B82F317E3200CBDD64 /* WearItWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		3781B3382E6A5B120064BE46 /* WearIt */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 3781B35C2E6A5B130064BE46 /* Build configuration list for PBXNativeTarget "WearIt" */;
@@ -102,6 +198,7 @@
 				3781B3352E6A5B120064BE46 /* Sources */,
 				3781B3362E6A5B120064BE46 /* Frameworks */,
 				3781B3372E6A5B120064BE46 /* Resources */,
+				376B19CF2F317E3300CBDD64 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -170,9 +267,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1640;
-				LastUpgradeCheck = 1640;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					376B19B72F317E3200CBDD64 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					3781B3382E6A5B120064BE46 = {
 						CreatedOnToolsVersion = 16.4;
 					};
@@ -192,9 +292,19 @@
 			knownRegions = (
 				en,
 				Base,
+				he,
 			);
 			mainGroup = 3781B3302E6A5B120064BE46;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				37CDD55A2F0048F800CBED5D /* XCRemoteSwiftPackageReference "Mantis" */,
+				37CDD55D2F004AB900CBED5D /* XCRemoteSwiftPackageReference "SwiftUIX" */,
+				37CDD55E2F004AE700CBED5D /* XCRemoteSwiftPackageReference "Kingfisher" */,
+				37CDD55F2F004B0F00CBED5D /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
+				37CDD5622F004B3600CBED5D /* XCRemoteSwiftPackageReference "Alamofire" */,
+				37CDD5672F004B5F00CBED5D /* XCRemoteSwiftPackageReference "apollo-ios" */,
+				37AD54A82F006C330090F22F /* XCRemoteSwiftPackageReference "ml-mobileclip" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3781B33A2E6A5B120064BE46 /* Products */;
 			projectDirPath = "";
@@ -203,11 +313,19 @@
 				3781B3382E6A5B120064BE46 /* WearIt */,
 				3781B3472E6A5B130064BE46 /* WearItTests */,
 				3781B3512E6A5B130064BE46 /* WearItUITests */,
+				376B19B72F317E3200CBDD64 /* WearItWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		376B19B62F317E3200CBDD64 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		3781B3372E6A5B120064BE46 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -232,6 +350,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		376B19B42F317E3200CBDD64 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		3781B3352E6A5B120064BE46 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -269,11 +394,80 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		376B19CD2F317E3300CBDD64 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WearItWidgetExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W97P4L45B8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WearItWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WearItWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearIt.WearItWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		376B19CE2F317E3300CBDD64 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = WearItWidgetExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W97P4L45B8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WearItWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WearItWidget;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearIt.WearItWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		3781B35A2E6A5B130064BE46 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -327,6 +521,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -337,6 +532,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
@@ -383,6 +579,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -393,13 +590,32 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = WearIt/WearIt.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W97P4L45B8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WearIt/Info.plist;
+				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
+				INFOPLIST_KEY_CFBundleDisplayName = WearIt;
+				INFOPLIST_KEY_CFBundleExecutable = "$(EXECUTABLE_NAME)";
+				INFOPLIST_KEY_CFBundleIdentifier = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				INFOPLIST_KEY_CFBundleInfoDictionaryVersion = 6.0;
+				INFOPLIST_KEY_CFBundleName = "$(PRODUCT_NAME)";
+				INFOPLIST_KEY_CFBundlePackageType = "$(PRODUCT_BUNDLE_PACKAGE_TYPE)";
+				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
+				INFOPLIST_KEY_CFBundleVersion = 1;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה משתמשת במצלמה כדי לסרוק ברקודים ולהוסיף פריטים.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "אנחנו משתמשים במיקום שלך כדי להביא תחזית מזג אוויר מקומית ולהמליץ על לבוש מתאים.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי להוסיף פריטים לארון הבגדים.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -407,11 +623,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearIt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearIt;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -420,13 +637,32 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = WearIt/WearIt.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W97P4L45B8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WearIt/Info.plist;
+				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
+				INFOPLIST_KEY_CFBundleDisplayName = WearIt;
+				INFOPLIST_KEY_CFBundleExecutable = "$(EXECUTABLE_NAME)";
+				INFOPLIST_KEY_CFBundleIdentifier = "$(PRODUCT_BUNDLE_IDENTIFIER)";
+				INFOPLIST_KEY_CFBundleInfoDictionaryVersion = 6.0;
+				INFOPLIST_KEY_CFBundleName = "$(PRODUCT_NAME)";
+				INFOPLIST_KEY_CFBundlePackageType = "$(PRODUCT_BUNDLE_PACKAGE_TYPE)";
+				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
+				INFOPLIST_KEY_CFBundleVersion = 1;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה משתמשת במצלמה כדי לסרוק ברקודים ולהוסיף פריטים.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "אנחנו משתמשים במיקום שלך כדי להביא תחזית מזג אוויר מקומית ולהמליץ על לבוש מתאים.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי להוסיף פריטים לארון הבגדים.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -434,11 +670,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearIt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearIt;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Release;
 		};
@@ -451,7 +688,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearItTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearItTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -469,7 +706,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearItTests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearItTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -485,7 +722,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearItUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearItUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -501,7 +738,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = dordavid.WearItUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dordavid.WearItUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
@@ -513,6 +750,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		376B19CC2F317E3300CBDD64 /* Build configuration list for PBXNativeTarget "WearItWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				376B19CD2F317E3300CBDD64 /* Debug */,
+				376B19CE2F317E3300CBDD64 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		3781B3342E6A5B120064BE46 /* Build configuration list for PBXProject "WearIt" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -550,6 +796,65 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		37AD54A82F006C330090F22F /* XCRemoteSwiftPackageReference "ml-mobileclip" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/ml-mobileclip";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		37CDD55A2F0048F800CBED5D /* XCRemoteSwiftPackageReference "Mantis" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/guoyingtao/Mantis";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.7.5;
+			};
+		};
+		37CDD55D2F004AB900CBED5D /* XCRemoteSwiftPackageReference "SwiftUIX" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SwiftUIX/SwiftUIX";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.2.4;
+			};
+		};
+		37CDD55E2F004AE700CBED5D /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/onevcat/Kingfisher";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 8.6.2;
+			};
+		};
+		37CDD55F2F004B0F00CBED5D /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SDWebImage/SDWebImageSwiftUI";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.1.4;
+			};
+		};
+		37CDD5622F004B3600CBED5D /* XCRemoteSwiftPackageReference "Alamofire" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Alamofire/Alamofire";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.11.0;
+			};
+		};
+		37CDD5672F004B5F00CBED5D /* XCRemoteSwiftPackageReference "apollo-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apollographql/apollo-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.4;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = 3781B3312E6A5B120064BE46 /* Project object */;
 }

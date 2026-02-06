@@ -1,32 +1,78 @@
-//
-//  WearItApp.swift
-//  WearIt
-//
-//  Created by Dor David on 05/09/2025.
-//
-
 import SwiftUI
 import SwiftData
+import os
 
 @main
 struct WearItApp: App {
-    var sharedModelContainer: ModelContainer = {
+    // MARK: - Storage
+    let container: ModelContainer
+    private let log = Logger(subsystem: "com.dordavid.WearIt", category: "App")
+
+    init() {
+        // מתקין מראה ניווט/טאב שקוף עם blur (liquid glass) לכל האפליקציה
+        AppAppearance.install()
+
+        // סכמת המודלים של האפליקציה (לוקאלי)
         let schema = Schema([
-            Item.self,
+            Garment.self,
+            Outfit.self,
+            RecoState.self,
+            DismissedOutfit.self,
+            UserProfile.self,
+            DailyLook.self,
+            OutfitFeedback.self,
+            DayPlan.self,
+            NotificationPreferences.self,
+            Brand.self,
+            WearEvent.self
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+
+        // אחסון מקומי מוגדר במפורש (Application Support/WearIt.store) + מיגרציה אוטומטית
+        let storeURL: URL = {
+            let base = try? FileManager.default.url(for: .applicationSupportDirectory,
+                                                    in: .userDomainMask,
+                                                    appropriateFor: nil,
+                                                    create: true)
+            return base?.appending(path: "WearIt.store") ?? URL(fileURLWithPath: "/tmp/WearIt.store")
+        }()
+        let cfg = ModelConfiguration(
+            url: storeURL,
+            cloudKitDatabase: .private("iCloud.com.dordavid.WearIt")
+        )
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            container = try ModelContainer(for: schema, configurations: cfg)
+            NotificationService.shared.configure(container: container)
+            #if DEBUG
+            print("MODEL_CONTAINER_READY,cloudKit=private")
+            #endif
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            log.fault("Critical: Failed to load ModelContainer at \(storeURL.path(percentEncoded: false), privacy: .public): \(error.localizedDescription, privacy: .public)")
+            fatalError("Failed to initialize persistent store: \(error.localizedDescription)")
         }
-    }()
+    }
 
+    // MARK: - Scene
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ZStack {
+                // Solid background to prevent black flash during launch
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+                
+                // Liquid glass backdrop (animated + noise + material layer)
+                LiquidGlassBackdrop()
+                    .ignoresSafeArea()
+
+                // Main app content with loading state
+                BootstrapView()
+                    .environmentObject(WeatherCenter.shared)
+                    .environmentObject(AuthManager.shared)
+                    .environmentObject(CloudKitSyncMonitor.shared)
+                    .tint(.accentColor)
+            }
+            .ignoresSafeArea()
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(container)
     }
 }

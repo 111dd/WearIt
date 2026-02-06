@@ -1,0 +1,8 @@
+/* WearItWidget Localizable (Hebrew) */
+"location_unavailable" = "המיקום לא זמין";
+"widget_open_planner" = "פתח מתכנן";
+"widget_mark_worn" = "סמן כנלבש";
+"widget_confirmed" = "אושר";
+"widget_not_confirmed" = "לא אושר";
+"widget_empty_title" = "אין לוק עדיין";
+"widget_empty_body" = "פתח את WearIt כדי ליצור את לוק היום.";

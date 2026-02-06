@@ -3,28 +3,21 @@ import CoreLocation
 
 @MainActor
 final class LocationManager: NSObject, ObservableObject {
-    private let manager = CLLocationManager()
+    static let shared = LocationManager()
 
-    // Continuations
+    private let manager = CLLocationManager()
     private var isRequestingAuth = false
     private var authWaiters: [CheckedContinuation<Void, Error>] = []
     private var locCont: CheckedContinuation<CLLocationCoordinate2D, Error>?
 
-    override init() {
+    override private init() {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyKilometer
     }
 
     enum LocError: Error, LocalizedError {
-        case denied
-        case restricted
-        case servicesDisabled
-        case busy
-        case timeout
-        case noLocation
-        case underlying(Error)
-
+        case denied, restricted, servicesDisabled, busy, timeout, noLocation, underlying(Error)
         var errorDescription: String? {
             switch self {
             case .denied: return "Location permission was denied."
@@ -38,36 +31,22 @@ final class LocationManager: NSObject, ObservableObject {
         }
     }
 
-    // Public API
+    // MARK: Public API
+
     func requestLocation() async throws -> CLLocationCoordinate2D {
-        // 1) שירותי מיקום פעילים?
-        guard CLLocationManager.locationServicesEnabled() else {
+        guard await servicesEnabled() else {
             throw LocError.servicesDisabled
         }
 
-        // 2) ודא הרשאה
-        switch manager.authorizationStatus {
-        case .notDetermined:
-            try await requestWhenInUseAuthorization()
-        case .denied:
-            throw LocError.denied
-        case .restricted:
-            throw LocError.restricted
-        default:
-            break
-        }
+        try await requestWhenInUseAuthorization()
 
-        // 3) מניעת בקשה חופפת
-        if locCont != nil {
-            throw LocError.busy
-        }
+        if locCont != nil { throw LocError.busy }
 
-        // 4) בקש מיקום + timeout בטוח
         return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CLLocationCoordinate2D, Error>) in
             self.locCont = cont
             self.manager.requestLocation()
 
-            // Timeout: אם אחרי 10 שניות לא קיבלנו תשובה – נסגור עם שגיאה
+            // Timeout אחרי 10 שניות
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 10 * 1_000_000_000)
                 await MainActor.run {
@@ -79,53 +58,71 @@ final class LocationManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Authorization flow
+    // MARK: Authorization
 
     private func requestWhenInUseAuthorization() async throws {
-        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            // Enqueue this waiter
-            self.authWaiters.append(cont)
+        guard await servicesEnabled() else {
+            throw LocError.servicesDisabled
+        }
 
-            // Fire the system prompt only once
-            if !self.isRequestingAuth {
-                self.isRequestingAuth = true
-                self.manager.requestWhenInUseAuthorization()
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            // Check current authorization status first to avoid unnecessary prompting on the main thread
+            switch manager.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                cont.resume()
+                return
+            case .denied:
+                cont.resume(throwing: LocError.denied)
+                return
+            case .restricted:
+                cont.resume(throwing: LocError.restricted)
+                return
+            case .notDetermined:
+                break // proceed to request below
+            @unknown default:
+                cont.resume(throwing: LocError.restricted)
+                return
+            }
+
+            // Queue the continuation and request authorization only once
+            authWaiters.append(cont)
+
+            if !isRequestingAuth {
+                isRequestingAuth = true
+                manager.requestWhenInUseAuthorization()
             }
         }
+    }
+
+    private func servicesEnabled() async -> Bool {
+        await Task.detached(priority: .utility) {
+            CLLocationManager.locationServicesEnabled()
+        }.value
     }
 }
 
 // MARK: - CLLocationManagerDelegate
 
-extension LocationManager: CLLocationManagerDelegate {
+extension LocationManager: @MainActor CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         switch manager.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
-            let waiters = authWaiters
-            authWaiters.removeAll()
-            isRequestingAuth = false
+            let waiters = authWaiters; authWaiters.removeAll(); isRequestingAuth = false
             waiters.forEach { $0.resume() }
 
         case .denied:
-            let waiters = authWaiters
-            authWaiters.removeAll()
-            isRequestingAuth = false
+            let waiters = authWaiters; authWaiters.removeAll(); isRequestingAuth = false
             waiters.forEach { $0.resume(throwing: LocError.denied) }
 
         case .restricted:
-            let waiters = authWaiters
-            authWaiters.removeAll()
-            isRequestingAuth = false
+            let waiters = authWaiters; authWaiters.removeAll(); isRequestingAuth = false
             waiters.forEach { $0.resume(throwing: LocError.restricted) }
 
         case .notDetermined:
-            // עדיין ממתינים – לא להחזיר כלום
             break
 
         @unknown default:
-            let waiters = authWaiters
-            authWaiters.removeAll()
-            isRequestingAuth = false
+            let waiters = authWaiters; authWaiters.removeAll(); isRequestingAuth = false
             waiters.forEach { $0.resume(throwing: LocError.restricted) }
         }
     }
@@ -144,8 +141,6 @@ extension LocationManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         guard let cont = locCont else { return }
         locCont = nil
-
-        // kCLErrorDomain Code=1 => denied
         let ns = error as NSError
         if ns.domain == kCLErrorDomain as String, ns.code == 1 {
             cont.resume(throwing: LocError.denied)

@@ -1,0 +1,487 @@
+/* 
+  Localizable.strings (English)
+  WearIt
+  
+  English localization strings
+*/
+
+// MARK: - Tab Bar
+"tab_outfits" = "Outfits";
+"tab_calendar" = "Calendar";
+"tab_wardrobe" = "Wardrobe";
+"tab_add" = "Add";
+"tab_stats" = "Stats";
+"tab_profile" = "Profile";
+"planner_weather_summary" = "Weather";
+"planner_weather_default_hint" = "No special adjustments needed.";
+"planner_recommendations_title" = "Recommendations";
+"planner_show_recommendations" = "Recommendations";
+"planner_hide_recommendations" = "Hide recommendations";
+"planner_reco_layering_yes" = "Layering recommended";
+"planner_reco_layering_no" = "No extra layering needed";
+"planner_reco_guidance_evening_jacket" = "Cool evening — add a jacket";
+"planner_reco_guidance_rain" = "Chance of rain — bring a layer";
+"planner_remove_outerwear" = "Remove outerwear";
+"signin_continue_offline" = "Continue Offline";
+"signin_icloud_guidance" = "Backup requires iCloud to be enabled in Settings. Sign in with Apple alone is not enough.";
+"backup_cta_title" = "Sign in to enable iCloud backup";
+"backup_cta_subtitle" = "Sign in to sync your wardrobe across devices.";
+"backup_cta_icloud_off" = "iCloud is off — enable it in Settings to back up.";
+"backup_cta_action" = "Sign In";
+"profile_cloud_status_unavailable" = "Not available";
+"profile_cloud_status_syncing" = "Syncing…";
+"profile_cloud_status_synced" = "Synced";
+"profile_cloud_status_error" = "Sync error";
+"profile_cloud_guidance" = "iCloud must be enabled in Settings for backup and sync.";
+"profile_icloud_signin_separate" = "iCloud backup is separate from app sign-in.";
+"profile_sign_in" = "Sign In";
+"profile_sign_out" = "Sign Out";
+"profile_signed_in" = "Signed in";
+"profile_signed_out" = "Not signed in";
+"profile_signout_title" = "Sign out?";
+"profile_signout_message" = "Choose how you want to continue.";
+"profile_signout_stay_offline" = "Stay Offline (keep access)";
+"profile_signout_go_to_signin" = "Go to Sign-In Screen";
+"wardrobe_sort_title" = "Sort";
+"wardrobe_sort_newest" = "Newest";
+"wardrobe_sort_oldest" = "Oldest";
+"wardrobe_sort_name" = "Name A–Z";
+"wardrobe_sort_brand" = "Brand A–Z";
+"wardrobe_sort_category" = "Category";
+
+// MARK: - Navigation Titles
+"nav_outfit_planner" = "Outfit Planner";
+"nav_wardrobe" = "Wardrobe";
+"nav_add_item" = "Add Item";
+"nav_edit_item" = "Edit Item";
+"nav_calendar" = "Calendar";
+"nav_stats" = "Stats";
+"nav_profile" = "Profile";
+
+// MARK: - Common Actions
+"action_save" = "Save";
+"action_cancel" = "Cancel";
+"action_delete" = "Delete";
+"action_edit" = "Edit";
+"action_done" = "Done";
+"action_back" = "Back";
+"action_refresh" = "Refresh";
+"action_clear" = "Clear";
+"action_add" = "Add";
+"action_remove" = "Remove";
+"action_close" = "Close";
+"action_confirm" = "Confirm";
+
+// MARK: - Days
+"day_today" = "Today";
+"day_tomorrow" = "Tomorrow";
+
+// MARK: - Outfit Planner
+"planner_recommended_outfit" = "Recommended Outfit";
+"planner_manual_adjustments" = "Manual Adjustments";
+"planner_adjust" = "Adjust";
+"planner_reset" = "Reset";
+"planner_reset_to_forecast" = "Reset to Forecast";
+"planner_no_outfit" = "No outfit available";
+"planner_add_more_items" = "Add more items to your wardrobe";
+"planner_limited_wardrobe" = "Limited wardrobe";
+"planner_not_enough_items" = "Not enough items to avoid repeats";
+"planner_what_do_you_think" = "What do you think?";
+"planner_wear_this" = "Wear";
+"planner_love_it" = "Love";
+"planner_skip" = "Skip";
+"planner_using_forecast" = "Using forecast defaults";
+"planner_manual_active" = "Manual adjustments active";
+
+// MARK: - Weather
+"weather_rain_expected" = "Rain expected";
+"weather_no_rain" = "No rain";
+"weather_sunny" = "Sunny";
+"weather_partly_cloudy" = "Partly Cloudy";
+"weather_cloudy" = "Cloudy";
+"weather_rainy" = "Rainy";
+"weather_stormy" = "Stormy";
+"weather_snow" = "Snow";
+"weather_temperature" = "Temperature";
+"weather_formality" = "Formality";
+
+// MARK: - Smart Hints
+"hint_layering_recommended" = "Large temperature change today — layering recommended";
+"hint_evening_jacket" = "Cold evening expected — consider a jacket";
+"hint_warm_afternoon_cool_morning" = "Warm afternoon, cool morning — avoid heavy outerwear";
+"hint_rain_expected" = "Rain likely — waterproof shoes recommended";
+"hint_fit_tight_cold" = "Tight fit in cold — consider layering";
+"hint_fit_oversized_hot" = "Oversized in heat — choose lighter layers";
+
+// MARK: - Fit & Size
+"fit_size_title" = "Fit & Size";
+"fit_label" = "Fit";
+"size_label" = "Size";
+"fit_skinny" = "Skinny";
+"fit_slim" = "Slim";
+"fit_regular" = "Regular";
+"fit_relaxed" = "Relaxed";
+"fit_oversized" = "Oversized";
+"size_xs" = "XS";
+"size_s" = "S";
+"size_m" = "M";
+"size_l" = "L";
+"size_xl" = "XL";
+"size_xxl" = "XXL";
+
+// MARK: - Temperature Feedback
+"temp_feedback_title" = "How was the temperature?";
+"temp_too_cold" = "Too Cold";
+"temp_too_hot" = "Too Hot";
+"temp_just_right" = "Just Right";
+
+// MARK: - Wardrobe
+"wardrobe_empty_title" = "Your wardrobe is empty";
+"wardrobe_empty_message" = "Tap the + button to add your first item";
+"wardrobe_filter_all" = "All";
+"wardrobe_filter_season" = "Season";
+"wardrobe_clear_filters" = "Clear Filters";
+"wardrobe_suitable_for_temp" = "Suitable for %@°";
+"wardrobe_delete_confirm_title" = "Delete item?";
+"wardrobe_delete_confirm_message" = "This action cannot be undone.";
+
+// MARK: - Add/Edit Garment
+"garment_add_title" = "Add to Wardrobe";
+"garment_add_subtitle" = "Take a photo or choose from library";
+"garment_take_photo" = "Take Photo";
+"garment_choose_library" = "Choose from Library";
+"garment_category" = "Category";
+"garment_item_type" = "Item Type";
+"item_type_tshirt" = "T-Shirt";
+"item_type_shirt" = "Shirt";
+"item_type_polo" = "Polo";
+"item_type_blouse" = "Blouse";
+"item_type_tank" = "Tank Top";
+"item_type_sweater" = "Sweater";
+"item_type_hoodie" = "Hoodie";
+"item_type_cardigan" = "Cardigan";
+"item_type_vest" = "Vest";
+"item_type_jeans" = "Jeans";
+"item_type_chinos" = "Chinos";
+"item_type_trousers" = "Trousers";
+"item_type_shorts" = "Shorts";
+"item_type_skirt" = "Skirt";
+"item_type_leggings" = "Leggings";
+"item_type_joggers" = "Joggers";
+"item_type_sweatpants" = "Sweatpants";
+"item_type_sneakers" = "Sneakers";
+"item_type_boots" = "Boots";
+"item_type_loafers" = "Loafers";
+"item_type_sandals" = "Sandals";
+"item_type_heels" = "Heels";
+"item_type_flats" = "Flats";
+"item_type_oxfords" = "Oxfords";
+"item_type_slippers" = "Slippers";
+"item_type_jacket" = "Jacket";
+"item_type_coat" = "Coat";
+"item_type_blazer" = "Blazer";
+"item_type_parka" = "Parka";
+"item_type_raincoat" = "Raincoat";
+"item_type_windbreaker" = "Windbreaker";
+"item_type_puffer" = "Puffer";
+"item_type_denim_jacket" = "Denim Jacket";
+"item_type_hat" = "Hat";
+"item_type_cap" = "Cap";
+"item_type_scarf" = "Scarf";
+"item_type_belt" = "Belt";
+"item_type_watch" = "Watch";
+"item_type_bag" = "Bag";
+"item_type_sunglasses" = "Sunglasses";
+"item_type_jewelry" = "Jewelry";
+"item_type_tie" = "Tie";
+"item_type_other" = "Other";
+"garment_colors" = "Colors";
+"garment_brand" = "Brand";
+"garment_brand_placeholder" = "e.g. Nike, Zara, Levi's";
+"brand_add_suggestion" = "Add \"%@\"";
+"garment_temperature_range" = "Temperature Range";
+"garment_attributes" = "Attributes";
+"garment_warmth" = "Warmth";
+"garment_formality" = "Formality";
+"garment_love" = "Love";
+"garment_more_options" = "More Options";
+"garment_pattern" = "Pattern";
+"action_save_changes" = "Save Changes";
+"action_delete_item" = "Delete Item";
+"planner_evening_empty" = "Evening look will appear here";
+"garment_no_image" = "No Image";
+"garment_add_photo" = "Add Photo";
+"action_remove_photo" = "Remove";
+"garment_change_image" = "Change Image";
+"planner_show_details" = "Details";
+"planner_hide_details" = "Hide details";
+"planner_day_header_format" = "%@ · %@ · %@ · %d°–%d° · %@";
+"planner_day_header_no_forecast_format" = "%@ · %@";
+"planner_add_item_category_mismatch" = "This item doesn’t match the selected slot.";
+"garment_colors" = "Colors";
+"garment_colors_recommended" = "recommended";
+"tag_bilingual_hint" = "Add tags in Hebrew and English (e.g., \"קפוצ׳ון, hoodie\")";
+"color_black" = "Black";
+"color_white" = "White";
+"color_gray" = "Gray";
+"color_navy" = "Navy";
+"color_blue" = "Blue";
+"color_light_blue" = "Light Blue";
+"color_red" = "Red";
+"color_pink" = "Pink";
+"color_orange" = "Orange";
+"color_yellow" = "Yellow";
+"color_green" = "Green";
+"color_olive" = "Olive";
+"color_brown" = "Brown";
+"color_beige" = "Beige";
+"color_cream" = "Cream";
+"color_burgundy" = "Burgundy";
+"color_purple" = "Purple";
+"color_multicolor" = "Multicolor";
+"color_denim" = "Denim";
+"size_w28" = "28";
+"size_w30" = "30";
+"size_w32" = "32";
+"size_w34" = "34";
+"size_w36" = "36";
+"size_w38" = "38";
+"size_w40" = "40";
+"size_eu39" = "EU 39";
+"size_eu40" = "EU 40";
+"size_eu41" = "EU 41";
+"size_eu42" = "EU 42";
+"size_eu43" = "EU 43";
+"size_eu44" = "EU 44";
+"size_eu45" = "EU 45";
+"size_eu46" = "EU 46";
+"size_eu47" = "EU 47";
+"profile_data_management" = "Data";
+"brand_management_title" = "Brand Management";
+"brand_list_title" = "Brands";
+"brand_merge_duplicates" = "Merge duplicates";
+"brand_items_count_format" = "%d items";
+"brand_rename_title" = "Rename Brand";
+"brand_name_placeholder" = "Brand name";
+"brand_merge_title" = "Merge Brand";
+"brand_merge_target" = "Merge into";
+"brand_merge_select_target" = "Select a target brand to merge into.";
+"brand_delete_in_use" = "This brand is used by garments. Merge it instead.";
+"action_rename" = "Rename";
+"action_merge" = "Merge";
+"garment_season" = "Season";
+"garment_save_success" = "Garment added to your wardrobe.";
+"garment_edit_title" = "Custom title";
+"garment_use_auto_title" = "Use Auto Title";
+
+// MARK: - Categories
+"category_tops" = "Tops";
+"category_bottoms" = "Bottoms";
+"category_outerwear" = "Outerwear";
+"category_footwear" = "Footwear";
+"category_accessories" = "Accessories";
+"category_other" = "Other";
+
+// MARK: - Seasons
+"season_summer" = "Summer";
+"season_winter" = "Winter";
+"season_transitional" = "Transitional";
+"season_all_season" = "All Season";
+
+// MARK: - Calendar
+"calendar_title" = "Calendar";
+"calendar_outfit_log" = "Outfit Log";
+"calendar_no_outfit" = "No outfit for this day";
+"calendar_add_photos" = "Add photos to record what you wore";
+"calendar_worn_on" = "Worn on %@";
+"calendar_photos_count" = "%d photos";
+"calendar_mark_as_worn" = "Mark as Worn";
+"calendar_plan_outfit" = "Plan Outfit";
+"calendar_outfit_for_day" = "Outfit for this day";
+"calendar_select_worn_items" = "Select items from your wardrobe";
+"calendar_lock_garment" = "Lock to this day";
+"calendar_unlock_garment" = "Unlock";
+"calendar_past_day" = "Past";
+"calendar_future_day" = "Planned";
+
+// MARK: - Stats
+"stats_title" = "Stats";
+"stats_total_items" = "Items";
+"stats_avg_love" = "Avg Love";
+"stats_active" = "Active";
+"stats_by_category" = "By Category";
+"stats_havent_worn" = "Haven't worn lately";
+"stats_all_worn_recently" = "All items worn recently!";
+"stats_never_worn" = "Never";
+"stats_days_ago" = "%dd ago";
+
+// MARK: - Profile
+"profile_title" = "Profile";
+"profile_account" = "Account";
+"profile_display_name" = "Display Name";
+"profile_display_name_placeholder" = "Your name";
+"profile_email" = "Email";
+"profile_email_placeholder" = "email@example.com";
+"profile_phone" = "Phone (optional)";
+"profile_phone_placeholder" = "+1 234 567 8900";
+"profile_use_apple_info" = "Use Apple Account Info";
+"profile_style_preferences" = "Style Preferences";
+"profile_formality" = "Formality";
+"profile_warmth_sensitivity" = "Warmth Sensitivity";
+"profile_rain_tolerance" = "Rain Tolerance";
+"profile_casual" = "Casual";
+"profile_smart" = "Smart";
+"profile_run_cold" = "Run Cold";
+"profile_run_hot" = "Run Hot";
+"profile_avoid_rain" = "Avoid Rain";
+"profile_dont_mind" = "Don't Mind";
+"profile_cloud_sync" = "Cloud Sync";
+"profile_local_storage" = "Local storage (SwiftData)";
+"profile_save_changes" = "Save Changes";
+"profile_default_name" = "Me";
+
+// MARK: - Language
+"language_section_title" = "Language";
+"language_system_label" = "System Language";
+"language_system_note" = "Follows the iOS system language";
+
+// MARK: - Loading
+"loading_preparing" = "Preparing your wardrobe";
+"loading_setting_up" = "Setting up";
+"loading_weather" = "Checking the weather";
+"loading_ready" = "Getting things ready";
+
+// MARK: - Errors
+"error_title" = "Error";
+"error_generic" = "Something went wrong.";
+"error_save_failed" = "Save failed";
+"error_load_failed" = "Failed to load";
+
+// MARK: - Success
+"success_title" = "Success";
+"success_saved" = "Saved!";
+"success_deleted" = "Deleted";
+"success_updated" = "Updated";
+
+// MARK: - Outfit Slots
+"slot_top" = "Top";
+"slot_bottom" = "Bottom";
+"slot_shoes" = "Shoes";
+"slot_outer" = "Outer";
+"slot_accessory" = "Accessory";
+
+// MARK: - Planner Board
+"planner_board_title" = "3-Day Planner";
+"planner_refresh_day" = "Refresh";
+"planner_clear_day" = "Clear";
+"planner_drop_here" = "Drop here";
+"planner_empty_slot" = "Empty";
+"planner_lock_item" = "Lock Item";
+"planner_unlock_item" = "Unlock Item";
+"planner_remove_item" = "Remove Item";
+
+// MARK: - Swap & Drag Errors
+"swap_error_different_slots" = "Can only swap between same slot types";
+"swap_error_locked" = "This slot is locked";
+"swap_error_duplicate" = "Item already used on another day";
+"assign_error_unavailable" = "This item is currently unavailable";
+
+// MARK: - Availability
+"availability_mark_unavailable" = "Mark Unavailable";
+"availability_mark_available" = "Mark Available";
+"availability_unavailable_badge" = "Unavailable";
+"availability_replace_item" = "Replace Item";
+
+// MARK: - Planner Header
+"greeting_morning" = "Good morning";
+"greeting_afternoon" = "Good afternoon";
+"greeting_evening" = "Good evening";
+"planner_header_subtitle" = "Here’s your plan for the next 3 days";
+"location_label" = "Weather for: %@";
+"location_unavailable" = "Location unavailable";
+
+// MARK: - Forecast
+"forecast_label" = "Forecast •";
+"rain_chance_format" = "Rain • %d%%";
+
+// MARK: - Planner Item Actions
+"planner_item_actions" = "Item Actions";
+"planner_mark_unavailable_now" = "Mark Unavailable Now";
+"planner_mark_available_now" = "Mark Available Now";
+"planner_go_to_item" = "Go to Item Page";
+"planner_last_worn_format" = "Last worn: %@";
+"planner_never_worn" = "Last worn: Never";
+"planner_mark_worn_today" = "Mark worn today";
+"planner_replace_single_item" = "Replace this item";
+"planner_unavailable_1d" = "1 day";
+"planner_unavailable_2d" = "2 days";
+"planner_unavailable_1w" = "1 week";
+"planner_days_ago_format" = "%d days ago";
+"planner_no_replacement" = "No replacement available";
+"planner_add_accessory" = "Add accessory";
+"planner_search_placeholder" = "Search items";
+"planner_filter_season" = "Season";
+"planner_filter_color" = "Color";
+"planner_add_item_title" = "Add item";
+"planner_add_new_item" = "Add new item";
+"planner_confirm_day" = "Confirm";
+"planner_undo_confirm" = "Undo";
+"planner_evening_look" = "Evening look";
+"inspire_favorites" = "Inspired by your favorites.";
+"inspire_evening_jacket" = "Because it cools down later, we kept a light jacket option.";
+"inspire_color" = "Inspired by your %@ pieces.";
+
+// MARK: - Garment Details
+"garment_detail_category" = "Category";
+"garment_detail_type" = "Type";
+"garment_detail_colors" = "Colors";
+"garment_detail_fit" = "Fit";
+"garment_detail_size" = "Size";
+"garment_detail_warmth" = "Warmth";
+"garment_detail_formality" = "Formality";
+"garment_detail_notes" = "Notes";
+
+// MARK: - Unavailable Items
+"unavailable_title" = "Unavailable Items";
+"unavailable_empty_title" = "All set";
+"unavailable_empty_message" = "No unavailable items right now.";
+"unavailable_blocked" = "Blocked";
+"unavailable_until_format" = "Unavailable until %@";
+"unavailable_mark_available" = "Mark available";
+"unavailable_extend" = "Extend";
+"garment_meta_default" = "All season";
+
+// MARK: - Notifications UI
+"notifications_section_title" = "Notifications";
+"notifications_section_subtext" = "WearIt sends only a few helpful notifications. You can control everything here.";
+"notifications_morning_title" = "Morning plan";
+"notifications_morning_help" = "Get your outfit for today based on weather and your wardrobe.";
+"notifications_weather_title" = "Weather changes";
+"notifications_weather_help" = "We notify only when the change actually affects what you should wear.";
+"notifications_confirm_title" = "Confirm worn";
+"notifications_confirm_help" = "Helps WearIt learn what works for you and improve recommendations.";
+"notifications_learn_more" = "The more you confirm what you wore (and what you skipped), the better recommendations become.";
+"notifications_time_label" = "Time";
+
+// MARK: - Notification Copy
+"notif_morning_title" = "Good morning · %@ · %d°–%d°";
+"notif_morning_title_fallback" = "Good morning";
+"notif_morning_body" = "Your outfit is ready for today";
+"notif_weather_title" = "Weather update";
+"notif_weather_body" = "Cooler evening today — consider adding a jacket";
+"notif_confirm_title" = "How was today’s outfit?";
+"notif_confirm_body" = "A quick tap will improve your future recommendations";
+
+// MARK: - Notification Actions
+"notif_action_open_planner" = "Open Planner";
+"notif_action_update_outfit" = "Update outfit";
+"notif_action_mark_worn" = "Mark as worn";
+"notif_action_skip" = "Skip";
+
+// MARK: - Widget
+"widget_open_planner" = "Open Planner";
+"widget_mark_worn" = "Mark worn";
+"widget_confirmed" = "Confirmed";
+"widget_not_confirmed" = "Not confirmed";
+"widget_empty_title" = "No outfit yet";
+"widget_empty_body" = "Open WearIt to generate today’s look.";

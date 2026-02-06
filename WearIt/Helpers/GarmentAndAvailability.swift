@@ -1,5 +1,5 @@
 //
-//  Untitled.swift
+//  GarmentAndAvailability.swift
 //  WearIt
 //
 //  Created by Dor David on 21/10/2025.
@@ -8,13 +8,7 @@
 import Foundation
 
 extension Garment {
-    /// האם כרגע לא זמין (כביסה) – נעלם אוטומטית אחרי התאריך
-    var isCurrentlyUnavailable: Bool {
-        if let until = unavailableUntil {
-            return until > Date()
-        }
-        return false
-    }
+    // isCurrentlyUnavailable is defined in Models.swift (checks both isBlocked and unavailableUntil)
 
     /// זמן שנותר עד שיהיה זמין, בדקות
     var minutesUntilAvailable: Int? {
