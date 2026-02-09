@@ -336,20 +336,23 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         try? context.save()
     }
 
-    @MainActor private func markTodayWorn(context: ModelContext) async {
+    @MainActor private func markTodayWorn(context: ModelContext) {
         let today = Calendar.current.startOfDay(for: Date())
         let plan = DayPlanService.shared.planFor(date: today, context: context)
         plan.wasWornConfirmed = true
 
-        let ids = plan.slotAssignments.values
+        let ids = Array(plan.slotAssignments.values)
+        WearHistoryService.recordWorn(
+            date: today,
+            garmentIDs: ids,
+            source: .planner,
+            context: context,
+            outfitID: plan.id,
+            incrementTimesWorn: true,
+            loveScoreDelta: 1
+        )
+
         let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
-        for garment in garments where ids.contains(garment.id) {
-            if garment.lastWorn == nil || garment.lastWorn! < today {
-                garment.lastWorn = today
-                garment.timesWorn += 1
-                garment.loveScore = min(100, garment.loveScore + 1)
-            }
-        }
 
         WidgetSnapshotService.saveTodaySnapshot(
             plan: plan,

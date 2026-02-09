@@ -42,6 +42,7 @@ struct WardrobeView: View {
     @State private var pendingDelete: Garment?
     @State private var selectedGarmentForEdit: Garment?
     @State private var currentDate: Date = Date()
+    @State private var rebuildDebouncer = Debouncer(interval: 0.2)
 
     // Filtered results
     private var filtered: [Garment] {
@@ -89,7 +90,13 @@ struct WardrobeView: View {
         }
         visibleGarments = result
     }
-    
+
+    private func scheduleRebuildVisibleGarments() {
+        rebuildDebouncer.schedule {
+            NotificationCenter.default.post(name: .wardrobeRebuildVisible, object: nil)
+        }
+    }
+
     private var activeFilterCount: Int {
         var count = 0
         if selectedCategory != nil { count += 1 }
@@ -236,24 +243,15 @@ struct WardrobeView: View {
                 rebuildVisibleGarments()
                 refreshCurrentDate()
             }
-            .onChange(of: allGarments.count) { _, _ in
+            .onReceive(NotificationCenter.default.publisher(for: .wardrobeRebuildVisible)) { _ in
                 rebuildVisibleGarments()
             }
-            .onChange(of: selectedCategory) { _, _ in
-                rebuildVisibleGarments()
-            }
-            .onChange(of: selectedSeasons) { _, _ in
-                rebuildVisibleGarments()
-            }
-            .onChange(of: showTempSuitable) { _, _ in
-                rebuildVisibleGarments()
-            }
-            .onChange(of: selectedSort) { _, _ in
-                rebuildVisibleGarments()
-            }
-            .onChange(of: weather.currentTempC) { _, _ in
-                rebuildVisibleGarments()
-            }
+            .onChange(of: allGarments.count) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: selectedCategory) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: selectedSeasons) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: showTempSuitable) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: selectedSort) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: weather.currentTempC) { _, _ in scheduleRebuildVisibleGarments() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 refreshCurrentDate()
             }

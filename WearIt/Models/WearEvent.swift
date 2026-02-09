@@ -6,6 +6,7 @@ enum WearEventSource: String, Codable {
     case manual
     case calendar
     case calendarBlock
+    case migration
 }
 
 @Model

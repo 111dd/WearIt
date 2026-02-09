@@ -18,5 +18,13 @@ extension Notification.Name {
 
     // Widget actions
     static let confirmWornFromWidget = Notification.Name("ConfirmWornFromWidget")
+
+    // Planner debounced persistence
+    static let plannerFlushDirtyPlans = Notification.Name("PlannerFlushDirtyPlans")
+
+    // Profile pref save (debounced)
+    static let profileFlushPrefsSave = Notification.Name("ProfileFlushPrefsSave")
+    static let profileScheduleNotifications = Notification.Name("ProfileScheduleNotifications")
+    static let wardrobeRebuildVisible = Notification.Name("WardrobeRebuildVisible")
 }
 

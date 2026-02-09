@@ -62,6 +62,7 @@ final class Garment {
 
     // MARK: - Usage/Meta
     var isFavorite: Bool = false
+    var isWorn: Bool = false
     var lastWorn: Date?
     var timesWorn: Int = 0
     var isBlocked: Bool = false
@@ -305,6 +306,7 @@ final class Garment {
         aiConfidence: Float? = nil,
         aiProcessedAt: Date? = nil,
         isFavorite: Bool = false,
+        isWorn: Bool = false,
         lastWorn: Date? = nil,
         timesWorn: Int = 0,
         isBlocked: Bool = false,
@@ -349,6 +351,7 @@ final class Garment {
         self.aiConfidence = aiConfidence
         self.aiProcessedAt = aiProcessedAt
         self.isFavorite = isFavorite
+        self.isWorn = isWorn
         self.lastWorn = lastWorn
         self.timesWorn = timesWorn
         self.isBlocked = isBlocked

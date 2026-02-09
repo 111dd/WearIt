@@ -157,7 +157,10 @@ struct PlannerDayState: Identifiable, Equatable {
     var forecast: DayForecast?
     var overrides: DayOverrides = DayOverrides()
     var isManualMode: Bool = false
+    var regenVersion: Int = 0
     var useEveningLook: Bool = false
+    var eveningUsesDayBottom: Bool = false
+    var eveningLinkedSlots: Set<OutfitSlot> = []
     var feedback: OutfitFeedbackRating? = nil
     var temperatureFeedback: TemperatureFeedback? = nil
     var notes: String? = nil
@@ -220,8 +223,18 @@ struct PlannerDayState: Identifiable, Equatable {
         slots[slot] = SlotAssignment(slot: slot, garmentID: id, isLocked: locked)
     }
     
-    mutating func setEveningGarment(_ id: UUID?, for slot: OutfitSlot) {
-        eveningSlots[slot] = SlotAssignment(slot: slot, garmentID: id, isLocked: false)
+    mutating func setEveningGarment(_ id: UUID?, for slot: OutfitSlot, locked: Bool = false) {
+        eveningSlots[slot] = SlotAssignment(slot: slot, garmentID: id, isLocked: locked)
+    }
+
+    /// Check if evening slot is locked
+    func isEveningLocked(_ slot: OutfitSlot) -> Bool {
+        eveningSlots[slot]?.isLocked ?? false
+    }
+
+    mutating func setEveningLock(_ slot: OutfitSlot, locked: Bool) {
+        let currentID = eveningSlots[slot]?.garmentID
+        eveningSlots[slot] = SlotAssignment(slot: slot, garmentID: currentID, isLocked: locked)
     }
     
     /// Check if slot is locked
@@ -244,9 +257,12 @@ struct PlannerDayState: Identifiable, Equatable {
         lhs.date == rhs.date &&
         lhs.overrides == rhs.overrides &&
         lhs.isManualMode == rhs.isManualMode &&
+        lhs.regenVersion == rhs.regenVersion &&
         lhs.useEveningLook == rhs.useEveningLook &&
-        lhs.assignedGarmentIDs == rhs.assignedGarmentIDs &&
-        lhs.eveningAssignedGarmentIDs == rhs.eveningAssignedGarmentIDs
+        lhs.eveningUsesDayBottom == rhs.eveningUsesDayBottom &&
+        lhs.eveningLinkedSlots == rhs.eveningLinkedSlots &&
+        lhs.slots == rhs.slots &&
+        lhs.eveningSlots == rhs.eveningSlots
     }
 }
 
@@ -355,11 +371,18 @@ final class PlannerBoardState {
     }
     
     /// Assign a garment to a slot (from drag or selection)
-    func assignGarment(_ garmentID: UUID, toDay dayIndex: Int, toSlot slot: OutfitSlot, garments: [Garment]) -> Bool {
+    func assignGarment(
+        _ garmentID: UUID,
+        toDay dayIndex: Int,
+        toSlot slot: OutfitSlot,
+        garments: [Garment],
+        allowUnavailable: Bool = false
+    ) -> Bool {
         guard dayIndex < days.count else { return false }
         
         // Check if garment is available
-        if let garment = garments.first(where: { $0.id == garmentID }),
+        if !allowUnavailable,
+           let garment = garments.first(where: { $0.id == garmentID }),
            garment.isCurrentlyUnavailable {
             alertMessage = String(localized: "assign_error_unavailable")
             showUnavailableAlert = true
@@ -404,6 +427,7 @@ final class PlannerBoardState {
         for slot in OutfitSlot.allCases {
             days[dayIndex].setEveningGarment(nil, for: slot)
         }
+        days[dayIndex].eveningLinkedSlots = []
         days[dayIndex].useEveningLook = false
     }
     

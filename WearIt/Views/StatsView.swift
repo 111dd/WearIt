@@ -23,8 +23,8 @@ struct StatsView: View {
                         // Category Breakdown
                         categoryBreakdown
                         
-                        // Stale Items
-                        staleItemsSection
+                        // Unworn Items
+                        unwornItemsSection
                     }
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.sm)
@@ -101,18 +101,25 @@ struct StatsView: View {
     
     // MARK: - Stale Items
     
-    private var staleItemsSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader("Haven't worn lately", icon: "clock.fill")
+    private var unwornItemsSection: some View {
+        let countText = String(
+            format: NSLocalizedString("stats_unworn_count_format", comment: ""),
+            unworn.count
+        )
+        return VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "stats_unworn_title"), icon: "clock.fill")
+            Text(countText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             
-            if stale.isEmpty {
-                Text("All items worn recently!")
+            if unworn.isEmpty {
+                Text(String(localized: "stats_unworn_empty"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, DS.Spacing.lg)
             } else {
-                ForEach(stale.prefix(8)) { garment in
+                ForEach(unworn.prefix(8)) { garment in
                     StaleItemRow(garment: garment, daysText: daysText(for: garment))
                 }
             }
@@ -148,8 +155,13 @@ struct StatsView: View {
         return Set(recentIDs).count
     }
 
-    private var stale: [Garment] {
-        garments.sorted { a, b in
+    private var unworn: [Garment] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: .now) ?? .now
+        let filtered = garments.filter { garment in
+            guard let last = lastWornByGarment[garment.id] else { return true }
+            return last < cutoff
+        }
+        return filtered.sorted { a, b in
             let da = daysSinceLastWorn(lastWornByGarment[a.id])
             let db = daysSinceLastWorn(lastWornByGarment[b.id])
             if da != db { return da > db }

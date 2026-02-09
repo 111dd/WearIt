@@ -56,11 +56,20 @@ final class DayPlan {
     /// Evening slot assignments (slot rawValue -> garment UUID)
     var eveningSlotAssignmentIDs: [String: UUID]?
 
+    /// Evening locked slots (slot rawValue)
+    var eveningLockedSlotRaw: [String]?
+
+    /// Evening linked slots (slot rawValue)
+    var eveningLinkedSlotRaw: [String]?
+
     /// Legacy (migration-only): evening slot assignments (slot rawValue -> garment UUID string)
     var eveningSlotAssignmentRaw: [String: String]?
 
     /// Whether an evening look is enabled for this day
     var eveningEnabled: Bool?
+    
+    /// If true, evening bottom uses the day bottom
+    var eveningUsesDayBottom: Bool = false
     
     /// Whether the user confirmed they actually wore this outfit
     var wasWornConfirmed: Bool = false
@@ -106,6 +115,7 @@ final class DayPlan {
         self.lockedGarmentIDs = lockedGarmentIDs
         self.wasWornConfirmed = wasWornConfirmed
         self.eveningEnabled = false
+        self.eveningUsesDayBottom = false
         self.createdAt = Foundation.Date()
         self.updatedAt = Foundation.Date()
         self.ownerID = ownerID
@@ -120,6 +130,7 @@ final class DayPlan {
         self.createdAt = Foundation.Date()
         self.updatedAt = Foundation.Date()
         self.ownerID = nil
+        self.eveningUsesDayBottom = false
     }
     
     // MARK: - Computed Properties
@@ -152,6 +163,18 @@ final class DayPlan {
             }
         }
         return result
+    }
+
+    @Transient
+    var eveningLockedSlots: Set<OutfitSlot> {
+        guard let raw = eveningLockedSlotRaw else { return [] }
+        return Set(raw.compactMap { OutfitSlot(rawValue: $0) })
+    }
+
+    @Transient
+    var eveningLinkedSlots: Set<OutfitSlot> {
+        guard let raw = eveningLinkedSlotRaw else { return [] }
+        return Set(raw.compactMap { OutfitSlot(rawValue: $0) })
     }
     
     @Transient
@@ -218,7 +241,7 @@ final class DayPlan {
         updatedAt = Date()
     }
 
-    func setEveningSlotAssignments(_ assignments: [OutfitSlot: UUID?]) {
+    func setEveningSlotAssignments(_ assignments: [OutfitSlot: UUID?], lockedSlots: Set<OutfitSlot> = []) {
         var newAssignments: [String: UUID] = [:]
         for (slot, id) in assignments {
             if let id {
@@ -226,6 +249,12 @@ final class DayPlan {
             }
         }
         eveningSlotAssignmentIDs = newAssignments.isEmpty ? nil : newAssignments
+        eveningLockedSlotRaw = lockedSlots.isEmpty ? nil : lockedSlots.map { $0.rawValue }
+        updatedAt = Date()
+    }
+
+    func setEveningLinkedSlots(_ slots: Set<OutfitSlot>) {
+        eveningLinkedSlotRaw = slots.isEmpty ? nil : slots.map { $0.rawValue }
         updatedAt = Date()
     }
     

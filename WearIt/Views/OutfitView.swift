@@ -480,10 +480,15 @@ struct OutfitView: View {
         }
 
         if markAsWorn {
-            for g in suggested {
-                g.lastWorn = now
-                g.timesWorn += 1
-            }
+            WearHistoryService.recordWorn(
+                date: now,
+                garmentIDs: suggested.map(\.id),
+                source: .manual,
+                context: context,
+                outfitID: outfit.id,
+                incrementTimesWorn: true,
+                loveScoreDelta: nil
+            )
         }
 
         if isFavorite {

@@ -15,6 +15,7 @@ final class DataMigrationService {
     
     private let logger = Logger(subsystem: "WearIt", category: "Migration")
     private let idsMigrationKey = "cloudKitIDsMigrationDone"
+    private let wearHistoryBackfillKey = "wearHistoryBackfillDone"
     
     /// Run all pending migrations. Safe to call multiple times.
     /// Does not block app launch - runs in background.
@@ -22,6 +23,12 @@ final class DataMigrationService {
         Task { [weak self] in
             await self?.performMigrations(context: context)
         }
+    }
+
+    /// Run migrations and await completion (boot-time use).
+    @MainActor
+    func runMigrationsAndWait(context: ModelContext) async {
+        await performMigrations(context: context)
     }
     
     @MainActor
@@ -54,6 +61,9 @@ final class DataMigrationService {
 
             // CloudKit ID backfill (one-time)
             migrateCloudKitIDsIfNeeded(context: context)
+
+            // Wear history backfill (one-time)
+            migrateWearHistoryIfNeeded(context: context)
             
         } catch {
             // Log but don't crash - migration failures should not block the app
@@ -290,6 +300,49 @@ final class DataMigrationService {
     private func appendUnique(_ array: inout [UUID], _ id: UUID) {
         if !array.contains(id) {
             array.append(id)
+        }
+    }
+
+    @MainActor
+    private func migrateWearHistoryIfNeeded(context: ModelContext) {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: wearHistoryBackfillKey) {
+            return
+        }
+
+        do {
+            let garments = try context.fetch(FetchDescriptor<Garment>())
+            let events = try context.fetch(FetchDescriptor<WearEvent>())
+            let existingWearIDs = Set(events.flatMap { $0.garmentIDs })
+
+            var backfillByDate: [Date: [UUID]] = [:]
+            for garment in garments {
+                guard let last = garment.lastWorn else { continue }
+                if existingWearIDs.contains(garment.id) { continue }
+                let day = Calendar.current.startOfDay(for: last)
+                backfillByDate[day, default: []].append(garment.id)
+            }
+
+            var backfilledCount = 0
+            for (date, ids) in backfillByDate {
+                WearHistoryService.recordWorn(
+                    date: date,
+                    garmentIDs: ids,
+                    source: .migration,
+                    context: context,
+                    incrementTimesWorn: false,
+                    loveScoreDelta: nil
+                )
+                backfilledCount += ids.count
+            }
+
+            defaults.set(true, forKey: wearHistoryBackfillKey)
+
+            #if DEBUG
+            logger.debug("Wear history backfill done. BackfilledEvents: \(backfilledCount)")
+            #endif
+        } catch {
+            logger.error("Wear history backfill failed: \(error.localizedDescription)")
         }
     }
     

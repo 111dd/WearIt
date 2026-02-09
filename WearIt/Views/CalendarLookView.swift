@@ -339,16 +339,17 @@ struct CalendarLookView: View {
                 // Combined history from looks and plans
                 let combined = combinedHistory()
                 ForEach(combined, id: \.date) { entry in
-                    HistoryRow(
-                        date: entry.date,
-                        photoCount: entry.photoCount,
-                        hasOutfit: entry.hasOutfit,
-                        wasWorn: entry.wasWorn
-                    )
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        selectedDate = entry.date
+                    NavigationLink {
+                        LookDetailView(date: entry.date)
+                    } label: {
+                        HistoryRow(
+                            date: entry.date,
+                            photoCount: entry.photoCount,
+                            hasOutfit: entry.hasOutfit,
+                            wasWorn: entry.wasWorn
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -452,22 +453,15 @@ struct CalendarLookView: View {
     private func confirmWorn() {
         let plan = planForSelectedDay ?? DayPlanService.shared.planFor(date: selectedDate, context: context)
         plan.confirmWorn()
-        
-        // Also update garment lastWorn dates
-        for garment in plannedGarments {
-            if garment.lastWorn == nil || garment.lastWorn! < selectedDate {
-                garment.lastWorn = selectedDate
-                garment.timesWorn += 1
-                garment.loveScore = min(100, garment.loveScore + 1)
-            }
-        }
-        
-        WearEventStore.markWorn(
+
+        WearHistoryService.recordWorn(
             date: selectedDate,
-            outfitID: plan.id,
             garmentIDs: plannedGarments.map(\.id),
             source: .calendar,
-            context: context
+            context: context,
+            outfitID: plan.id,
+            incrementTimesWorn: true,
+            loveScoreDelta: 1
         )
 
         try? context.save()
@@ -537,16 +531,202 @@ private struct HistoryRow: View {
             }
             
             Spacer()
-            
-            if wasWorn {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
+
+            Label(
+                String(localized: wasWorn ? "journal_status_approved" : "journal_status_pending"),
+                systemImage: wasWorn ? "checkmark.circle.fill" : "clock"
+            )
+            .font(.caption2)
+            .foregroundStyle(wasWorn ? .green : .secondary)
         }
         .padding(.vertical, DS.Spacing.xxs)
     }
     
     private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
+    }
+}
+
+// MARK: - Look Detail View
+
+private struct LookDetailView: View {
+    @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
+    @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
+    @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
+
+    let date: Date
+
+    private var normalizedDate: Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    private var look: DailyLook? {
+        dailyLooks.first(where: { Calendar.current.isDate($0.date, inSameDayAs: normalizedDate) })
+    }
+
+    private var plan: DayPlan? {
+        dayPlans.first(where: { Calendar.current.isDate($0.date, inSameDayAs: normalizedDate) })
+    }
+
+    private var hasContent: Bool {
+        look != nil || plan != nil
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                if !hasContent {
+                    DSEmptyState(
+                        icon: "calendar",
+                        title: String(localized: "journal_no_look_title"),
+                        message: String(localized: "journal_no_look_message")
+                    )
+                    .dsCard()
+                } else {
+                    statusRow
+
+                    if let plan {
+                        dayLookSection(plan: plan)
+
+                        if plan.eveningEnabled == true || !plan.eveningSlotAssignments.isEmpty {
+                            eveningLookSection(plan: plan)
+                        }
+                    }
+
+                    if let look, !look.photoPaths.isEmpty {
+                        photoGrid(for: look)
+                    }
+                }
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, 100)
+        }
+        .navigationTitle(formattedDate(normalizedDate))
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var statusRow: some View {
+        let approved = plan?.wasWornConfirmed == true
+        return HStack(spacing: DS.Spacing.xs) {
+            Label(
+                String(localized: approved ? "journal_status_approved" : "journal_status_pending"),
+                systemImage: approved ? "checkmark.circle.fill" : "clock"
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(approved ? .green : .secondary)
+            Spacer()
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+        )
+    }
+
+    private func dayLookSection(plan: DayPlan) -> some View {
+        lookSection(
+            title: String(localized: "planner_day_look"),
+            assignments: dayAssignments(for: plan)
+        )
+    }
+
+    private func eveningLookSection(plan: DayPlan) -> some View {
+        lookSection(
+            title: String(localized: "planner_evening_look"),
+            assignments: eveningAssignments(for: plan)
+        )
+    }
+
+    private func lookSection(title: String, assignments: [OutfitSlot: UUID]) -> some View {
+        let items = garments(for: assignments)
+        return VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(title, icon: "tshirt.fill")
+
+            if items.isEmpty {
+                Text(String(localized: "planner_no_outfit"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: DS.Spacing.xs) {
+                    ForEach(items, id: \.id) { garment in
+                        DSGarmentThumbnail(garment, size: .small)
+                    }
+                }
+            }
+        }
+        .dsCard()
+    }
+
+    private func dayAssignments(for plan: DayPlan) -> [OutfitSlot: UUID] {
+        if !plan.slotAssignments.isEmpty { return plan.slotAssignments }
+        var result: [OutfitSlot: UUID] = [:]
+        for id in plan.selectedGarmentIDs {
+            if let garment = garment(for: id) {
+                let slot = OutfitSlot.from(category: garment.category)
+                if result[slot] == nil {
+                    result[slot] = id
+                }
+            }
+        }
+        return result
+    }
+
+    private func eveningAssignments(for plan: DayPlan) -> [OutfitSlot: UUID] {
+        let dayAssignments = dayAssignments(for: plan)
+        var result = plan.eveningSlotAssignments
+        for slot in plan.eveningLinkedSlots {
+            if let dayID = dayAssignments[slot] {
+                result[slot] = dayID
+            }
+        }
+        return result
+    }
+
+    private func garments(for assignments: [OutfitSlot: UUID]) -> [Garment] {
+        let order: [OutfitSlot] = [.shoes, .bottom, .top, .outer, .accessory]
+        return order.compactMap { slot in
+            guard let id = assignments[slot] else { return nil }
+            return garment(for: id)
+        }
+    }
+
+    private func garment(for id: UUID) -> Garment? {
+        allGarments.first(where: { $0.id == id })
+    }
+
+    private func photoGrid(for look: DailyLook) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "calendar_photos"), icon: "photo.on.rectangle")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+                ForEach(Array(look.photoPaths.enumerated()), id: \.offset) { _, path in
+                    if let img = ImageStore.loadImage(path: path) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 120)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+                    } else {
+                        RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                            .fill(Color(.systemGray6))
+                            .frame(height: 120)
+                            .overlay {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.yellow)
+                            }
+                    }
+                }
+            }
+        }
+        .dsCard()
+    }
+
+    private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: date)

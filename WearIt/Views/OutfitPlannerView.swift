@@ -11,11 +11,13 @@ import UIKit
 
 struct OutfitPlannerView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var weather: WeatherCenter
-    
+
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
+    @Query(sort: \WearEvent.date, order: .reverse) private var wearEvents: [WearEvent]
     
     @State private var boardState = PlannerBoardState()
     @State private var showFeedbackAlert = false
@@ -28,7 +30,10 @@ struct OutfitPlannerView: View {
     @State private var availableGarmentsCache: [Garment] = []
     @State private var currentDate: Date = Date()
     @State private var availableGarmentsSignature: String = ""
-    
+    @State private var didRunWearHistoryDebug = false
+    @State private var dirtyDayIndices: Set<Int> = []
+    @State private var plannerSaveDebouncer = Debouncer(interval: 15.0)
+
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
     private static let dayNameFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -49,15 +54,16 @@ struct OutfitPlannerView: View {
 
     private enum PlannerSheet: Identifiable {
         case garmentMenu(Garment)
-        case addPicker(dayIndex: Int, slots: [OutfitSlot], lookTime: LookTime)
+        case addPicker(dayIndex: Int, slots: [OutfitSlot], lookTime: LookTime, initialSlot: OutfitSlot?)
         case addNewItem(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime)
 
         var id: String {
             switch self {
             case .garmentMenu(let garment):
                 return "garment-\(garment.id.uuidString)"
-            case .addPicker(let dayIndex, _, let lookTime):
-                return "picker-\(dayIndex)-\(lookTime.rawValue)"
+            case .addPicker(let dayIndex, _, let lookTime, let initialSlot):
+                let slot = initialSlot?.rawValue ?? "any"
+                return "picker-\(dayIndex)-\(lookTime.rawValue)-\(slot)"
             case .addNewItem(let dayIndex, let slot, let lookTime):
                 return "new-\(dayIndex)-\(slot.rawValue)-\(lookTime.rawValue)"
             }
@@ -68,6 +74,10 @@ struct OutfitPlannerView: View {
     
     private var availableGarments: [Garment] {
         availableGarmentsCache
+    }
+
+    private var latestWearByGarmentID: [UUID: Date] {
+        WearHistoryService.latestWearMap(events: wearEvents)
     }
     
     // MARK: - Body
@@ -97,8 +107,8 @@ struct OutfitPlannerView: View {
             switch sheet {
             case .garmentMenu(let garment):
                 garmentSheet(garment)
-            case .addPicker(let dayIndex, let slots, let lookTime):
-                addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime)
+            case .addPicker(let dayIndex, let slots, let lookTime, let initialSlot):
+                addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
             case .addNewItem(let dayIndex, let slot, let lookTime):
                 addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
             }
@@ -108,6 +118,14 @@ struct OutfitPlannerView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                flushDirtyPlans()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
+            flushDirtyPlans()
         }
     }
 
@@ -119,21 +137,19 @@ struct OutfitPlannerView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                     plannerHeader
+                        .padding(.horizontal, DS.Spacing.md)
 
                     ForEach(0..<3, id: \.self) { dayIndex in
                         if dayIndex < boardState.days.count {
                             dayColumn(for: dayIndex)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, DS.Spacing.sm)
                         }
                     }
                 }
-                .padding(.horizontal, DS.Spacing.md)
                 .padding(.top, DS.Spacing.sm)
-                .padding(.bottom, DS.Spacing.xl)
+                .padding(.bottom, DS.Spacing.sm)
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            bottomActionBar
         }
     }
 
@@ -142,6 +158,15 @@ struct OutfitPlannerView: View {
         hydrateFromPlans()
         updateAvailableGarments()
         refreshCurrentDate()
+        #if DEBUG
+        if !didRunWearHistoryDebug {
+            WearHistoryService.debugCheckConsistency(
+                garments: allGarments,
+                events: wearEvents
+            )
+            didRunWearHistoryDebug = true
+        }
+        #endif
         Task {
             await weather.refreshForecast(source: "OutfitPlannerView.handleAppear")
             boardState.updateForecasts(weather.forecasts)
@@ -190,9 +215,18 @@ struct OutfitPlannerView: View {
                         Button {
                             replaceSingleItem(for: garment)
                         } label: {
-                            Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 36, height: 36)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(
+                                    Circle()
+                                        .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                                )
                         }
-                        .dsSecondaryButton()
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(String(localized: "planner_replace_single_item"))
 
                         Button {
                             openAddNewItemForExisting(garment)
@@ -259,17 +293,34 @@ struct OutfitPlannerView: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func addPickerSheet(dayIndex: Int, slots: [OutfitSlot], lookTime: LookTime) -> some View {
+    private func addPickerSheet(
+        dayIndex: Int,
+        slots: [OutfitSlot],
+        lookTime: LookTime,
+        initialSlot: OutfitSlot?
+    ) -> some View {
         NavigationStack {
             PlannerAddPicker(
                 dayIndex: dayIndex,
                 availableSlots: slots,
-                garmentsForSlot: { slot in
-                    garmentsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
+                initialSlot: initialSlot,
+                recommendedItemsForSlot: { slot in
+                    recommendedItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
                 },
-                onSelect: { garment, slot in
-                    assignGarment(garment, to: slot, dayIndex: dayIndex, lookTime: lookTime)
-                    activeSheet = nil
+                allItemsForSlot: { slot in
+                    allItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
+                },
+                onSelect: { garment, slot, allowUnavailable in
+                    let success = assignGarment(
+                        garment,
+                        to: slot,
+                        dayIndex: dayIndex,
+                        lookTime: lookTime,
+                        allowUnavailable: allowUnavailable
+                    )
+                    if success {
+                        activeSheet = nil
+                    }
                 },
                 onAddNewItem: { slot in
                     openAddNewItem(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
@@ -313,6 +364,7 @@ struct OutfitPlannerView: View {
                 dayTopBar(for: state, dayIndex: dayIndex)
 
                 outfitRow(for: dayIndex, lookTime: .day)
+                availabilityHintsView(for: dayIndex, lookTime: .day)
 
                 if state.useEveningLook {
                     eveningSection(for: dayIndex)
@@ -390,10 +442,19 @@ struct OutfitPlannerView: View {
             } label: {
                 Label(String(localized: "planner_refresh_day"), systemImage: "arrow.clockwise")
             }
-            Button {
-                confirmWorn(dayIndex: dayIndex)
-            } label: {
-                Label(String(localized: "planner_mark_worn_today"), systemImage: "checkmark.seal")
+            switch dayTiming(for: dayIndex) {
+            case .future:
+                Button {
+                    confirmPlan(dayIndex: dayIndex)
+                } label: {
+                    Label(String(localized: "planner_confirm_plan"), systemImage: "checkmark.seal")
+                }
+            case .today, .past:
+                Button {
+                    confirmWorn(dayIndex: dayIndex)
+                } label: {
+                    Label(String(localized: "planner_confirm_worn"), systemImage: "checkmark.seal")
+                }
             }
             Toggle(isOn: Binding(
                 get: { boardState.days[dayIndex].useEveningLook },
@@ -451,11 +512,42 @@ struct OutfitPlannerView: View {
     }
 
     private func dayCardActions(for dayIndex: Int) -> some View {
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: DS.Spacing.xs) {
+                confirmActionPill(dayIndex: dayIndex)
+                refreshActionPill(dayIndex: dayIndex)
+                Spacer()
+                recommendationsActionPill(dayIndex: dayIndex)
+            }
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    confirmActionPill(dayIndex: dayIndex)
+                    refreshActionPill(dayIndex: dayIndex)
+                }
+                HStack(spacing: DS.Spacing.xs) {
+                    recommendationsActionPill(dayIndex: dayIndex)
+                }
+            }
+        }
+        .padding(.top, DS.Spacing.xxs)
+    }
+
+    @ViewBuilder
+    private func confirmActionPill(dayIndex: Int) -> some View {
         let confirmed = isConfirmed(dayIndex)
-        let expanded = isDetailsExpanded(dayIndex)
-        return HStack(spacing: DS.Spacing.xs) {
+        switch dayTiming(for: dayIndex) {
+        case .future:
             compactActionPill(
-                title: String(localized: confirmed ? "planner_undo_confirm" : "planner_confirm_day"),
+                title: String(localized: "planner_confirm_plan"),
+                systemImage: "checkmark.seal",
+                tint: Color.accentColor
+            ) {
+                confirmPlan(dayIndex: dayIndex)
+            }
+        case .today, .past:
+            compactActionPill(
+                title: String(localized: confirmed ? "planner_undo_confirm" : "planner_confirm_worn"),
                 systemImage: confirmed ? "arrow.uturn.left" : "checkmark.seal",
                 tint: Color.accentColor
             ) {
@@ -465,26 +557,28 @@ struct OutfitPlannerView: View {
                     confirmWorn(dayIndex: dayIndex)
                 }
             }
-
-            compactActionPill(
-                title: String(localized: "planner_refresh_day"),
-                systemImage: "arrow.clockwise",
-                tint: .secondary
-            ) {
-                refreshDay(dayIndex)
-            }
-
-            Spacer()
-
-            compactActionPill(
-                title: String(localized: expanded ? "planner_hide_recommendations" : "planner_show_recommendations"),
-                systemImage: expanded ? "chevron.down" : "sparkles",
-                tint: .primary
-            ) {
-                toggleDayDetails(dayIndex)
-            }
         }
-        .padding(.top, DS.Spacing.xxs)
+    }
+
+    private func refreshActionPill(dayIndex: Int) -> some View {
+        compactActionPill(
+            title: String(localized: "planner_refresh_day"),
+            systemImage: "arrow.clockwise",
+            tint: .secondary
+        ) {
+            refreshDay(dayIndex)
+        }
+    }
+
+    private func recommendationsActionPill(dayIndex: Int) -> some View {
+        let expanded = isDetailsExpanded(dayIndex)
+        return compactActionPill(
+            title: String(localized: expanded ? "planner_hide_recommendations" : "planner_show_recommendations"),
+            systemImage: expanded ? "chevron.down" : "sparkles",
+            tint: .primary
+        ) {
+            toggleDayDetails(dayIndex)
+        }
     }
 
     private func compactActionPill(
@@ -504,12 +598,28 @@ struct OutfitPlannerView: View {
                     Capsule()
                         .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
                 )
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
         }
         .buttonStyle(.plain)
     }
 
     private var bottomActionBar: some View {
         AnyView(EmptyView())
+    }
+
+    private enum DayTiming {
+        case past
+        case today
+        case future
+    }
+
+    private func dayTiming(for dayIndex: Int) -> DayTiming {
+        let day = boardState.days[dayIndex].date
+        let start = Calendar.current.startOfDay(for: day)
+        let today = Calendar.current.startOfDay(for: Date())
+        if start == today { return .today }
+        return start < today ? .past : .future
     }
 
     private func dayHeaderLine(for state: PlannerDayState) -> String {
@@ -793,36 +903,176 @@ struct OutfitPlannerView: View {
         }
         
         let day = boardState.days[dayIndex]
-        let assignedSlots = slotsToShow.compactMap { slot -> (OutfitSlot, Garment, Bool)? in
-            let id: UUID?
-            if lookTime == .evening {
-                id = day.eveningGarmentID(for: slot)
+        let assignedSlots = slotsToShow.filter { slot in
+            let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
+            if isLinked {
+                return day.garmentID(for: slot) != nil
+            } else if lookTime == .evening {
+                return day.eveningGarmentID(for: slot) != nil
             } else {
-                id = day.garmentID(for: slot)
+                return day.garmentID(for: slot) != nil
             }
-            guard let id,
-                  let garment = allGarments.first(where: { $0.id == id }) else {
-                return nil
-            }
-            let isLocked = lookTime == .day ? day.isLocked(slot) : false
-            return (slot, garment, isLocked)
         }
-        
+        let canAdd = !availableSlots(for: dayIndex, lookTime: lookTime).isEmpty
+        let rowItemCount = assignedSlots.count + (canAdd ? 1 : 0)
+        let thumbnailSize: DSGarmentThumbnail.ThumbnailSize = rowItemCount >= 5 ? .small : .medium
+
         return HStack(spacing: DS.Spacing.xs) {
-            ForEach(assignedSlots, id: \.1.id) { slot, garment, isLocked in
-                draggableGarmentTile(
-                    garment: garment,
-                    slot: slot,
+            ForEach(assignedSlots, id: \.self) { slot in
+                let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
+                let id: UUID? = {
+                    if isLinked {
+                        return day.garmentID(for: slot)
+                    } else if lookTime == .evening {
+                        return day.eveningGarmentID(for: slot)
+                    } else {
+                        return day.garmentID(for: slot)
+                    }
+                }()
+
+                Group {
+                    if let id, let garment = allGarments.first(where: { $0.id == id }) {
+                        let isLocked = isLinked || (lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot))
+                        draggableGarmentTile(
+                            garment: garment,
+                            slot: slot,
+                            dayIndex: dayIndex,
+                            lookTime: lookTime,
+                            isLocked: isLocked,
+                            isLinked: isLinked,
+                            thumbnailSize: thumbnailSize
+                        )
+                    }
+                }
+            }
+
+            if canAdd {
+                addItemsButton(
                     dayIndex: dayIndex,
                     lookTime: lookTime,
-                    isLocked: isLocked
+                    thumbnailSize: thumbnailSize
                 )
             }
-            
-            if !availableSlots(for: dayIndex, lookTime: lookTime).isEmpty {
-                addItemButton(dayIndex: dayIndex, lookTime: lookTime)
+        }
+    }
+
+    private func addItemsButton(
+        dayIndex: Int,
+        lookTime: LookTime,
+        thumbnailSize: DSGarmentThumbnail.ThumbnailSize
+    ) -> some View {
+        let dimension = thumbnailSize.dimension
+        let iconSize = thumbnailSize.iconSize
+        return Button {
+            openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
+        } label: {
+            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                        .strokeBorder(DS.Border.subtle, lineWidth: 0.8)
+                )
+                .overlay(
+                    Image(systemName: "plus")
+                        .font(.system(size: iconSize, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                )
+                .frame(width: dimension, height: dimension)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: "planner_add_new_item"))
+    }
+
+    @ViewBuilder
+    private func lockLinkBadge(isLocked: Bool, isLinked: Bool) -> some View {
+        if isLocked || isLinked {
+            HStack(spacing: 4) {
+                if isLinked {
+                    badgeIcon(systemName: "link")
+                }
+                if isLocked {
+                    badgeIcon(systemName: "lock.fill")
+                }
+            }
+            .padding(4)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+            )
+            .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
+            .padding(4)
+        }
+    }
+
+    private func badgeIcon(systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.secondary.opacity(0.75))
+    }
+
+    @ViewBuilder
+    private func availabilityBadge(status: AvailabilityStatus) -> some View {
+        switch status {
+        case .available:
+            EmptyView()
+        case .worn:
+            availabilityBadgeView(text: String(localized: "planner_badge_worn"))
+        case .unavailable:
+            availabilityBadgeView(text: String(localized: "planner_badge_unavailable"))
+        case .cooldown:
+            availabilityBadgeView(text: String(localized: "planner_badge_cooldown"))
+        }
+    }
+
+    private func availabilityBadgeView(text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .foregroundStyle(.secondary)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+            )
+            .padding(4)
+    }
+
+    @ViewBuilder
+    private func availabilityHintsView(for dayIndex: Int, lookTime: LookTime) -> some View {
+        let hints = missingSlotHints(for: dayIndex, lookTime: lookTime)
+        if !hints.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(hints, id: \.self) { hint in
+                    Text(hint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func missingSlotHints(for dayIndex: Int, lookTime: LookTime) -> [String] {
+        guard dayIndex < boardState.days.count else { return [] }
+        var hints: [String] = []
+        let slots = OutfitSlot.allCases.filter { slot in
+            slot != .outer || shouldShowSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
+        }
+        for slot in slots {
+            if currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime) == nil {
+                if recommendedItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime).isEmpty {
+                    let slotName = slot.title.lowercased()
+                    let hint = String(
+                        format: NSLocalizedString("planner_no_available_slot_format", comment: ""),
+                        slotName
+                    )
+                    hints.append(hint)
+                }
             }
         }
+        return hints
     }
 
     private func eveningSection(for dayIndex: Int) -> some View {
@@ -832,6 +1082,7 @@ struct OutfitPlannerView: View {
                 .foregroundStyle(.secondary)
 
             outfitRow(for: dayIndex, lookTime: .evening)
+            availabilityHintsView(for: dayIndex, lookTime: .evening)
         }
     }
 
@@ -869,38 +1120,34 @@ struct OutfitPlannerView: View {
         slot: OutfitSlot,
         dayIndex: Int,
         lookTime: LookTime,
-        isLocked: Bool
+        isLocked: Bool,
+        isLinked: Bool,
+        thumbnailSize: DSGarmentThumbnail.ThumbnailSize
     ) -> some View {
-        let canDrag = !isLocked && !garment.isCurrentlyUnavailable
+        let day = boardState.days[dayIndex]
+        let status = availabilityStatus(for: garment, dayIndex: dayIndex, lookTime: lookTime)
+        let isDimmed = !AvailabilityService.isRecommendedEligible(status)
+        let canDrag = !isLocked && !isLinked
         let baseTile = ZStack(alignment: .topTrailing) {
-            DSGarmentThumbnail(garment, size: .medium)
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                        .strokeBorder(garment.isCurrentlyUnavailable ? Color.red : .clear, lineWidth: 2)
-                )
-                .opacity(garment.isCurrentlyUnavailable ? 0.5 : 1.0)
-            
-            // Lock indicator
-            if isLocked {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white)
-                    .padding(3)
-                    .background(Color.accentColor, in: Circle())
-                    .offset(x: 4, y: -4)
-            }
-            
-            // Unavailable badge
-            if garment.isCurrentlyUnavailable {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white)
-                    .padding(3)
-                    .background(Color.red, in: Circle())
-                    .offset(x: 4, y: -4)
-            }
+            DSGarmentThumbnail(garment, size: thumbnailSize)
+                .opacity(isDimmed ? 0.6 : 1.0)
+
         }
         let dropTarget = baseTile
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                    .strokeBorder(
+                        isLocked ? DS.Accent.warmth.opacity(0.22) : .clear,
+                        lineWidth: 1
+                    )
+                    .shadow(color: isLocked ? DS.Accent.warmth.opacity(0.1) : .clear, radius: 4)
+            )
+            .overlay(alignment: .topLeading) {
+                availabilityBadge(status: status)
+            }
+            .overlay(alignment: .topTrailing) {
+                lockLinkBadge(isLocked: isLocked, isLinked: isLinked)
+            }
             .onDrop(of: [UTType.garmentDragItem], isTargeted: Binding(
                 get: { isTargetHighlighted(dayIndex: dayIndex, slot: slot, lookTime: lookTime) },
                 set: { updateTargeted($0, dayIndex: dayIndex, slot: slot, lookTime: lookTime) }
@@ -912,50 +1159,15 @@ struct OutfitPlannerView: View {
                 activeSheet = .garmentMenu(garment)
             }
             .contextMenu {
-                Button {
-                    replaceSlot(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-                } label: {
-                    Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
-                }
-
-                Button {
-                    openAddNewItem(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-                } label: {
-                    Label(String(localized: "planner_add_new_item"), systemImage: "plus")
-                }
-
-                if slot == .outer {
-                    Button(role: .destructive) {
-                        removeGarmentSlot(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-                    } label: {
-                        Label(String(localized: "planner_remove_outerwear"), systemImage: "xmark.circle")
-                    }
-                }
-
-                if garment.isCurrentlyUnavailable {
-                    Button {
-                        markAvailable(garment)
-                    } label: {
-                        Label(String(localized: "planner_mark_available_now"), systemImage: "checkmark.circle")
-                    }
-                } else {
-                    Button(role: .destructive) {
-                        markUnavailable(garment)
-                    } label: {
-                        Label(String(localized: "planner_mark_unavailable_now"), systemImage: "xmark.circle")
-                    }
-                }
-
-                Button {
-                    activeSheet = .garmentMenu(garment)
-                } label: {
-                    Label(String(localized: "planner_go_to_item"), systemImage: "info.circle")
-                }
-
-                Button {} label: {
-                    Label(lastWornText(for: garment), systemImage: "clock")
-                }
-                .disabled(true)
+                slotContextMenu(
+                    garment: garment,
+                    slot: slot,
+                    dayIndex: dayIndex,
+                    lookTime: lookTime,
+                    isLocked: isLocked,
+                    isLinked: isLinked,
+                    day: day
+                )
             }
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
@@ -981,16 +1193,130 @@ struct OutfitPlannerView: View {
             dropTarget
         }
     }
+
+    @ViewBuilder
+    private func slotContextMenu(
+        garment: Garment,
+        slot: OutfitSlot,
+        dayIndex: Int,
+        lookTime: LookTime,
+        isLocked: Bool,
+        isLinked: Bool,
+        day: PlannerDayState
+    ) -> some View {
+        Group {
+            if !isLinked {
+                if isLocked {
+                    Button {
+                        if lookTime == .day {
+                            toggleLock(dayIndex: dayIndex, slot: slot)
+                        } else {
+                            toggleEveningLock(dayIndex: dayIndex, slot: slot)
+                        }
+                    } label: {
+                        Label(String(localized: "planner_unlock_item"), systemImage: "lock.open")
+                    }
+                } else {
+                    Button {
+                        if lookTime == .day {
+                            toggleLock(dayIndex: dayIndex, slot: slot)
+                        } else {
+                            toggleEveningLock(dayIndex: dayIndex, slot: slot)
+                        }
+                    } label: {
+                        Label(String(localized: "planner_lock_item"), systemImage: "lock")
+                    }
+                }
+            }
+        }
+
+        Group {
+            if lookTime == .evening, let dayID = day.garmentID(for: slot) {
+                if isEveningLinked(dayIndex: dayIndex, slot: slot) {
+                    Button {
+                        toggleEveningLink(dayIndex: dayIndex, slot: slot, enable: false)
+                    } label: {
+                        Label(String(localized: "planner_evening_unlink_day"), systemImage: "link.badge.minus")
+                    }
+                } else if dayID != garment.id {
+                    Button {
+                        toggleEveningLink(dayIndex: dayIndex, slot: slot, enable: true)
+                    } label: {
+                        Label(String(localized: "planner_evening_link_day"), systemImage: "link")
+                    }
+                }
+            }
+        }
+
+        Group {
+            if !isLocked {
+                Button {
+                    openAddPicker(dayIndex: dayIndex, lookTime: lookTime, preferredSlot: slot)
+                } label: {
+                    Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
+                }
+
+                Button {
+                    openAddNewItem(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+                } label: {
+                    Label(String(localized: "planner_add_new_item"), systemImage: "plus")
+                }
+            }
+        }
+
+        Group {
+            if slot == .outer {
+                Button(role: .destructive) {
+                    removeGarmentSlot(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+                } label: {
+                    Label(String(localized: "planner_remove_outerwear"), systemImage: "xmark.circle")
+                }
+            }
+        }
+
+        Group {
+            if garment.isCurrentlyUnavailable {
+                Button {
+                    markAvailable(garment)
+                } label: {
+                    Label(String(localized: "planner_mark_available_now"), systemImage: "checkmark.circle")
+                }
+            } else {
+                Button(role: .destructive) {
+                    markUnavailable(garment)
+                } label: {
+                    Label(String(localized: "planner_mark_unavailable_now"), systemImage: "xmark.circle")
+                }
+            }
+        }
+
+        Group {
+            Button {
+                activeSheet = .garmentMenu(garment)
+            } label: {
+                Label(String(localized: "planner_go_to_item"), systemImage: "info.circle")
+            }
+
+            Button {} label: {
+                Label(lastWornText(for: garment), systemImage: "clock")
+            }
+            .disabled(true)
+        }
+    }
     
     // MARK: - Empty Slot Target
     
-    private func emptySlotTarget(slot: OutfitSlot, dayIndex: Int) -> some View {
-        RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+    private func emptySlotTarget(slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> some View {
+        let isLocked = lookTime == .day
+            ? boardState.days[dayIndex].isLocked(slot)
+            : boardState.days[dayIndex].isEveningLocked(slot)
+        let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
+        return RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
             .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
             .foregroundStyle(Color.secondary.opacity(0.3))
             .frame(width: 70, height: 70)
             .overlay {
-                if isTargetHighlighted(dayIndex: dayIndex, slot: slot, lookTime: .day) {
+                if isTargetHighlighted(dayIndex: dayIndex, slot: slot, lookTime: lookTime) {
                     Text(String(localized: "planner_drop_here"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1000,23 +1326,81 @@ struct OutfitPlannerView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .overlay(alignment: .topTrailing) {
+                lockLinkBadge(isLocked: isLocked, isLinked: isLinked)
+            }
             .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
             .onTapGesture {
-                openAddPicker(dayIndex: dayIndex, lookTime: .day)
+                if !isLocked && !isLinked {
+                    openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
+                }
             }
             .onDrop(of: [UTType.garmentDragItem], isTargeted: Binding(
-                get: { isTargetHighlighted(dayIndex: dayIndex, slot: slot, lookTime: .day) },
-                set: { updateTargeted($0, dayIndex: dayIndex, slot: slot, lookTime: .day) }
+                get: { isTargetHighlighted(dayIndex: dayIndex, slot: slot, lookTime: lookTime) },
+                set: { updateTargeted($0, dayIndex: dayIndex, slot: slot, lookTime: lookTime) }
             )) { providers in
-                return handleDrop(providers: providers, targetDay: dayIndex, targetSlot: slot, lookTime: .day)
+                if isLocked || isLinked { return false }
+                return handleDrop(providers: providers, targetDay: dayIndex, targetSlot: slot, lookTime: lookTime)
             }
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                     .strokeBorder(
-                        targetHighlightColor(dayIndex: dayIndex, slot: slot, lookTime: .day),
-                        lineWidth: targetHighlightLineWidth(dayIndex: dayIndex, slot: slot, lookTime: .day)
+                        targetHighlightColor(dayIndex: dayIndex, slot: slot, lookTime: lookTime),
+                        lineWidth: targetHighlightLineWidth(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
                     )
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                    .strokeBorder(
+                        isLocked ? DS.Accent.warmth.opacity(0.22) : .clear,
+                        lineWidth: 1
+                    )
+                    .shadow(color: isLocked ? DS.Accent.warmth.opacity(0.1) : .clear, radius: 4)
+            )
+            .contextMenu {
+                Group {
+                    if isLocked {
+                        Button {
+                            if lookTime == .day {
+                                toggleLock(dayIndex: dayIndex, slot: slot)
+                            } else {
+                                toggleEveningLock(dayIndex: dayIndex, slot: slot)
+                            }
+                        } label: {
+                            Label(String(localized: "planner_unlock_item"), systemImage: "lock.open")
+                        }
+                    } else {
+                        Button {
+                            if lookTime == .day {
+                                toggleLock(dayIndex: dayIndex, slot: slot)
+                            } else {
+                                toggleEveningLock(dayIndex: dayIndex, slot: slot)
+                            }
+                        } label: {
+                            Label(String(localized: "planner_lock_item"), systemImage: "lock")
+                        }
+                    }
+                }
+
+                Group {
+                    if lookTime == .evening,
+                       boardState.days[dayIndex].garmentID(for: slot) != nil {
+                        if isEveningLinked(dayIndex: dayIndex, slot: slot) {
+                            Button {
+                                toggleEveningLink(dayIndex: dayIndex, slot: slot, enable: false)
+                            } label: {
+                                Label(String(localized: "planner_evening_unlink_day"), systemImage: "link.badge.minus")
+                            }
+                        } else {
+                            Button {
+                                toggleEveningLink(dayIndex: dayIndex, slot: slot, enable: true)
+                            } label: {
+                                Label(String(localized: "planner_evening_link_day"), systemImage: "link")
+                            }
+                        }
+                    }
+                }
+            }
     }
 
     private func addItemButton(dayIndex: Int, lookTime: LookTime) -> some View {
@@ -1175,9 +1559,13 @@ struct OutfitPlannerView: View {
             return false
         }
 
-        // Check if either day slot is locked
+        // Check if either slot is locked or linked (day or evening)
         if (item.lookTime == .day && boardState.days[item.sourceDayIndex].isLocked(item.sourceSlot)) ||
-            (lookTime == .day && boardState.days[targetDay].isLocked(targetSlot)) {
+            (item.lookTime == .evening && (boardState.days[item.sourceDayIndex].isEveningLocked(item.sourceSlot) ||
+                                           isEveningLinked(dayIndex: item.sourceDayIndex, slot: item.sourceSlot))) ||
+            (lookTime == .day && boardState.days[targetDay].isLocked(targetSlot)) ||
+            (lookTime == .evening && (boardState.days[targetDay].isEveningLocked(targetSlot) ||
+                                      isEveningLinked(dayIndex: targetDay, slot: targetSlot))) {
             DS.haptic(0.8)
             boardState.alertMessage = String(localized: "swap_error_locked")
             boardState.showUnavailableAlert = true
@@ -1232,6 +1620,12 @@ struct OutfitPlannerView: View {
             return false
         }
 
+        if boardState.days[fromDay].isEveningLocked(fromSlot) || boardState.days[toDay].isEveningLocked(toSlot) {
+            boardState.alertMessage = String(localized: "swap_error_locked")
+            boardState.showUnavailableAlert = true
+            return false
+        }
+
         let fromID = boardState.days[fromDay].eveningGarmentID(for: fromSlot)
         let toID = boardState.days[toDay].eveningGarmentID(for: toSlot)
 
@@ -1262,6 +1656,15 @@ struct OutfitPlannerView: View {
         guard fromDay < boardState.days.count, toDay < boardState.days.count else { return false }
         guard fromSlot == toSlot else {
             boardState.alertMessage = String(localized: "swap_error_different_slots")
+            boardState.showUnavailableAlert = true
+            return false
+        }
+
+        if (fromLook == .day && boardState.days[fromDay].isLocked(fromSlot)) ||
+            (fromLook == .evening && boardState.days[fromDay].isEveningLocked(fromSlot)) ||
+            (toLook == .day && boardState.days[toDay].isLocked(toSlot)) ||
+            (toLook == .evening && boardState.days[toDay].isEveningLocked(toSlot)) {
+            boardState.alertMessage = String(localized: "swap_error_locked")
             boardState.showUnavailableAlert = true
             return false
         }
@@ -1313,12 +1716,23 @@ struct OutfitPlannerView: View {
     
     private func refreshDay(_ dayIndex: Int) {
         guard dayIndex < boardState.days.count else { return }
-        
-        // Collect IDs used in other days
-        var excludedIDs = Set<UUID>()
+        let referenceDate = boardState.days[dayIndex].date
+        let previousIDsBySlot: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
+            if let id = boardState.days[dayIndex].garmentID(for: slot) {
+                result[slot] = id
+            }
+        }
+        let currentUnlockedIDs = OutfitSlot.allCases.compactMap { slot -> UUID? in
+            if boardState.days[dayIndex].isLocked(slot) { return nil }
+            return boardState.days[dayIndex].garmentID(for: slot)
+        }
+
+        // Collect IDs used in other days (day + evening)
+        var baseExcludedIDs = Set<UUID>()
         for (index, day) in boardState.days.enumerated() {
             if index != dayIndex {
-                excludedIDs.formUnion(day.assignedGarmentIDs)
+                baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
             }
         }
         
@@ -1326,31 +1740,75 @@ struct OutfitPlannerView: View {
         for slot in OutfitSlot.allCases {
             if boardState.days[dayIndex].isLocked(slot),
                let id = boardState.days[dayIndex].garmentID(for: slot) {
-                excludedIDs.insert(id)
+                baseExcludedIDs.insert(id)
             }
         }
+        baseExcludedIDs.formUnion(currentUnlockedIDs)
         
         let ctx = recoContext(for: dayIndex)
+        let cooldownExcludedIDs = buildCooldownExcludedIDs(
+            referenceDate: referenceDate,
+            ctx: ctx,
+            baseExcludedIDs: baseExcludedIDs
+        )
+        let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
+        let lockedCats = lockedCategories(for: dayIndex, lookTime: .day)
+        let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
+            .filter { !lockedCats.contains($0.category) }
         
         let outfit = AIRecommender.shared.suggestOutfit(
-            from: availableGarments,
+            from: pool,
             ctx: ctx,
             modelContext: context,
-            excludedIDs: excludedIDs
+            excludedIDs: excludedMerged
         )
         
         boardState.setOutfit(forDay: dayIndex, garments: outfit, overwriteExisting: true)
+        var didChange = false
+        for slot in OutfitSlot.allCases {
+            if boardState.days[dayIndex].isLocked(slot) { continue }
+            let previousID = previousIDsBySlot[slot]
+            if boardState.days[dayIndex].garmentID(for: slot) == nil, let previousID {
+                boardState.days[dayIndex].setGarment(previousID, for: slot)
+            }
+            let currentID = boardState.days[dayIndex].garmentID(for: slot)
+            if currentID != previousID {
+                didChange = true
+            }
+        }
+
+        boardState.days[dayIndex].regenVersion += 1
         persistDayPlan(dayIndex)
+
+        if !didChange {
+            boardState.alertMessage = String(localized: "planner_no_alternatives")
+            boardState.showUnavailableAlert = true
+        }
+
+        #if DEBUG
+        logPlannerOutfit(
+            dayIndex: dayIndex,
+            isEvening: false,
+            referenceDate: referenceDate,
+            ctx: ctx,
+            baseExcludedIDs: baseExcludedIDs,
+            cooldownExcludedIDs: cooldownExcludedIDs,
+            mergedExcludedIDs: excludedMerged
+        )
+        #endif
 
         if boardState.days[dayIndex].useEveningLook {
             generateEveningOutfit(for: dayIndex)
         }
     }
 
-    private func openAddPicker(dayIndex: Int, lookTime: LookTime) {
-        let slots = availableSlots(for: dayIndex, lookTime: lookTime)
+    private func openAddPicker(dayIndex: Int, lookTime: LookTime, preferredSlot: OutfitSlot? = nil) {
+        var slots = availableSlots(for: dayIndex, lookTime: lookTime)
+        if let preferredSlot, !slots.contains(preferredSlot) {
+            slots.insert(preferredSlot, at: 0)
+        }
         guard !slots.isEmpty else { return }
-        activeSheet = .addPicker(dayIndex: dayIndex, slots: slots, lookTime: lookTime)
+        activeSheet = .addPicker(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: preferredSlot)
     }
 
     private func openAddNewItem(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime) {
@@ -1368,45 +1826,99 @@ struct OutfitPlannerView: View {
         openAddNewItem(dayIndex: assignment.dayIndex, slot: assignment.slot, lookTime: .day)
     }
 
-    private func garmentsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
-        let allowed = slot.allowedCategories
+    private func availableSlots(for dayIndex: Int, lookTime: LookTime) -> [OutfitSlot] {
+        guard dayIndex < boardState.days.count else { return [] }
+        var slots: [OutfitSlot] = []
+
+        let topID = currentGarmentID(for: .top, dayIndex: dayIndex, lookTime: lookTime)
+        if topID == nil { slots.append(.top) }
+
+        let bottomID = currentGarmentID(for: .bottom, dayIndex: dayIndex, lookTime: lookTime)
+        if bottomID == nil { slots.append(.bottom) }
+
+        let shoesID = currentGarmentID(for: .shoes, dayIndex: dayIndex, lookTime: lookTime)
+        if shoesID == nil { slots.append(.shoes) }
+
+        let outerID = currentGarmentID(for: .outer, dayIndex: dayIndex, lookTime: lookTime)
+        if shouldShowSlot(.outer, dayIndex: dayIndex, lookTime: lookTime),
+           outerID == nil {
+            slots.append(.outer)
+        }
+
+        let accessoryID = currentGarmentID(for: .accessory, dayIndex: dayIndex, lookTime: lookTime)
+        if accessoryID == nil {
+            slots.append(.accessory)
+        }
+
+        return slots
+    }
+
+    private func currentGarmentID(for slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> UUID? {
+        guard dayIndex < boardState.days.count else { return nil }
         let day = boardState.days[dayIndex]
-        let currentID = lookTime == .evening ? day.eveningGarmentID(for: slot) : day.garmentID(for: slot)
-        return availableGarments.filter { garment in
+        if lookTime == .evening, isEveningLinked(dayIndex: dayIndex, slot: slot) {
+            return day.garmentID(for: slot)
+        }
+        return lookTime == .evening ? day.eveningGarmentID(for: slot) : day.garmentID(for: slot)
+    }
+
+    private func availabilityStatus(for garment: Garment, dayIndex: Int, lookTime: LookTime) -> AvailabilityStatus {
+        let referenceDate = boardState.days[dayIndex].date
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        return AvailabilityService.availabilityStatus(
+            for: garment,
+            on: referenceDate,
+            ctx: ctx,
+            latestWearMap: latestWearByGarmentID
+        )
+    }
+
+    private func slotCandidates(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
+        let allowed = slot.allowedCategories
+        let currentID = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime)
+        return allGarments.filter { garment in
             guard allowed.contains(garment.category) else { return false }
             if garment.id == currentID { return true }
             return !isGarmentUsedElsewhere(garment.id, excludingDay: dayIndex)
         }
     }
 
-    private func availableSlots(for dayIndex: Int, lookTime: LookTime) -> [OutfitSlot] {
-        guard dayIndex < boardState.days.count else { return [] }
-        let day = boardState.days[dayIndex]
-        var slots: [OutfitSlot] = []
+    private func recommendedItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
+        let referenceDate = boardState.days[dayIndex].date
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        let candidates = slotCandidates(slot, dayIndex: dayIndex, lookTime: lookTime)
+        return AvailabilityService.recommendedItemsForSlot(
+            slot,
+            garments: candidates,
+            date: referenceDate,
+            ctx: ctx,
+            latestWearMap: latestWearByGarmentID
+        )
+    }
 
-        let topID = lookTime == .evening ? day.eveningGarmentID(for: .top) : day.garmentID(for: .top)
-        if topID == nil, !garmentsForSlot(.top, dayIndex: dayIndex, lookTime: lookTime).isEmpty { slots.append(.top) }
+    private func allItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [AvailabilityService.AvailabilityItem] {
+        let referenceDate = boardState.days[dayIndex].date
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        let candidates = slotCandidates(slot, dayIndex: dayIndex, lookTime: lookTime)
+        return AvailabilityService.allItemsForSlot(
+            slot,
+            garments: candidates,
+            date: referenceDate,
+            ctx: ctx,
+            latestWearMap: latestWearByGarmentID
+        )
+    }
 
-        let bottomID = lookTime == .evening ? day.eveningGarmentID(for: .bottom) : day.garmentID(for: .bottom)
-        if bottomID == nil, !garmentsForSlot(.bottom, dayIndex: dayIndex, lookTime: lookTime).isEmpty { slots.append(.bottom) }
-
-        let shoesID = lookTime == .evening ? day.eveningGarmentID(for: .shoes) : day.garmentID(for: .shoes)
-        if shoesID == nil, !garmentsForSlot(.shoes, dayIndex: dayIndex, lookTime: lookTime).isEmpty { slots.append(.shoes) }
-
-        let outerID = lookTime == .evening ? day.eveningGarmentID(for: .outer) : day.garmentID(for: .outer)
-        if shouldShowSlot(.outer, dayIndex: dayIndex, lookTime: lookTime),
-           outerID == nil,
-           !garmentsForSlot(.outer, dayIndex: dayIndex, lookTime: lookTime).isEmpty {
-            slots.append(.outer)
+    private func recommendedPool(referenceDate: Date, ctx: RecoContext) -> [Garment] {
+        allGarments.filter { garment in
+            let status = AvailabilityService.availabilityStatus(
+                for: garment,
+                on: referenceDate,
+                ctx: ctx,
+                latestWearMap: latestWearByGarmentID
+            )
+            return AvailabilityService.isRecommendedEligible(status)
         }
-
-        let accessoryID = lookTime == .evening ? day.eveningGarmentID(for: .accessory) : day.garmentID(for: .accessory)
-        if accessoryID == nil,
-           !garmentsForSlot(.accessory, dayIndex: dayIndex, lookTime: lookTime).isEmpty {
-            slots.append(.accessory)
-        }
-
-        return slots
     }
 
     private func isGarmentUsedElsewhere(_ id: UUID, excludingDay dayIndex: Int) -> Bool {
@@ -1422,6 +1934,120 @@ struct OutfitPlannerView: View {
         let value = profiles.first?.preferredFormality ?? 3
         return min(max(value, 1), 4)
     }
+
+    private func cooldownDays(for category: Category, ctx: RecoContext) -> Int {
+        AvailabilityService.cooldownDays(for: category, ctx: ctx)
+    }
+
+    private func daysSinceWorn(_ garmentID: UUID, referenceDate: Date) -> Int? {
+        AvailabilityService.daysSinceWorn(
+            garmentID: garmentID,
+            referenceDate: referenceDate,
+            latestWearMap: latestWearByGarmentID
+        )
+    }
+
+    private func buildCooldownExcludedIDs(
+        referenceDate: Date,
+        ctx: RecoContext,
+        baseExcludedIDs: Set<UUID>
+    ) -> Set<UUID> {
+        var excluded = Set<UUID>()
+        let categories: [Category] = [.top, .bottom, .shoes, .outer, .accessory]
+
+        for category in categories {
+            let cooldown = cooldownDays(for: category, ctx: ctx)
+            guard cooldown > 0 else { continue }
+
+            let pool = allGarments.filter { g in
+                g.category == category && !baseExcludedIDs.contains(g.id)
+            }
+
+            var recentIDs = Set<UUID>()
+            for g in pool {
+                if let days = daysSinceWorn(g.id, referenceDate: referenceDate),
+                   days < cooldown {
+                    recentIDs.insert(g.id)
+                }
+            }
+
+            if recentIDs.isEmpty { continue }
+            excluded.formUnion(recentIDs)
+        }
+
+        return excluded
+    }
+
+    private func lockedCategories(for dayIndex: Int, lookTime: LookTime) -> Set<Category> {
+        guard dayIndex < boardState.days.count else { return [] }
+        let day = boardState.days[dayIndex]
+        let lockedSlots = OutfitSlot.allCases.filter { slot in
+            lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot)
+        }
+        var categories = Set(lockedSlots.compactMap { $0.allowedCategories.first })
+        if lookTime == .evening {
+            for slot in day.eveningLinkedSlots {
+                if let category = slot.allowedCategories.first {
+                    categories.insert(category)
+                }
+            }
+        }
+        return categories
+    }
+
+    #if DEBUG
+    private static let plannerLogDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private func logPlannerOutfit(
+        dayIndex: Int,
+        isEvening: Bool,
+        referenceDate: Date,
+        ctx: RecoContext,
+        baseExcludedIDs: Set<UUID>,
+        cooldownExcludedIDs: Set<UUID>,
+        mergedExcludedIDs: Set<UUID>
+    ) {
+        let dateString = Self.plannerLogDateFormatter.string(from: referenceDate)
+        let selectedIDs = isEvening
+            ? boardState.days[dayIndex].eveningAssignedGarmentIDs
+            : boardState.days[dayIndex].assignedGarmentIDs
+
+        print(
+            "PLANNER_OUTFIT,date=\(dateString),isEvening=\(isEvening ? 1 : 0),excludedBaseCount=\(baseExcludedIDs.count),excludedCooldownCount=\(cooldownExcludedIDs.count),excludedMergedCount=\(mergedExcludedIDs.count),selectedCount=\(selectedIDs.count)"
+        )
+
+        for slot in OutfitSlot.allCases {
+            let id = isEvening
+                ? boardState.days[dayIndex].eveningGarmentID(for: slot)
+                : boardState.days[dayIndex].garmentID(for: slot)
+            guard let id, let garment = allGarments.first(where: { $0.id == id }) else { continue }
+
+            let days = daysSinceWorn(garment.id, referenceDate: referenceDate)
+            let daysString = days.map { String($0) } ?? "nil"
+            let cooldown = cooldownDays(for: garment.category, ctx: ctx)
+            let isInBase = baseExcludedIDs.contains(garment.id) ? 1 : 0
+            let isInCooldown = cooldownExcludedIDs.contains(garment.id) ? 1 : 0
+            let isInMerged = mergedExcludedIDs.contains(garment.id) ? 1 : 0
+            let lastWornIsNil = latestWearByGarmentID[garment.id] == nil ? 1 : 0
+            let isLocked = isEvening
+                ? (boardState.days[dayIndex].isEveningLocked(slot) ? 1 : 0)
+                : (boardState.days[dayIndex].isLocked(slot) ? 1 : 0)
+
+            print(
+                "PLANNER_PICK,id=\(id.uuidString),slot=\(slot.rawValue),category=\(garment.category.rawValue),daysSinceWorn=\(daysString),cooldownDays=\(cooldown),isInBaseExcluded=\(isInBase),isInCooldownExcluded=\(isInCooldown),isInMergedExcluded=\(isInMerged),lastWornIsNil=\(lastWornIsNil),isLocked=\(isLocked)"
+            )
+            if isInCooldown == 1 {
+                print("COOLDOWN_BROKEN,id=\(id.uuidString),date=\(dateString),slot=\(slot.rawValue),category=\(garment.category.rawValue)")
+            }
+        }
+    }
+    #endif
 
     private func recoContext(for dayIndex: Int, isEvening: Bool = false) -> RecoContext {
         let state = boardState.days[dayIndex]
@@ -1444,14 +2070,38 @@ struct OutfitPlannerView: View {
     }
 
     @discardableResult
-    private func assignGarment(_ garment: Garment, to slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> Bool {
+    private func assignGarment(
+        _ garment: Garment,
+        to slot: OutfitSlot,
+        dayIndex: Int,
+        lookTime: LookTime,
+        allowUnavailable: Bool = false
+    ) -> Bool {
+        if !allowUnavailable {
+            let status = availabilityStatus(for: garment, dayIndex: dayIndex, lookTime: lookTime)
+            if !AvailabilityService.isRecommendedEligible(status) {
+                boardState.alertMessage = availabilityAlertMessage(for: status)
+                boardState.showUnavailableAlert = true
+                return false
+            }
+        }
+
         let success: Bool
         if lookTime == .evening {
-            success = assignEveningGarment(garment, to: slot, dayIndex: dayIndex)
+            success = assignEveningGarment(garment, to: slot, dayIndex: dayIndex, allowUnavailable: allowUnavailable)
         } else {
-            success = boardState.assignGarment(garment.id, toDay: dayIndex, toSlot: slot, garments: allGarments)
+            success = boardState.assignGarment(
+                garment.id,
+                toDay: dayIndex,
+                toSlot: slot,
+                garments: allGarments,
+                allowUnavailable: allowUnavailable
+            )
         }
         if success {
+            if lookTime == .day && isEveningLinked(dayIndex: dayIndex, slot: slot) {
+                boardState.days[dayIndex].setEveningGarment(garment.id, for: slot, locked: true)
+            }
             DS.haptic(0.3)
             persistAllPlans()
         } else {
@@ -1460,12 +2110,25 @@ struct OutfitPlannerView: View {
         return success
     }
 
-    private func assignEveningGarment(_ garment: Garment, to slot: OutfitSlot, dayIndex: Int) -> Bool {
+    private func assignEveningGarment(
+        _ garment: Garment,
+        to slot: OutfitSlot,
+        dayIndex: Int,
+        allowUnavailable: Bool
+    ) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
-        if garment.isCurrentlyUnavailable {
-            boardState.alertMessage = String(localized: "assign_error_unavailable")
+        if boardState.days[dayIndex].isEveningLocked(slot) || isEveningLinked(dayIndex: dayIndex, slot: slot) {
+            boardState.alertMessage = String(localized: "swap_error_locked")
             boardState.showUnavailableAlert = true
             return false
+        }
+        if !allowUnavailable {
+            let status = availabilityStatus(for: garment, dayIndex: dayIndex, lookTime: .evening)
+            if !AvailabilityService.isRecommendedEligible(status) {
+                boardState.alertMessage = availabilityAlertMessage(for: status)
+                boardState.showUnavailableAlert = true
+                return false
+            }
         }
         if isGarmentUsedElsewhere(garment.id, excludingDay: dayIndex) {
             boardState.alertMessage = String(localized: "swap_error_duplicate")
@@ -1476,6 +2139,19 @@ struct OutfitPlannerView: View {
         return true
     }
 
+    private func availabilityAlertMessage(for status: AvailabilityStatus) -> String {
+        switch status {
+        case .unavailable:
+            return String(localized: "assign_error_unavailable")
+        case .worn:
+            return String(localized: "planner_marked_worn")
+        case .cooldown(let remaining):
+            return String(format: NSLocalizedString("planner_in_cooldown_format", comment: ""), remaining)
+        case .available:
+            return String(localized: "assign_error_unavailable")
+        }
+    }
+
     private func toggleLock(dayIndex: Int, slot: OutfitSlot) {
         guard dayIndex < boardState.days.count else { return }
         let isLocked = boardState.days[dayIndex].isLocked(slot)
@@ -1484,12 +2160,41 @@ struct OutfitPlannerView: View {
         persistDayPlan(dayIndex)
     }
 
+    private func toggleEveningLock(dayIndex: Int, slot: OutfitSlot) {
+        guard dayIndex < boardState.days.count else { return }
+        let isLocked = boardState.days[dayIndex].isEveningLocked(slot)
+        boardState.days[dayIndex].setEveningLock(slot, locked: !isLocked)
+        persistDayPlan(dayIndex)
+    }
+
+    private func toggleEveningLink(dayIndex: Int, slot: OutfitSlot, enable: Bool) {
+        guard dayIndex < boardState.days.count else { return }
+        if enable {
+            guard let dayID = boardState.days[dayIndex].garmentID(for: slot) else { return }
+            boardState.days[dayIndex].eveningLinkedSlots.insert(slot)
+            boardState.days[dayIndex].setEveningGarment(dayID, for: slot, locked: true)
+        } else {
+            boardState.days[dayIndex].eveningLinkedSlots.remove(slot)
+            boardState.days[dayIndex].setEveningGarment(nil, for: slot, locked: false)
+        }
+        persistDayPlan(dayIndex)
+    }
+
+    private func isEveningLinked(dayIndex: Int, slot: OutfitSlot) -> Bool {
+        guard dayIndex < boardState.days.count else { return false }
+        return boardState.days[dayIndex].eveningLinkedSlots.contains(slot)
+    }
+
     private func removeGarment(dayIndex: Int, slot: OutfitSlot) {
         guard dayIndex < boardState.days.count else { return }
         if boardState.days[dayIndex].isLocked(slot) {
             boardState.alertMessage = String(localized: "swap_error_locked")
             boardState.showUnavailableAlert = true
             return
+        }
+        if isEveningLinked(dayIndex: dayIndex, slot: slot) {
+            boardState.days[dayIndex].eveningLinkedSlots.remove(slot)
+            boardState.days[dayIndex].setEveningGarment(nil, for: slot, locked: false)
         }
         boardState.days[dayIndex].setGarment(nil, for: slot)
         persistDayPlan(dayIndex)
@@ -1500,6 +2205,11 @@ struct OutfitPlannerView: View {
         if lookTime == .day {
             removeGarment(dayIndex: dayIndex, slot: slot)
         } else {
+            if boardState.days[dayIndex].isEveningLocked(slot) {
+                boardState.alertMessage = String(localized: "swap_error_locked")
+                boardState.showUnavailableAlert = true
+                return
+            }
             boardState.days[dayIndex].setEveningGarment(nil, for: slot)
             persistDayPlan(dayIndex)
         }
@@ -1512,27 +2222,51 @@ struct OutfitPlannerView: View {
             boardState.showUnavailableAlert = true
             return
         }
+        if lookTime == .evening, boardState.days[dayIndex].isEveningLocked(slot) {
+            boardState.alertMessage = String(localized: "swap_error_locked")
+            boardState.showUnavailableAlert = true
+            return
+        }
+        if lookTime == .evening, isEveningLinked(dayIndex: dayIndex, slot: slot) {
+            boardState.alertMessage = String(localized: "swap_error_locked")
+            boardState.showUnavailableAlert = true
+            return
+        }
 
+        let referenceDate = boardState.days[dayIndex].date
         let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         let state = boardState.days[dayIndex]
         let currentID = lookTime == .evening ? state.eveningGarmentID(for: slot) : state.garmentID(for: slot)
 
-        var excludedIDs: Set<UUID> = []
+        var baseExcludedIDs: Set<UUID> = []
         for (index, day) in boardState.days.enumerated() {
             if index != dayIndex {
-                excludedIDs.formUnion(day.assignedGarmentIDs)
-                excludedIDs.formUnion(day.eveningAssignedGarmentIDs)
+                baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
+            } else {
+                baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
             }
         }
-        if let currentID { excludedIDs.insert(currentID) }
+        if let currentID {
+            baseExcludedIDs.remove(currentID)
+        }
 
-        let pool = availableGarments.filter { slot.allowedCategories.contains($0.category) }
+        let cooldownExcludedIDs = buildCooldownExcludedIDs(
+            referenceDate: referenceDate,
+            ctx: ctx,
+            baseExcludedIDs: baseExcludedIDs
+        )
+        let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
+
+        let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
+            .filter { slot.allowedCategories.contains($0.category) }
         let suggestions = AIRecommender.shared.suggest(
             from: pool,
             k: 1,
             ctx: ctx,
             modelContext: context,
-            excludedIDs: excludedIDs
+            excludedIDs: excludedMerged
         )
 
         if let replacement = suggestions.first {
@@ -1543,6 +2277,17 @@ struct OutfitPlannerView: View {
             }
             persistDayPlan(dayIndex)
             DS.haptic(0.3)
+            #if DEBUG
+            logPlannerOutfit(
+                dayIndex: dayIndex,
+                isEvening: lookTime == .evening,
+                referenceDate: referenceDate,
+                ctx: ctx,
+                baseExcludedIDs: baseExcludedIDs,
+                cooldownExcludedIDs: cooldownExcludedIDs,
+                mergedExcludedIDs: excludedMerged
+            )
+            #endif
         } else {
             boardState.alertMessage = String(localized: "planner_no_replacement")
             boardState.showUnavailableAlert = true
@@ -1560,27 +2305,48 @@ struct OutfitPlannerView: View {
     }
     
     private func generateAllOutfits(fillMissingOnly: Bool) {
-        var usedIDs: Set<UUID> = fillMissingOnly
-            ? Set(boardState.days.flatMap { $0.assignedGarmentIDs })
-            : []
-        
         for i in 0..<boardState.days.count {
             let state = boardState.days[i]
             let ctx = recoContext(for: i)
+            let referenceDate = state.date
+            var baseExcludedIDs = Set<UUID>()
+            for (index, day) in boardState.days.enumerated() {
+                if index != i {
+                    baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                    baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
+                }
+            }
+            let cooldownExcludedIDs = buildCooldownExcludedIDs(
+                referenceDate: referenceDate,
+                ctx: ctx,
+                baseExcludedIDs: baseExcludedIDs
+            )
+            let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
+            let lockedCats = lockedCategories(for: i, lookTime: .day)
+            let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
+                .filter { !lockedCats.contains($0.category) }
             
             let outfit = AIRecommender.shared.suggestOutfit(
-                from: availableGarments,
+                from: pool,
                 ctx: ctx,
                 modelContext: context,
-                excludedIDs: fillMissingOnly
-                    ? usedIDs.subtracting(state.assignedGarmentIDs)
-                    : usedIDs
+                excludedIDs: excludedMerged
             )
             
             boardState.setOutfit(forDay: i, garments: outfit, overwriteExisting: !fillMissingOnly)
-            usedIDs.formUnion(boardState.days[i].assignedGarmentIDs)
             boardState.days[i].insufficientItemsWarning = boardState.days[i].assignedGarmentIDs.isEmpty && i > 0
             persistDayPlan(i)
+            #if DEBUG
+            logPlannerOutfit(
+                dayIndex: i,
+                isEvening: false,
+                referenceDate: referenceDate,
+                ctx: ctx,
+                baseExcludedIDs: baseExcludedIDs,
+                cooldownExcludedIDs: cooldownExcludedIDs,
+                mergedExcludedIDs: excludedMerged
+            )
+            #endif
         }
 
         generateEveningOutfits(fillMissingOnly: fillMissingOnly)
@@ -1590,27 +2356,50 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count else { return }
         guard boardState.days[dayIndex].useEveningLook else { return }
 
-        var usedIDs = Set(boardState.days.flatMap { $0.assignedGarmentIDs })
-        usedIDs.formUnion(boardState.days.flatMap { $0.eveningAssignedGarmentIDs })
-
+        let referenceDate = boardState.days[dayIndex].date
         let ctx = recoContext(for: dayIndex, isEvening: true)
+        var baseExcludedIDs = Set(boardState.days.flatMap { $0.assignedGarmentIDs })
+        baseExcludedIDs.formUnion(boardState.days.flatMap { $0.eveningAssignedGarmentIDs })
+        if !boardState.days[dayIndex].eveningLinkedSlots.isEmpty {
+            for slot in boardState.days[dayIndex].eveningLinkedSlots {
+                if let dayID = boardState.days[dayIndex].garmentID(for: slot) {
+                    baseExcludedIDs.remove(dayID)
+                }
+            }
+        }
+
+        let cooldownExcludedIDs = buildCooldownExcludedIDs(
+            referenceDate: referenceDate,
+            ctx: ctx,
+            baseExcludedIDs: baseExcludedIDs
+        )
+        let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
+        let lockedCats = lockedCategories(for: dayIndex, lookTime: .evening)
+        let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
+            .filter { !lockedCats.contains($0.category) }
         let outfit = AIRecommender.shared.suggestOutfit(
-            from: availableGarments,
+            from: pool,
             ctx: ctx,
             modelContext: context,
-            excludedIDs: usedIDs
+            excludedIDs: excludedMerged
         )
 
         setEveningOutfit(forDay: dayIndex, garments: outfit)
         persistDayPlan(dayIndex)
+        #if DEBUG
+        logPlannerOutfit(
+            dayIndex: dayIndex,
+            isEvening: true,
+            referenceDate: referenceDate,
+            ctx: ctx,
+            baseExcludedIDs: baseExcludedIDs,
+            cooldownExcludedIDs: cooldownExcludedIDs,
+            mergedExcludedIDs: excludedMerged
+        )
+        #endif
     }
 
     private func generateEveningOutfits(fillMissingOnly: Bool) {
-        var usedIDs = Set(boardState.days.flatMap { $0.assignedGarmentIDs })
-        if fillMissingOnly {
-            usedIDs.formUnion(boardState.days.flatMap { $0.eveningAssignedGarmentIDs })
-        }
-
         for i in 0..<boardState.days.count {
             guard boardState.days[i].useEveningLook else { continue }
 
@@ -1620,34 +2409,81 @@ struct OutfitPlannerView: View {
             }
 
             let ctx = recoContext(for: i, isEvening: true)
+            let referenceDate = boardState.days[i].date
+            var baseExcludedIDs = Set<UUID>()
+            for (index, day) in boardState.days.enumerated() {
+                if index != i {
+                    baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                    baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
+                } else {
+                    baseExcludedIDs.formUnion(day.assignedGarmentIDs)
+                    baseExcludedIDs.formUnion(day.eveningAssignedGarmentIDs)
+                }
+            }
+            if !boardState.days[i].eveningLinkedSlots.isEmpty {
+                for slot in boardState.days[i].eveningLinkedSlots {
+                    if let dayID = boardState.days[i].garmentID(for: slot) {
+                        baseExcludedIDs.remove(dayID)
+                    }
+                }
+            }
+            let cooldownExcludedIDs = buildCooldownExcludedIDs(
+                referenceDate: referenceDate,
+                ctx: ctx,
+                baseExcludedIDs: baseExcludedIDs
+            )
+            let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
+            let lockedCats = lockedCategories(for: i, lookTime: .evening)
+            let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
+                .filter { !lockedCats.contains($0.category) }
             let outfit = AIRecommender.shared.suggestOutfit(
-                from: availableGarments,
+                from: pool,
                 ctx: ctx,
                 modelContext: context,
-                excludedIDs: usedIDs
+                excludedIDs: excludedMerged
             )
 
             setEveningOutfit(forDay: i, garments: outfit)
-            usedIDs.formUnion(boardState.days[i].eveningAssignedGarmentIDs)
             persistDayPlan(i)
+            #if DEBUG
+            logPlannerOutfit(
+                dayIndex: i,
+                isEvening: true,
+                referenceDate: referenceDate,
+                ctx: ctx,
+                baseExcludedIDs: baseExcludedIDs,
+                cooldownExcludedIDs: cooldownExcludedIDs,
+                mergedExcludedIDs: excludedMerged
+            )
+            #endif
         }
     }
 
     private func setEveningOutfit(forDay dayIndex: Int, garments: [Garment]) {
         guard dayIndex < boardState.days.count else { return }
         for slot in OutfitSlot.allCases {
-            boardState.days[dayIndex].setEveningGarment(nil, for: slot)
+            if !boardState.days[dayIndex].isEveningLocked(slot) &&
+                !isEveningLinked(dayIndex: dayIndex, slot: slot) {
+                boardState.days[dayIndex].setEveningGarment(nil, for: slot)
+            }
         }
         for garment in garments {
             let slot = OutfitSlot.from(category: garment.category)
-            boardState.days[dayIndex].setEveningGarment(garment.id, for: slot)
+            if !boardState.days[dayIndex].isEveningLocked(slot),
+               !isEveningLinked(dayIndex: dayIndex, slot: slot),
+               boardState.days[dayIndex].eveningGarmentID(for: slot) == nil {
+                boardState.days[dayIndex].setEveningGarment(garment.id, for: slot)
+            }
         }
     }
 
     private func clearEveningOutfit(for dayIndex: Int) {
         guard dayIndex < boardState.days.count else { return }
         for slot in OutfitSlot.allCases {
-            boardState.days[dayIndex].setEveningGarment(nil, for: slot)
+            if !boardState.days[dayIndex].isEveningLocked(slot) &&
+                !isEveningLinked(dayIndex: dayIndex, slot: slot) {
+                boardState.days[dayIndex].setEveningGarment(nil, for: slot)
+            }
         }
     }
 
@@ -1670,6 +2506,14 @@ struct OutfitPlannerView: View {
         }
 
         boardState.days[dayIndex].useEveningLook = plan.eveningEnabled ?? false
+        boardState.days[dayIndex].eveningUsesDayBottom = plan.eveningUsesDayBottom
+        if !plan.eveningLinkedSlots.isEmpty {
+            boardState.days[dayIndex].eveningLinkedSlots = plan.eveningLinkedSlots
+        } else if plan.eveningUsesDayBottom {
+            boardState.days[dayIndex].eveningLinkedSlots = [.bottom]
+        } else {
+            boardState.days[dayIndex].eveningLinkedSlots = []
+        }
 
         let assignments = plan.slotAssignments
         if !assignments.isEmpty {
@@ -1707,18 +2551,53 @@ struct OutfitPlannerView: View {
 
         let eveningAssignments = plan.eveningSlotAssignments
         if boardState.days[dayIndex].useEveningLook, !eveningAssignments.isEmpty {
+            let eveningLockedSlots = plan.eveningLockedSlots
             for slot in OutfitSlot.allCases {
                 if let id = eveningAssignments[slot],
                    let garment = allGarments.first(where: { $0.id == id }),
                    !usedIDs.contains(garment.id) {
-                    boardState.days[dayIndex].setEveningGarment(garment.id, for: slot)
+                    boardState.days[dayIndex].setEveningGarment(
+                        garment.id,
+                        for: slot,
+                        locked: eveningLockedSlots.contains(slot)
+                    )
                     usedIDs.insert(garment.id)
+                }
+            }
+        }
+        if !boardState.days[dayIndex].eveningLinkedSlots.isEmpty {
+            for slot in boardState.days[dayIndex].eveningLinkedSlots {
+                if let dayID = boardState.days[dayIndex].garmentID(for: slot) {
+                    boardState.days[dayIndex].setEveningGarment(dayID, for: slot, locked: true)
                 }
             }
         }
     }
 
-    private func persistDayPlan(_ dayIndex: Int) {
+    /// Persist a day: debounced unless `immediate` (e.g. confirm worn/plan, or flush on background).
+    private func persistDayPlan(_ dayIndex: Int, immediate: Bool = false) {
+        guard dayIndex < boardState.days.count else { return }
+        if immediate {
+            persistDayPlanImmediate(dayIndex)
+            dirtyDayIndices.remove(dayIndex)
+            plannerSaveDebouncer.flush()
+            return
+        }
+        dirtyDayIndices.insert(dayIndex)
+        plannerSaveDebouncer.schedule {
+            NotificationCenter.default.post(name: .plannerFlushDirtyPlans, object: nil)
+        }
+    }
+
+    private func flushDirtyPlans() {
+        for dayIndex in dirtyDayIndices {
+            persistDayPlanImmediate(dayIndex)
+        }
+        dirtyDayIndices.removeAll()
+        plannerSaveDebouncer.flush()
+    }
+
+    private func persistDayPlanImmediate(_ dayIndex: Int) {
         guard dayIndex < boardState.days.count else { return }
         let day = boardState.days[dayIndex]
         let plan = DayPlanService.shared.planFor(date: day.date, context: context)
@@ -1737,10 +2616,16 @@ struct OutfitPlannerView: View {
         plan.eveningEnabled = day.useEveningLook
 
         var eveningAssignments: [OutfitSlot: UUID?] = [:]
+        var eveningLockedSlots: Set<OutfitSlot> = []
         for slot in OutfitSlot.allCases {
             eveningAssignments[slot] = day.eveningGarmentID(for: slot)
+            if day.isEveningLocked(slot) {
+                eveningLockedSlots.insert(slot)
+            }
         }
-        plan.setEveningSlotAssignments(eveningAssignments)
+        plan.setEveningSlotAssignments(eveningAssignments, lockedSlots: eveningLockedSlots)
+        plan.setEveningLinkedSlots(day.eveningLinkedSlots)
+        plan.eveningUsesDayBottom = day.eveningLinkedSlots.contains(.bottom)
         try? context.save()
 
         if Calendar.current.isDateInToday(day.date) {
@@ -1753,9 +2638,9 @@ struct OutfitPlannerView: View {
         }
     }
 
-    private func persistPlans(for indices: [Int]) {
+    private func persistPlans(for indices: [Int], immediate: Bool = false) {
         for index in indices {
-            persistDayPlan(index)
+            persistDayPlan(index, immediate: immediate)
         }
     }
 
@@ -1814,21 +2699,20 @@ struct OutfitPlannerView: View {
     
     private func replaceSingleItem(for garment: Garment) {
         guard let assignment = findAssignment(for: garment.id) else { return }
-        replaceSlot(dayIndex: assignment.dayIndex, slot: assignment.slot, lookTime: .day)
+        openAddPicker(dayIndex: assignment.dayIndex, lookTime: .day, preferredSlot: assignment.slot)
         activeSheet = nil
     }
 
     private func markWornToday(_ garment: Garment) {
         DS.haptic(0.4)
         let date = Date()
-        garment.lastWorn = date
-        garment.timesWorn += 1
-        try? context.save()
-        WearEventStore.markWorn(
+        WearHistoryService.recordWorn(
             date: date,
             garmentIDs: [garment.id],
             source: .manual,
-            context: context
+            context: context,
+            incrementTimesWorn: true,
+            loveScoreDelta: nil
         )
         activeSheet = nil
     }
@@ -1838,24 +2722,17 @@ struct OutfitPlannerView: View {
         let date = boardState.days[dayIndex].date
         let garmentIDs = boardState.days[dayIndex].assignedGarmentIDs
 
-        for garment in allGarments where garmentIDs.contains(garment.id) {
-            if garment.lastWorn == nil || garment.lastWorn! < date {
-                garment.lastWorn = date
-                garment.timesWorn += 1
-                garment.loveScore = min(100, garment.loveScore + 1)
-            }
-        }
-
         let plan = DayPlanService.shared.planFor(date: date, context: context)
         plan.wasWornConfirmed = true
         plan.updatedAt = Date()
-        try? context.save()
-        WearEventStore.markWorn(
+        WearHistoryService.recordWorn(
             date: date,
-            outfitID: plan.id,
             garmentIDs: garmentIDs,
             source: .planner,
-            context: context
+            context: context,
+            outfitID: plan.id,
+            incrementTimesWorn: true,
+            loveScoreDelta: 1
         )
         DS.haptic(0.4)
 
@@ -1867,6 +2744,13 @@ struct OutfitPlannerView: View {
                 locationName: weather.locationName
             )
         }
+        persistDayPlan(dayIndex, immediate: true)
+    }
+
+    private func confirmPlan(dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        persistDayPlan(dayIndex, immediate: true)
+        DS.haptic(0.3)
     }
 
     private func isConfirmed(_ dayIndex: Int) -> Bool {
@@ -1956,8 +2840,10 @@ struct OutfitPlannerView: View {
     private struct PlannerAddPicker: View {
         let dayIndex: Int
         let availableSlots: [OutfitSlot]
-        let garmentsForSlot: (OutfitSlot) -> [Garment]
-        let onSelect: (Garment, OutfitSlot) -> Void
+        let initialSlot: OutfitSlot?
+        let recommendedItemsForSlot: (OutfitSlot) -> [Garment]
+        let allItemsForSlot: (OutfitSlot) -> [AvailabilityService.AvailabilityItem]
+        let onSelect: (Garment, OutfitSlot, Bool) -> Void
         let onAddNewItem: (OutfitSlot) -> Void
         let onClose: () -> Void
 
@@ -1965,28 +2851,54 @@ struct OutfitPlannerView: View {
         @State private var searchText = ""
         @State private var selectedSeasons: Set<SeasonSuitability> = []
         @State private var selectedColors: Set<ColorTag> = []
+        @State private var pickerMode: PickerMode = .recommended
+        @State private var pendingSelection: AvailabilityService.AvailabilityItem?
+        @State private var showConfirm = false
+
+        private enum PickerMode: String, CaseIterable {
+            case recommended
+            case all
+        }
 
         init(
             dayIndex: Int,
             availableSlots: [OutfitSlot],
-            garmentsForSlot: @escaping (OutfitSlot) -> [Garment],
-            onSelect: @escaping (Garment, OutfitSlot) -> Void,
+            initialSlot: OutfitSlot?,
+            recommendedItemsForSlot: @escaping (OutfitSlot) -> [Garment],
+            allItemsForSlot: @escaping (OutfitSlot) -> [AvailabilityService.AvailabilityItem],
+            onSelect: @escaping (Garment, OutfitSlot, Bool) -> Void,
             onAddNewItem: @escaping (OutfitSlot) -> Void,
             onClose: @escaping () -> Void
         ) {
             self.dayIndex = dayIndex
             self.availableSlots = availableSlots
-            self.garmentsForSlot = garmentsForSlot
+            self.initialSlot = initialSlot
+            self.recommendedItemsForSlot = recommendedItemsForSlot
+            self.allItemsForSlot = allItemsForSlot
             self.onSelect = onSelect
             self.onAddNewItem = onAddNewItem
             self.onClose = onClose
-            _selectedSlot = State(initialValue: availableSlots.first ?? .top)
+            let preferred = initialSlot.flatMap { slot in
+                availableSlots.contains(slot) ? slot : nil
+            }
+            _selectedSlot = State(initialValue: preferred ?? availableSlots.first ?? .top)
         }
 
         private let columns = [GridItem(.adaptive(minimum: 90), spacing: DS.Spacing.sm)]
 
-        private var filteredGarments: [Garment] {
-            garmentsForSlot(selectedSlot).filter { garment in
+        private var filteredItems: [AvailabilityService.AvailabilityItem] {
+            let baseItems: [AvailabilityService.AvailabilityItem]
+            switch pickerMode {
+            case .recommended:
+                baseItems = recommendedItemsForSlot(selectedSlot).map {
+                    AvailabilityService.AvailabilityItem(garment: $0, status: .available)
+                }
+            case .all:
+                baseItems = allItemsForSlot(selectedSlot)
+            }
+
+            return baseItems.filter { item in
+                let garment = item.garment
                 if !searchText.isEmpty {
                     let text = searchText.lowercased()
                     let title = garment.displayTitle.lowercased()
@@ -1996,10 +2908,9 @@ struct OutfitPlannerView: View {
                     }
                 }
 
-                if !selectedSeasons.isEmpty, let season = garment.seasonSuitability {
-                    if !selectedSeasons.contains(season) && season != .allSeason {
-                        return false
-                    }
+                if !selectedSeasons.isEmpty {
+                    let season = garment.seasonSuitability ?? .allSeason
+                    if season != .allSeason && !selectedSeasons.contains(season) { return false }
                 }
 
                 if !selectedColors.isEmpty {
@@ -2031,16 +2942,15 @@ struct OutfitPlannerView: View {
                         }
                     }
 
-                    Button {
-                        onAddNewItem(selectedSlot)
-                    } label: {
-                        Label(String(localized: "planner_add_new_item"), systemImage: "plus")
+                    Picker(String(localized: "planner_picker_mode_title"), selection: $pickerMode) {
+                        Text(String(localized: "planner_picker_recommended")).tag(PickerMode.recommended)
+                        Text(String(localized: "planner_picker_all")).tag(PickerMode.all)
                     }
-                    .dsSecondaryButton()
+                    .pickerStyle(.segmented)
 
                     filterSection
 
-                    if filteredGarments.isEmpty {
+                    if filteredItems.isEmpty {
                         DSEmptyState(
                             icon: "tshirt",
                             title: String(localized: "planner_no_outfit"),
@@ -2048,11 +2958,11 @@ struct OutfitPlannerView: View {
                         )
                     } else {
                         LazyVGrid(columns: columns, spacing: DS.Spacing.sm) {
-                            ForEach(filteredGarments) { garment in
+                            ForEach(filteredItems) { item in
                                 Button {
-                                    onSelect(garment, selectedSlot)
+                                    handleSelection(item)
                                 } label: {
-                                    DSGarmentThumbnail(garment, size: .medium)
+                                    pickerItemCard(item)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -2069,6 +2979,34 @@ struct OutfitPlannerView: View {
                         onClose()
                     }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        onAddNewItem(selectedSlot)
+                    } label: {
+                        Image(systemName: "plus")
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                    }
+                    .accessibilityLabel(String(localized: "planner_add_new_item"))
+                }
+            }
+            .confirmationDialog(
+                String(localized: "planner_confirm_use_anyway_title"),
+                isPresented: $showConfirm,
+                titleVisibility: .visible
+            ) {
+                Button(String(localized: "planner_confirm_use_anyway_action")) {
+                    if let pendingSelection {
+                        onSelect(pendingSelection.garment, selectedSlot, true)
+                        self.pendingSelection = nil
+                    }
+                }
+                Button(String(localized: "action_cancel"), role: .cancel) {
+                    pendingSelection = nil
+                }
+            } message: {
+                Text(String(localized: "planner_confirm_use_anyway_message"))
             }
         }
 
@@ -2109,6 +3047,90 @@ struct OutfitPlannerView: View {
                         }
                     }
                 }
+            }
+        }
+
+        private func handleSelection(_ item: AvailabilityService.AvailabilityItem) {
+            let isRecommended = AvailabilityService.isRecommendedEligible(item.status)
+            if pickerMode == .all && !isRecommended {
+                pendingSelection = item
+                showConfirm = true
+                return
+            }
+            onSelect(item.garment, selectedSlot, false)
+        }
+
+        @ViewBuilder
+        private func pickerItemCard(_ item: AvailabilityService.AvailabilityItem) -> some View {
+            let garment = item.garment
+            let isDimmed = pickerMode == .all && !AvailabilityService.isRecommendedEligible(item.status)
+
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .topLeading) {
+                    DSGarmentThumbnail(garment, size: .medium)
+                        .opacity(isDimmed ? 0.6 : 1.0)
+
+                    if let badge = badgeText(for: item.status), pickerMode == .all {
+                        Text(badge)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .foregroundStyle(.secondary)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                            )
+                            .padding(4)
+                    }
+                }
+
+                Text(garment.displayTitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isDimmed ? .secondary : .primary)
+                    .lineLimit(1)
+
+                if let warning = warningText(for: item.status), pickerMode == .all {
+                    Text(warning)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(DS.Spacing.xs)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+            )
+        }
+
+        private func badgeText(for status: AvailabilityStatus) -> String? {
+            switch status {
+            case .available:
+                return nil
+            case .worn:
+                return String(localized: "planner_badge_worn")
+            case .unavailable:
+                return String(localized: "planner_badge_unavailable")
+            case .cooldown:
+                return String(localized: "planner_badge_cooldown")
+            }
+        }
+
+        private func warningText(for status: AvailabilityStatus) -> String? {
+            switch status {
+            case .available:
+                return nil
+            case .worn:
+                return String(localized: "planner_warning_worn")
+            case .unavailable:
+                return String(localized: "planner_warning_unavailable")
+            case .cooldown(let daysRemaining):
+                return String(
+                    format: NSLocalizedString("planner_warning_cooldown_format", comment: ""),
+                    daysRemaining
+                )
             }
         }
     }
@@ -2206,9 +3228,11 @@ struct OutfitPlannerView: View {
     }
 
     private func updateAvailableGarments() {
-        let filtered = allGarments.filter { !$0.isBlocked && !$0.isCurrentlyUnavailable }
+        let filtered = allGarments
         availableGarmentsCache = filtered
-        availableGarmentsSignature = filtered.map { $0.id.uuidString }.sorted().joined(separator: "|")
+        availableGarmentsSignature = filtered.map {
+            "\($0.id.uuidString)-\($0.isWorn ? 1 : 0)-\($0.isCurrentlyUnavailable ? 1 : 0)"
+        }.sorted().joined(separator: "|")
     }
 
     private func refreshCurrentDate() {

@@ -22,6 +22,10 @@
 "planner_reco_guidance_evening_jacket" = "ערב קריר — מומלץ להוסיף מעיל";
 "planner_reco_guidance_rain" = "סיכוי לגשם — מומלץ לקחת שכבה";
 "planner_remove_outerwear" = "הסר עליון";
+"planner_evening_link_bottom" = "השתמש באותו תחתון כמו ביום";
+"planner_evening_unlink_bottom" = "הפסק להשתמש בתחתון של היום";
+"planner_evening_link_day" = "השתמש באותו פריט כמו ביום";
+"planner_evening_unlink_day" = "הפסק לקשר ליום";
 "signin_continue_offline" = "המשך במצב לא מקוון";
 "signin_icloud_guidance" = "גיבוי דורש iCloud פעיל בהגדרות. התחברות עם Apple בלבד לא מספיקה.";
 "backup_cta_title" = "התחבר כדי להפעיל גיבוי iCloud";
@@ -326,11 +330,26 @@
 "profile_phone_placeholder" = "050-1234567";
 "profile_use_apple_info" = "השתמש בפרטי Apple";
 "profile_style_preferences" = "העדפות סגנון";
+"profile_algorithm_title" = "כך האלגוריתם לומד אותך";
+"profile_algorithm_intro" = "ההגדרות האלה מכוונות את ההמלצות.\nהן לא מגבילות אותך - הן עוזרות לאלגוריתם ללמוד את הסגנון שלך.";
 "profile_formality" = "פורמליות";
 "profile_warmth_sensitivity" = "רגישות לחום";
 "profile_rain_tolerance" = "סובלנות לגשם";
 "profile_casual" = "קז׳ואל";
 "profile_smart" = "אלגנטי";
+"profile_elegant" = "אלגנטי";
+"profile_resistant" = "עמיד";
+"profile_sensitive" = "רגיש";
+"profile_dont_care" = "לא משנה";
+"profile_prefer_dry" = "מעדיף יבש";
+"profile_level_low" = "נמוך";
+"profile_level_medium" = "בינוני";
+"profile_level_high" = "גבוה";
+"profile_pref_affects" = "משפיע על ההמלצות שלך.";
+"profile_profile_managed" = "פרטי הפרופיל מנוהלים דרך Apple ID.";
+"profile_signed_in_with_apple" = "מחובר עם Apple";
+"profile_account_sync_caption" = "ההתחברות שולטת בזהות. iCloud שולט בגיבוי ובסנכרון.";
+"profile_manage_icloud_settings" = "ניהול הגדרות iCloud";
 "profile_run_cold" = "מתקרר בקלות";
 "profile_run_hot" = "מתחמם בקלות";
 "profile_avoid_rain" = "נמנע מגשם";
@@ -350,6 +369,7 @@
 "loading_setting_up" = "מגדיר";
 "loading_weather" = "בודק את מזג האוויר";
 "loading_ready" = "מכין הכל";
+"loading_offline" = "מצב לא מקוון — סנכרון iCloud לא זמין";
 
 // MARK: - Errors
 "error_title" = "שגיאה";
@@ -424,7 +444,33 @@
 "planner_filter_color" = "צבע";
 "planner_add_item_title" = "הוסף פריט";
 "planner_add_new_item" = "הוסף פריט חדש";
+"planner_picker_mode_title" = "מצב";
+"planner_picker_recommended" = "מומלץ";
+"planner_picker_all" = "הכל";
+"planner_badge_worn" = "נלבש";
+"planner_badge_unavailable" = "לא זמין";
+"planner_badge_cooldown" = "קירור";
+"planner_warning_worn" = "מסומן כנלבש";
+"planner_warning_unavailable" = "לא זמין כרגע";
+"planner_warning_cooldown_format" = "בקירור (%d ימים)";
+"planner_confirm_use_anyway_title" = "להשתמש בכל זאת?";
+"planner_confirm_use_anyway_message" = "הפריט אינו מומלץ כרגע.";
+"planner_confirm_use_anyway_action" = "השתמש";
+"planner_no_available_slot_format" = "אין %@ זמינים. לחץ על החלפה כדי לבחור בכל זאת.";
+"planner_marked_worn" = "הפריט מסומן כנלבש.";
+"planner_in_cooldown_format" = "הפריט בקירור (%d ימים).";
+"planner_no_alternatives" = "אין חלופות זמינות.";
+"journal_status_approved" = "מאושר";
+"journal_status_pending" = "ממתין";
+"journal_no_look_title" = "אין לוק שמור";
+"journal_no_look_message" = "אין לוק שמור לתאריך הזה.";
+"calendar_photos" = "תמונות";
+"stats_unworn_title" = "לא נלבש";
+"stats_unworn_empty" = "כל הפריטים נלבשו לאחרונה!";
+"stats_unworn_count_format" = "לא נלבש: %d";
 "planner_confirm_day" = "אשר";
+"planner_confirm_plan" = "אשר תוכנית";
+"planner_confirm_worn" = "אשר כנלבש";
 "planner_undo_confirm" = "בטל אישור";
 "planner_evening_look" = "לוק ערב";
 "inspire_favorites" = "בהשראת המועדפים שלך.";
@@ -443,6 +489,10 @@
 
 // MARK: - Unavailable Items
 "unavailable_title" = "פריטים לא זמינים";
+"unavailable_segment_unavailable" = "לא זמין";
+"unavailable_segment_not_recommended" = "לא מומלץ";
+"unavailable_segment_worn" = "נלבש";
+"unavailable_segment_cooldown" = "קירור";
 "unavailable_empty_title" = "הכל תקין";
 "unavailable_empty_message" = "אין כרגע פריטים לא זמינים.";
 "unavailable_blocked" = "חסום";

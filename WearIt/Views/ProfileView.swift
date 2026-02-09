@@ -4,6 +4,7 @@ import UIKit
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
 
@@ -21,35 +22,33 @@ struct ProfileView: View {
     @State private var showSignOutDialog = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
 
-    @FocusState private var focusedField: Field?
     @State private var currentDate: Date = Date()
-
-    enum Field { case emoji, name, email, phone }
+    @State private var prefsSaveDebouncer = Debouncer(interval: 3.0)
+    @State private var scheduleNotificationsDebouncer = Debouncer(interval: 5.0)
 
     init() { _users = Query(FetchDescriptor<UserProfile>()) }
 
     var body: some View {
         ZStack {
             LiquidGlassBackdrop()
+                .ignoresSafeArea()
             
             ScrollView {
-                VStack(spacing: DS.Spacing.md) {
-                    accountSection
-                    stylePreferencesSection
+                VStack(spacing: DS.Spacing.lg) {
+                    heroProfileCard
+                    accountCard
+                    algorithmSection
                     notificationsSection
                     dataManagementSection
                     languageSection
-                    cloudSection
 
                     #if DEBUG
                     debugSection
                     #endif
                     
-                    // Save Button
                     Button {
                         DS.haptic(0.6)
                         saveProfile()
-                        dismissKeyboard()
                     } label: {
                         Label(String(localized: "profile_save_changes"), systemImage: "checkmark.circle.fill")
                     }
@@ -57,19 +56,14 @@ struct ProfileView: View {
                 }
                 .padding(.horizontal, DS.Spacing.md)
                 .padding(.top, DS.Spacing.sm)
-                .padding(.bottom, 100)
+                .padding(.bottom, DS.Spacing.lg)
             }
         }
         .navigationTitle(String(localized: "nav_profile"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button(String(localized: "action_done")) { dismissKeyboard() }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
-                    dismissKeyboard()
                     saveProfile()
                 } label: {
                     Image(systemName: "checkmark.circle.fill")
@@ -87,6 +81,18 @@ struct ProfileView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .profileFlushPrefsSave)) { _ in
+            try? context.save()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .profileScheduleNotifications)) { _ in
+            scheduleNotifications()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                prefsSaveDebouncer.flush()
+                try? context.save()
+            }
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
@@ -112,137 +118,189 @@ struct ProfileView: View {
 
     // MARK: - Sections
     
-    private var accountSection: some View {
+    private var heroProfileCard: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_account"), icon: "person.circle.fill")
-            
-            HStack(spacing: DS.Spacing.sm) {
-                // Avatar emoji
-                TextField("🙂", text: $avatarEmoji)
-                    .frame(width: 56, height: 56)
-                    .font(.system(size: 32))
-                    .multilineTextAlignment(.center)
-                    .focused($focusedField, equals: .emoji)
-                    .submitLabel(.done)
-                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
-                
-                // Name
-                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                    Text(String(localized: "profile_display_name"))
+            HStack(alignment: .center, spacing: DS.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(DS.Border.subtle, lineWidth: 0.8)
+                        )
+                    if avatarEmoji.isEmpty {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(avatarEmoji)
+                            .font(.system(size: 36))
+                    }
+                }
+                .frame(width: 72, height: 72)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(displayNameText)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    if !emailText.isEmpty {
+                        Text(emailText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(signedInStatusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField(String(localized: "profile_display_name_placeholder"), text: $displayName)
-                        .textInputAutocapitalization(.words)
-                        .focused($focusedField, equals: .name)
-                        .submitLabel(.done)
-                        .padding(DS.Spacing.xs)
-                        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: DS.Radius.xs, style: .continuous))
-                }
-            }
-            
-            // Email
-            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                Text(String(localized: "profile_email"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField(String(localized: "profile_email_placeholder"), text: $email)
-                    .textContentType(.emailAddress)
-                    .keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .focused($focusedField, equals: .email)
-                    .submitLabel(.done)
-                    .padding(DS.Spacing.xs)
-                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: DS.Radius.xs, style: .continuous))
-            }
-            
-            // Phone
-            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                Text(String(localized: "profile_phone"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField(String(localized: "profile_phone_placeholder"), text: $phone)
-                    .textContentType(.telephoneNumber)
-                    .keyboardType(.phonePad)
-                    .focused($focusedField, equals: .phone)
-                    .padding(DS.Spacing.xs)
-                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: DS.Radius.xs, style: .continuous))
-            }
-            
-            // Apple account button
-            Button {
-                if let n = auth.displayName, !n.isEmpty { displayName = n }
-                if let e = auth.email, !e.isEmpty { email = e }
-                saveProfile()
-            } label: {
-                Label(String(localized: "profile_use_apple_info"), systemImage: "apple.logo")
-                    .font(.subheadline.weight(.medium))
-            }
-            .dsSecondaryButton()
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                Text(auth.isSignedIn
-                     ? String(localized: "profile_signed_in")
-                     : String(localized: "profile_signed_out"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let currentEmail = auth.email, !currentEmail.isEmpty {
-                    Text(currentEmail)
+                    Text(String(localized: "profile_profile_managed"))
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                 }
-            }
 
-            if auth.isSignedIn {
-                Button(role: .destructive) {
-                    showSignOutDialog = true
-                } label: {
-                    Label(String(localized: "profile_sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
-                        .font(.subheadline.weight(.medium))
-                }
-                .dsSecondaryButton()
-            } else {
-                Button {
-                    showSignInSheet = true
-                } label: {
-                    Label(String(localized: "profile_sign_in"), systemImage: "person.crop.circle.badge.plus")
-                        .font(.subheadline.weight(.medium))
-                }
-                .dsSecondaryButton()
+                Spacer()
+
+                Button(String(localized: "action_edit")) { }
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                    )
+                    .disabled(true)
+                    .opacity(0.5)
             }
         }
         .dsCard()
     }
 
-    private var stylePreferencesSection: some View {
+    private var accountCard: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_style_preferences"), icon: "sparkles")
-            
+            DSSectionHeader(String(localized: "profile_account"), icon: "person.circle.fill")
+
+            HStack(alignment: .center, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_signed_in_with_apple"))
+                        .font(.subheadline.weight(.medium))
+                    Text(auth.isSignedIn ? String(localized: "profile_signed_in") : String(localized: "profile_signed_out"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if auth.isSignedIn, let currentEmail = auth.email, !currentEmail.isEmpty {
+                        Text(currentEmail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if auth.isSignedIn {
+                    Button(role: .destructive) {
+                        showSignOutDialog = true
+                    } label: {
+                        Label(String(localized: "profile_sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, DS.Spacing.sm)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        showSignInSheet = true
+                    } label: {
+                        Label(String(localized: "profile_sign_in"), systemImage: "person.crop.circle.badge.plus")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, DS.Spacing.sm)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "icloud.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_cloud_sync"))
+                        .font(.subheadline.weight(.medium))
+                    Text(cloudStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            Text(cloudExplanationText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Button {
+                openAppSettings()
+            } label: {
+                HStack {
+                    Text(String(localized: "profile_manage_icloud_settings"))
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text(String(localized: "profile_account_sync_caption"))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .dsCard()
+    }
+
+    private var algorithmSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "profile_algorithm_title"), icon: "sparkles")
+
+            Text(String(localized: "profile_algorithm_intro"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             PreferenceRow(
                 label: String(localized: "profile_formality"),
                 icon: "briefcase",
                 value: $preferredFormality,
                 range: 1...4,
-                labels: [String(localized: "profile_casual"), String(localized: "profile_smart")]
+                labels: [String(localized: "profile_casual"), String(localized: "profile_elegant")]
             )
-            
+
             PreferenceRow(
                 label: String(localized: "profile_warmth_sensitivity"),
                 icon: "thermometer.medium",
                 value: $warmthSensitivity,
                 range: 1...5,
-                labels: [String(localized: "profile_run_cold"), String(localized: "profile_run_hot")]
+                labels: [String(localized: "profile_resistant"), String(localized: "profile_sensitive")]
             )
-            
+
             PreferenceRow(
                 label: String(localized: "profile_rain_tolerance"),
                 icon: "umbrella",
                 value: $rainTolerance,
                 range: 1...5,
-                labels: [String(localized: "profile_avoid_rain"), String(localized: "profile_dont_mind")]
+                labels: [String(localized: "profile_dont_care"), String(localized: "profile_prefer_dry")]
             )
         }
         .dsCard()
@@ -250,8 +308,7 @@ struct ProfileView: View {
 
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            Text(String(localized: "notifications_section_title"))
-                .font(.headline)
+            DSSectionHeader(String(localized: "notifications_section_title"), icon: "bell.badge")
 
             Text(String(localized: "notifications_section_subtext"))
                 .font(.caption)
@@ -307,13 +364,13 @@ struct ProfileView: View {
                 .foregroundStyle(.secondary)
         }
         .dsCard()
-        .onChange(of: prefs.morningEnabled) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.weatherEnabled) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.confirmEnabled) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.morningHour) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.morningMinute) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.confirmHour) { _, _ in scheduleNotifications() }
-        .onChange(of: prefs.confirmMinute) { _, _ in scheduleNotifications() }
+        .onChange(of: prefs.morningEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.weatherEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.morningHour) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.morningMinute) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmHour) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmMinute) { _, _ in scheduleNotificationsDebounced() }
     }
 
     private var languageSection: some View {
@@ -351,44 +408,6 @@ struct ProfileView: View {
         .dsCard()
     }
 
-    private var cloudSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            HStack(spacing: DS.Spacing.sm) {
-                Image(systemName: "icloud.fill")
-                    .font(.title2)
-                    .foregroundStyle(.blue)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "profile_cloud_sync"))
-                        .font(.subheadline.weight(.medium))
-                    Text(cloudStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-            }
-            
-            Text(String(localized: "profile_icloud_signin_separate"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            
-            if cloudKit.status == .notAvailable {
-                let message = cloudKit.availabilityMessage.isEmpty
-                    ? String(localized: "profile_cloud_guidance")
-                    : cloudKit.availabilityMessage
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else if case .error(let message) = cloudKit.status {
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .dsCard(padding: DS.Spacing.sm)
-    }
-
     private var cloudStatusText: String {
         switch cloudKit.status {
         case .notAvailable:
@@ -405,6 +424,35 @@ struct ProfileView: View {
     private var currentLanguageName: String {
         let code = Locale.current.language.languageCode?.identifier ?? Locale.current.identifier
         return Locale.current.localizedString(forLanguageCode: code) ?? code
+    }
+
+    private var displayNameText: String {
+        if !displayName.isEmpty { return displayName }
+        if let authName = auth.displayName, !authName.isEmpty { return authName }
+        return String(localized: "profile_default_name")
+    }
+
+    private var emailText: String {
+        if !email.isEmpty { return email }
+        return auth.email ?? ""
+    }
+
+    private var signedInStatusText: String {
+        auth.isSignedIn
+            ? String(localized: "profile_signed_in_with_apple")
+            : String(localized: "profile_signed_out")
+    }
+
+    private var cloudExplanationText: String {
+        if cloudKit.status == .notAvailable {
+            return cloudKit.availabilityMessage.isEmpty
+                ? String(localized: "profile_cloud_guidance")
+                : cloudKit.availabilityMessage
+        }
+        if case .error(let message) = cloudKit.status {
+            return message
+        }
+        return String(localized: "profile_icloud_signin_separate")
     }
 
     #if DEBUG
@@ -443,24 +491,15 @@ struct ProfileView: View {
     }
 
     private var morningEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.morningEnabled },
-            set: { prefs.morningEnabled = $0; try? context.save() }
-        )
+        Binding(get: { prefs.morningEnabled }, set: { prefs.morningEnabled = $0; schedulePrefsSave() })
     }
 
     private var weatherEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.weatherEnabled },
-            set: { prefs.weatherEnabled = $0; try? context.save() }
-        )
+        Binding(get: { prefs.weatherEnabled }, set: { prefs.weatherEnabled = $0; schedulePrefsSave() })
     }
 
     private var confirmEnabledBinding: Binding<Bool> {
-        Binding(
-            get: { prefs.confirmEnabled },
-            set: { prefs.confirmEnabled = $0; try? context.save() }
-        )
+        Binding(get: { prefs.confirmEnabled }, set: { prefs.confirmEnabled = $0; schedulePrefsSave() })
     }
 
     private var morningTimeBinding: Binding<Date> {
@@ -470,7 +509,7 @@ struct ProfileView: View {
                 let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
                 prefs.morningHour = comps.hour ?? prefs.morningHour
                 prefs.morningMinute = comps.minute ?? prefs.morningMinute
-                try? context.save()
+                schedulePrefsSave()
             }
         )
     }
@@ -482,9 +521,15 @@ struct ProfileView: View {
                 let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
                 prefs.confirmHour = comps.hour ?? prefs.confirmHour
                 prefs.confirmMinute = comps.minute ?? prefs.confirmMinute
-                try? context.save()
+                schedulePrefsSave()
             }
         )
+    }
+
+    private func schedulePrefsSave() {
+        prefsSaveDebouncer.schedule {
+            NotificationCenter.default.post(name: .profileFlushPrefsSave, object: nil)
+        }
     }
 
     private func timeFrom(hour: Int, minute: Int) -> Date {
@@ -500,6 +545,12 @@ struct ProfileView: View {
 
     private func scheduleNotifications() {
         Task { await NotificationService.shared.scheduleDailyNotifications(context: context) }
+    }
+
+    private func scheduleNotificationsDebounced() {
+        scheduleNotificationsDebouncer.schedule {
+            NotificationCenter.default.post(name: .profileScheduleNotifications, object: nil)
+        }
     }
 
     // MARK: - Data
@@ -575,8 +626,9 @@ struct ProfileView: View {
         try? context.save()
     }
 
-    private func dismissKeyboard() {
-        UIApplication.shared.endEditing()
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
@@ -590,18 +642,24 @@ private struct PreferenceRow: View {
     let labels: [String]
     
     var body: some View {
-        VStack(spacing: DS.Spacing.xs) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             HStack {
                 Label(label, systemImage: icon)
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
                 
                 Spacer()
-                
-                Text("\(value)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 24)
+
+                Text(scaleLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, DS.Spacing.xs)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
+                    )
             }
             
             HStack {
@@ -623,7 +681,24 @@ private struct PreferenceRow: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+
+            Text(String(localized: "profile_pref_affects"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, DS.Spacing.xxs)
+    }
+
+    private var scaleLabel: String {
+        let minValue = range.lowerBound
+        let maxValue = range.upperBound
+        if maxValue <= minValue { return String(localized: "profile_level_medium") }
+        let normalized = Double(value - minValue) / Double(maxValue - minValue)
+        if normalized < 0.34 {
+            return String(localized: "profile_level_low")
+        } else if normalized < 0.67 {
+            return String(localized: "profile_level_medium")
+        }
+        return String(localized: "profile_level_high")
     }
 }

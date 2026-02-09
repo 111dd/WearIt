@@ -28,17 +28,18 @@ enum WidgetCommandService {
         let plan = DayPlanService.shared.planFor(date: day, context: context)
         plan.wasWornConfirmed = true
 
-        let garmentIDs = plan.slotAssignments.values
-        let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
-        for garment in garments where garmentIDs.contains(garment.id) {
-            if garment.lastWorn == nil || garment.lastWorn! < day {
-                garment.lastWorn = day
-                garment.timesWorn += 1
-                garment.loveScore = min(100, garment.loveScore + 1)
-            }
-        }
+        let garmentIDs = Array(plan.slotAssignments.values)
+        WearHistoryService.recordWorn(
+            date: day,
+            garmentIDs: garmentIDs,
+            source: .planner,
+            context: context,
+            outfitID: plan.id,
+            incrementTimesWorn: true,
+            loveScoreDelta: 1
+        )
 
-        try? context.save()
+        let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
 
         WidgetSnapshotService.saveTodaySnapshot(
             plan: plan,

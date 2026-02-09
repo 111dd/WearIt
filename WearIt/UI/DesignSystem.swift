@@ -36,6 +36,7 @@ enum DS {
         static var primary: Color { .accentColor }
         static var love: Color { .pink }
         static var warmth: Color { .orange }
+        static var danger: Color { .red }
     }
 
     // MARK: Spacing

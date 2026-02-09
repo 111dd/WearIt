@@ -22,6 +22,10 @@
 "planner_reco_guidance_evening_jacket" = "Cool evening — add a jacket";
 "planner_reco_guidance_rain" = "Chance of rain — bring a layer";
 "planner_remove_outerwear" = "Remove outerwear";
+"planner_evening_link_bottom" = "Use same bottom as Day";
+"planner_evening_unlink_bottom" = "Stop using Day bottom";
+"planner_evening_link_day" = "Use same as Day";
+"planner_evening_unlink_day" = "Stop linking to Day";
 "signin_continue_offline" = "Continue Offline";
 "signin_icloud_guidance" = "Backup requires iCloud to be enabled in Settings. Sign in with Apple alone is not enough.";
 "backup_cta_title" = "Sign in to enable iCloud backup";
@@ -326,11 +330,26 @@
 "profile_phone_placeholder" = "+1 234 567 8900";
 "profile_use_apple_info" = "Use Apple Account Info";
 "profile_style_preferences" = "Style Preferences";
+"profile_algorithm_title" = "How the algorithm learns you";
+"profile_algorithm_intro" = "These settings tune how outfits are suggested.\nThey don't restrict you - they help the algorithm learn your style.";
 "profile_formality" = "Formality";
 "profile_warmth_sensitivity" = "Warmth Sensitivity";
 "profile_rain_tolerance" = "Rain Tolerance";
 "profile_casual" = "Casual";
 "profile_smart" = "Smart";
+"profile_elegant" = "Elegant";
+"profile_resistant" = "Resistant";
+"profile_sensitive" = "Sensitive";
+"profile_dont_care" = "Don't care";
+"profile_prefer_dry" = "Prefer dry";
+"profile_level_low" = "Low";
+"profile_level_medium" = "Medium";
+"profile_level_high" = "High";
+"profile_pref_affects" = "Affects your outfit suggestions.";
+"profile_profile_managed" = "Profile details are managed via your Apple ID.";
+"profile_signed_in_with_apple" = "Signed in with Apple";
+"profile_account_sync_caption" = "Sign-in controls your identity. iCloud controls backup & sync.";
+"profile_manage_icloud_settings" = "Manage iCloud Settings";
 "profile_run_cold" = "Run Cold";
 "profile_run_hot" = "Run Hot";
 "profile_avoid_rain" = "Avoid Rain";
@@ -350,6 +369,7 @@
 "loading_setting_up" = "Setting up";
 "loading_weather" = "Checking the weather";
 "loading_ready" = "Getting things ready";
+"loading_offline" = "Offline mode — iCloud sync unavailable";
 
 // MARK: - Errors
 "error_title" = "Error";
@@ -424,7 +444,33 @@
 "planner_filter_color" = "Color";
 "planner_add_item_title" = "Add item";
 "planner_add_new_item" = "Add new item";
+"planner_picker_mode_title" = "Mode";
+"planner_picker_recommended" = "Recommended";
+"planner_picker_all" = "All";
+"planner_badge_worn" = "Worn";
+"planner_badge_unavailable" = "Unavailable";
+"planner_badge_cooldown" = "Cooldown";
+"planner_warning_worn" = "Marked as worn";
+"planner_warning_unavailable" = "Currently unavailable";
+"planner_warning_cooldown_format" = "In cooldown (%d days)";
+"planner_confirm_use_anyway_title" = "Use anyway?";
+"planner_confirm_use_anyway_message" = "This item is not recommended right now.";
+"planner_confirm_use_anyway_action" = "Use";
+"planner_no_available_slot_format" = "No available %@. Tap Replace to pick anyway.";
+"planner_marked_worn" = "This item is marked as worn.";
+"planner_in_cooldown_format" = "This item is in cooldown (%d days).";
+"planner_no_alternatives" = "No alternatives available.";
+"journal_status_approved" = "Approved";
+"journal_status_pending" = "Pending";
+"journal_no_look_title" = "No look saved";
+"journal_no_look_message" = "No look saved for this date.";
+"calendar_photos" = "Photos";
+"stats_unworn_title" = "Unworn";
+"stats_unworn_empty" = "All items worn recently!";
+"stats_unworn_count_format" = "Unworn: %d";
 "planner_confirm_day" = "Confirm";
+"planner_confirm_plan" = "Confirm Plan";
+"planner_confirm_worn" = "Confirm Worn";
 "planner_undo_confirm" = "Undo";
 "planner_evening_look" = "Evening look";
 "inspire_favorites" = "Inspired by your favorites.";
@@ -443,6 +489,10 @@
 
 // MARK: - Unavailable Items
 "unavailable_title" = "Unavailable Items";
+"unavailable_segment_unavailable" = "Unavailable";
+"unavailable_segment_not_recommended" = "Not Recommended";
+"unavailable_segment_worn" = "Worn";
+"unavailable_segment_cooldown" = "Cooldown";
 "unavailable_empty_title" = "All set";
 "unavailable_empty_message" = "No unavailable items right now.";
 "unavailable_blocked" = "Blocked";

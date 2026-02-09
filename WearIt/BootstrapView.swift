@@ -14,10 +14,12 @@ enum AppLoadState: Equatable {
 struct BootstrapView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var weather: WeatherCenter
+    @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
 
     @AppStorage("didSeed") private var didSeed = false
     @State private var loadState: AppLoadState = .loading
-    @State private var loadingMessage: String = "Getting things ready"
+    @State private var loadingMessage: String = String(localized: "loading_ready")
 
     var body: some View {
         ZStack {
@@ -43,19 +45,24 @@ struct BootstrapView: View {
         // Small delay to ensure loading screen appears smoothly
         try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
         
+        // Step 0: Refresh auth + iCloud status (do not block on sync events)
+        loadingMessage = String(localized: "loading_ready")
+        await auth.refreshCredentialStateIfNeeded()
+        await cloudKit.refreshAccountStatus()
+
         // Step 1: Data migrations
-        loadingMessage = "Preparing your wardrobe"
-        DataMigrationService.runOnLaunch(context: context)
+        loadingMessage = String(localized: "loading_preparing")
+        await DataMigrationService.shared.runMigrationsAndWait(context: context)
         
         // Step 2: Seed data
         if !didSeed {
-            loadingMessage = "Setting up"
+            loadingMessage = String(localized: "loading_setting_up")
             SeedData.load(context: context)
             didSeed = true
         }
         
         // Step 3: Weather (non-blocking, with timeout)
-        loadingMessage = "Checking the weather"
+        loadingMessage = String(localized: "loading_weather")
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [self] in
                 await refreshWeatherFromLocation()
@@ -108,13 +115,18 @@ struct BootstrapView: View {
 
 // MARK: - App Loading View
 
+private final class IconCycleCounter: ObservableObject {
+    @Published var count = 0
+    var timer: Timer?
+}
+
 struct AppLoadingView: View {
     let message: String
     
     @State private var isAnimating = false
-    @State private var iconIndex = 0
-    @State private var iconTimer: Timer?
-    
+    @StateObject private var iconCycleCounter = IconCycleCounter()
+    private static let maxIconCycles = 5
+
     private let icons = ["tshirt.fill", "cloud.sun.fill", "sparkles"]
     
     var body: some View {
@@ -143,7 +155,7 @@ struct AppLoadingView: View {
                         .opacity(isAnimating ? 0.5 : 1.0)
                     
                     // Icon
-                    Image(systemName: icons[iconIndex])
+                    Image(systemName: icons[iconCycleCounter.count % icons.count])
                         .font(.system(size: 44, weight: .light))
                         .foregroundStyle(Color.accentColor)
                         .symbolEffect(.pulse.byLayer, options: .repeating, value: isAnimating)
@@ -162,7 +174,7 @@ struct AppLoadingView: View {
                             Circle()
                                 .fill(Color.secondary.opacity(0.4))
                                 .frame(width: 6, height: 6)
-                                .scaleEffect(isAnimating && (iconIndex % 3 == i) ? 1.3 : 1.0)
+                                .scaleEffect(isAnimating && (iconCycleCounter.count % 3 == i) ? 1.3 : 1.0)
                                 .animation(
                                     .easeInOut(duration: 0.4)
                                     .repeatForever()
@@ -179,19 +191,24 @@ struct AppLoadingView: View {
         }
         .onAppear {
             isAnimating = true
-            
-            // Cycle through icons
-        iconTimer?.invalidate()
-        iconTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            withAnimation(.easeInOut(duration: 0.3)) {
-                iconIndex = (iconIndex + 1) % icons.count
+            iconCycleCounter.count = 0
+            iconCycleCounter.timer?.invalidate()
+            iconCycleCounter.timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [iconCycleCounter] _ in
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        iconCycleCounter.count += 1
+                    }
+                    if iconCycleCounter.count >= Self.maxIconCycles {
+                        iconCycleCounter.timer?.invalidate()
+                        iconCycleCounter.timer = nil
+                    }
+                }
             }
         }
-    }
-    .onDisappear {
-        isAnimating = false
-        iconTimer?.invalidate()
-        iconTimer = nil
+        .onDisappear {
+            isAnimating = false
+            iconCycleCounter.timer?.invalidate()
+            iconCycleCounter.timer = nil
         }
     }
 }
