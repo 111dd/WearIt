@@ -46,12 +46,37 @@
 "profile_signout_message" = "Choose how you want to continue.";
 "profile_signout_stay_offline" = "Stay Offline (keep access)";
 "profile_signout_go_to_signin" = "Go to Sign-In Screen";
+"profile_taste_title" = "My Taste";
+"profile_taste_intro" = "A few small signals help WearIt understand what feels comfortable, what matches your style, and what to suggest next.";
+"profile_taste_casual" = "Prefers casual";
+"profile_taste_elegant" = "Prefers elegant";
+"profile_taste_balanced" = "Balanced casual/elegant";
+"profile_taste_cool_resistant" = "Less sensitive to cold";
+"profile_taste_cold_sensitive" = "Sensitive to cold";
+"profile_taste_medium_warmth" = "Balanced warmth sensitivity";
+"profile_taste_rain_flexible" = "Flexible in rain";
+"profile_taste_prefers_dry" = "Prefers staying dry";
+"profile_taste_medium_rain" = "Balanced rain tolerance";
+"profile_learning_status_title" = "How WearIt learns";
+"profile_learning_status_empty" = "Not enough feedback yet. Likes, skips, and worn confirmations will help.";
+"profile_learning_status_count" = "WearIt has learned from %d feedback actions.";
+"profile_reset_learning" = "Reset learning";
+"profile_reset_learning_title" = "Reset learning?";
+"profile_reset_learning_message" = "Manual preferences will stay, but learned recommendation weights will start over.";
+"profile_reset_learning_confirm" = "Reset learning";
 "wardrobe_sort_title" = "Sort";
 "wardrobe_sort_newest" = "Newest";
 "wardrobe_sort_oldest" = "Oldest";
 "wardrobe_sort_name" = "Name A–Z";
 "wardrobe_sort_brand" = "Brand A–Z";
 "wardrobe_sort_category" = "Category";
+"wardrobe_current_season_filter" = "Now: %@";
+"wardrobe_show_all_seasons" = "Show all";
+"wardrobe_manual_season_filter" = "Season";
+"season_summer_short" = "Summer";
+"season_winter_short" = "Winter";
+"season_transitional_short" = "Spring/Fall";
+"season_all_short" = "All";
 
 // MARK: - Navigation Titles
 "nav_outfit_planner" = "Outfit Planner";
@@ -94,6 +119,12 @@
 "planner_wear_this" = "Wear";
 "planner_love_it" = "Love";
 "planner_skip" = "Skip";
+"planner_not_my_style" = "Not my style";
+"planner_too_warm" = "Too warm";
+"planner_too_cold" = "Too cold";
+"planner_just_right" = "Just right";
+"planner_too_formal" = "Too formal";
+"planner_too_casual" = "Too casual";
 "planner_using_forecast" = "Using forecast defaults";
 "planner_manual_active" = "Manual adjustments active";
 
@@ -307,6 +338,17 @@
 "calendar_unlock_garment" = "Unlock";
 "calendar_past_day" = "Past";
 "calendar_future_day" = "Planned";
+"calendar_summary_today" = "Today’s look and photos";
+"calendar_summary_past" = "What was planned or worn";
+"calendar_summary_future" = "Plan ahead for this day";
+"calendar_items_count_format" = "%d items";
+"calendar_photos_count_format" = "%d photos";
+"calendar_day_photos" = "Photos from this day";
+"calendar_no_photos_title" = "No photos yet";
+"calendar_no_photos_message" = "Add a quick photo if you want to remember the look.";
+"calendar_recent_days" = "Recent days";
+"calendar_show_more_history" = "Show more";
+"calendar_show_less_history" = "Show less";
 
 // MARK: - Stats
 "stats_title" = "Stats";
@@ -535,3 +577,12 @@
 "widget_not_confirmed" = "Not confirmed";
 "widget_empty_title" = "No outfit yet";
 "widget_empty_body" = "Open WearIt to generate today’s look.";
+"intent_today_outfit_summary_format" = "Today's outfit: %@.";
+"Show Today's Outfit" = "Show Today's Outfit";
+"Reads today's planned outfit without opening Wear It." = "Reads today's planned outfit without opening Wear It.";
+"No outfit is planned for today yet." = "No outfit is planned for today yet.";
+"Suggest Another Outfit" = "Suggest Another Outfit";
+"Opens Wear It and creates another personalized outfit recommendation." = "Opens Wear It and creates another personalized outfit recommendation.";
+"Opening Wear It to suggest another outfit." = "Opening Wear It to suggest another outfit.";
+"Show Outfit" = "Show Outfit";
+"New Suggestion" = "New Suggestion";

@@ -10,14 +10,20 @@ import SwiftUI
 
 enum AppAppearance {
     static func install() {
-        // UINavigationBar - iOS 18+ Enhanced
+        // On iOS 26 the system owns the Liquid Glass appearance and its scroll
+        // transitions. UIKit blur overrides flatten that effect, so only install
+        // the material fallback on earlier systems.
+        if #available(iOS 26.0, *) {
+            return
+        }
+
+        // UINavigationBar fallback
         let nav = UINavigationBarAppearance()
         nav.configureWithTransparentBackground()
         nav.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         nav.backgroundColor = .clear
         nav.shadowColor = .clear
         
-        // iOS 18+ title styling
         nav.titleTextAttributes = [
             .foregroundColor: UIColor.label,
             .font: UIFont.systemFont(ofSize: 17, weight: .semibold)
@@ -32,14 +38,13 @@ enum AppAppearance {
         UINavigationBar.appearance().compactAppearance = nav
         UINavigationBar.appearance().compactScrollEdgeAppearance = nav
 
-        // UITabBar - iOS 18+ Enhanced
+        // UITabBar fallback
         let tab = UITabBarAppearance()
         tab.configureWithTransparentBackground()
         tab.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         tab.backgroundColor = .clear
         tab.shadowColor = .clear
         
-        // iOS 18+ tab item styling
         tab.stackedLayoutAppearance.normal.iconColor = .secondaryLabel
         tab.stackedLayoutAppearance.normal.titleTextAttributes = [
             .foregroundColor: UIColor.secondaryLabel,

@@ -28,10 +28,16 @@ struct WardrobeView: View {
             }
         }
     }
+
+    private enum SeasonScope {
+        case current
+        case all
+    }
     
     // Filter States
     @State private var selectedCategory: Category? = nil
     @State private var selectedSeasons: Set<SeasonSuitability> = []
+    @State private var seasonScope: SeasonScope = .current
     @State private var showTempSuitable: Bool = false
     @State private var showFilters: Bool = false
 
@@ -54,10 +60,11 @@ struct WardrobeView: View {
         
         if !selectedSeasons.isEmpty {
             result = result.filter { garment in
-                if let season = garment.seasonSuitability {
-                    return selectedSeasons.contains(season) || season == .allSeason
-                }
-                return true
+                seasonMatches(garment, allowedSeasons: selectedSeasons)
+            }
+        } else if seasonScope == .current {
+            result = result.filter {
+                seasonMatches($0, allowedSeasons: [currentSeason])
             }
         }
         
@@ -108,12 +115,11 @@ struct WardrobeView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LiquidGlassBackdrop()
-                    .ignoresSafeArea()
-                
                 VStack(spacing: 0) {
                     // Compact category filter
                     categoryFilter
+
+                    seasonScopeFilter
                     
                     // Collapsible advanced filters
                     if showFilters {
@@ -129,15 +135,7 @@ struct WardrobeView: View {
                             message: String(localized: "wardrobe_empty_message")
                         )
                         .padding(DS.Spacing.lg)
-                        .background(
-                            .ultraThinMaterial,
-                            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                                .blendMode(.plusLighter)
-                        )
+                        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
                         .padding(.horizontal, DS.Spacing.md)
                         .frame(maxHeight: .infinity)
                     } else {
@@ -249,14 +247,17 @@ struct WardrobeView: View {
             .onChange(of: allGarments.count) { _, _ in scheduleRebuildVisibleGarments() }
             .onChange(of: selectedCategory) { _, _ in scheduleRebuildVisibleGarments() }
             .onChange(of: selectedSeasons) { _, _ in scheduleRebuildVisibleGarments() }
+            .onChange(of: seasonScope) { _, _ in scheduleRebuildVisibleGarments() }
             .onChange(of: showTempSuitable) { _, _ in scheduleRebuildVisibleGarments() }
             .onChange(of: selectedSort) { _, _ in scheduleRebuildVisibleGarments() }
             .onChange(of: weather.currentTempC) { _, _ in scheduleRebuildVisibleGarments() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                 refreshCurrentDate()
+                scheduleRebuildVisibleGarments()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
                 refreshCurrentDate()
+                scheduleRebuildVisibleGarments()
             }
         }
     }
@@ -287,30 +288,54 @@ struct WardrobeView: View {
     
     private var categoryFilter: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Spacing.xs) {
-                DSChip("All", isSelected: selectedCategory == nil) {
-                    selectedCategory = nil
-                }
-                ForEach(Category.allCases) { cat in
-                    DSChip(cat.title, isSelected: selectedCategory == cat) {
-                        selectedCategory = cat
+            LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    DSChip("All", isSelected: selectedCategory == nil) {
+                        selectedCategory = nil
+                    }
+                    ForEach(Category.allCases) { cat in
+                        DSChip(cat.title, isSelected: selectedCategory == cat) {
+                            selectedCategory = cat
+                        }
                     }
                 }
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
         }
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color.accentColor.opacity(0.02))
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.sm)
+    }
+
+    private var seasonScopeFilter: some View {
+        LiquidGlassGroup(spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.xs) {
+                DSChip(
+                    String(format: NSLocalizedString("wardrobe_current_season_filter", comment: ""), currentSeason.shortTitle),
+                    icon: currentSeason.icon,
+                    isSelected: seasonScope == .current && selectedSeasons.isEmpty,
+                    color: currentSeason.color
+                ) {
+                    selectedSeasons.removeAll()
+                    seasonScope = .current
+                }
+
+                DSChip(
+                    String(localized: "wardrobe_show_all_seasons"),
+                    icon: "square.grid.2x2",
+                    isSelected: seasonScope == .all && selectedSeasons.isEmpty,
+                    color: .accentColor
+                ) {
+                    selectedSeasons.removeAll()
+                    seasonScope = .all
+                }
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.top, DS.Spacing.xs)
     }
     
     // MARK: - Advanced Filters
@@ -318,7 +343,7 @@ struct WardrobeView: View {
     private var advancedFilters: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             // Season filter
-            DSSectionHeader("Season")
+            DSSectionHeader(String(localized: "wardrobe_manual_season_filter"))
             
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DS.Spacing.xs) {
@@ -359,15 +384,7 @@ struct WardrobeView: View {
             }
         }
         .padding(DS.Spacing.md)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         .padding(.horizontal, DS.Spacing.md)
         .padding(.bottom, DS.Spacing.sm)
     }
@@ -380,6 +397,7 @@ struct WardrobeView: View {
                 selectedSeasons.remove(season)
             } else {
                 selectedSeasons.insert(season)
+                seasonScope = .all
             }
         }
     }
@@ -388,8 +406,28 @@ struct WardrobeView: View {
         withAnimation(DS.Animation.standard) {
             selectedCategory = nil
             selectedSeasons.removeAll()
+            seasonScope = .current
             showTempSuitable = false
         }
+    }
+
+    private var currentSeason: SeasonSuitability {
+        let month = Calendar.current.component(.month, from: currentDate)
+        switch month {
+        case 6...9:
+            return .summer
+        case 12, 1, 2:
+            return .winter
+        default:
+            return .transitional
+        }
+    }
+
+    private func seasonMatches(_ garment: Garment, allowedSeasons: Set<SeasonSuitability>) -> Bool {
+        guard let season = garment.seasonSuitability else {
+            return true
+        }
+        return season == .allSeason || allowedSeasons.contains(season)
     }
 
     private var wardrobeColumns: [GridItem] {
@@ -586,10 +624,10 @@ private struct WardrobeTileView: View, Equatable {
 extension SeasonSuitability {
     var shortTitle: String {
         switch self {
-        case .summer: return "Summer"
-        case .winter: return "Winter"
-        case .transitional: return "Trans."
-        case .allSeason: return "All"
+        case .summer: return String(localized: "season_summer_short")
+        case .winter: return String(localized: "season_winter_short")
+        case .transitional: return String(localized: "season_transitional_short")
+        case .allSeason: return String(localized: "season_all_short")
         }
     }
     

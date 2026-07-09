@@ -9,8 +9,6 @@ struct WelcomeView: View {
 
     var body: some View {
         ZStack {
-            LiquidGlassBackdrop()
-
             ambientOrbs
 
             GeometryReader { geo in
@@ -71,20 +69,12 @@ struct WelcomeView: View {
     private var header: some View {
         VStack(spacing: DS.Spacing.xs) {
             ZStack {
-                RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8)
-                            .blendMode(.plusLighter)
-                    )
-                    .shadow(color: Color.black.opacity(0.2), radius: 12, x: 0, y: 6)
-
                 Image(systemName: "square.stack.3d.up")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color.blue.opacity(0.8))
             }
+            .frame(width: 48, height: 48)
+            .liquidGlassSurface(cornerRadius: DS.Radius.lg, tint: Color.blue.opacity(0.08), castsShadow: true)
             .padding(.bottom, DS.Spacing.xs)
 
             Text("WearIt")
@@ -134,34 +124,36 @@ struct WelcomeView: View {
     }
 
     private var capabilityRows: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            Text("Seamless Experience")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.white.opacity(0.5))
-                .textCase(.uppercase)
-                .tracking(1.5)
-                .padding(.horizontal, 4)
+        LiquidGlassGroup(spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Text("Seamless Experience")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .textCase(.uppercase)
+                    .tracking(1.5)
+                    .padding(.horizontal, 4)
 
-            CapabilityRow(
-                icon: "cloud.sun.fill",
-                iconTint: .blue,
-                title: "Weather Sync",
-                subtitle: "Plans match temperature & rain"
-            )
+                CapabilityRow(
+                    icon: "cloud.sun.fill",
+                    iconTint: .blue,
+                    title: "Weather Sync",
+                    subtitle: "Plans match temperature & rain"
+                )
 
-            CapabilityRow(
-                icon: "camera.fill",
-                iconTint: .purple,
-                title: "Photo Access",
-                subtitle: "Capture your real wardrobe"
-            )
+                CapabilityRow(
+                    icon: "camera.fill",
+                    iconTint: .purple,
+                    title: "Photo Access",
+                    subtitle: "Capture your real wardrobe"
+                )
 
-            CapabilityRow(
-                icon: "calendar.badge.checkmark",
-                iconTint: .orange,
-                title: "Smart Calendar",
-                subtitle: "Track looks & occasions"
-            )
+                CapabilityRow(
+                    icon: "calendar.badge.checkmark",
+                    iconTint: .orange,
+                    title: "Smart Calendar",
+                    subtitle: "Track looks & occasions"
+                )
+            }
         }
     }
 
@@ -213,15 +205,7 @@ private struct HeroTile: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-        .background(
-            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassSurface(cornerRadius: corner)
         .shadow(color: Color.black.opacity(0.25), radius: 16, x: 0, y: 10)
     }
 }
@@ -260,22 +244,7 @@ private struct CapabilityRow: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.22), Color.white.opacity(0.08)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.8
-                )
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassSurface(cornerRadius: 18)
         .shadow(color: Color.black.opacity(0.18), radius: 14, x: 0, y: 8)
     }
 }

@@ -67,9 +67,6 @@ struct GarmentPreview: View {
     
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-            
             if let image {
                 Image(uiImage: image)
                     .resizable()
@@ -89,6 +86,7 @@ struct GarmentPreview: View {
         }
         .aspectRatio(aspectRatio, contentMode: .fit)
         .frame(maxHeight: maxHeight)
+        .liquidGlassSurface(cornerRadius: 24)
     }
 }
 

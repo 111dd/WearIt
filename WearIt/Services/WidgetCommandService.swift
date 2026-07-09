@@ -8,6 +8,24 @@ struct WidgetCommand: Codable {
 }
 
 enum WidgetCommandService {
+    static func enqueueConfirmWorn(for date: Date) {
+        guard let defaults = UserDefaults(suiteName: WidgetSnapshotService.appGroupID) else {
+            return
+        }
+
+        let command = WidgetCommand(
+            type: "confirmWorn",
+            date: DateFormatter.widgetDate.string(from: date),
+            timestamp: Date()
+        )
+
+        guard let data = try? JSONEncoder().encode(command) else {
+            return
+        }
+
+        defaults.set(data, forKey: WidgetSnapshotService.commandKey)
+    }
+
     @MainActor static func consumeIfNeeded(context: ModelContext) {
         guard let defaults = UserDefaults(suiteName: WidgetSnapshotService.appGroupID),
               let data = defaults.data(forKey: WidgetSnapshotService.commandKey),

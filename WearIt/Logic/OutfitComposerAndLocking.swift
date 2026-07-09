@@ -48,12 +48,8 @@ enum OutfitComposer {
         // פרונינג פר־קטגוריה
         func pruned(_ arr: [Garment], n: Int) -> [Garment] {
             let ai = AIRecommender.shared
-            let s = ai.ensureState(context: modelContext)
-            let w = s.weights, b = s.bias
             func scoreItem(_ g: Garment) -> Double {
-                let x = ai.features(for: g, ctx: ctx)
-                var s = b; for i in 0..<x.count { s += w[i]*x[i] }
-                return 1.0 / (1.0 + exp(-s))
+                ai.score(g, ctx: ctx, modelContext: modelContext)
             }
             return arr
                 .map { ($0, scoreItem($0)) }
@@ -170,13 +166,9 @@ enum OutfitComposer {
     // ניקוד סט: ממוצע ניקוד לוגיסטי של כל פריט (אפשר לשפר בהמשך עם התאמות צבע/סגנון)
     private static func scoreSet(top: Garment, bottom: Garment, shoes: Garment, outer: Garment?, needOuter: Bool, ctx: RecoContext, modelContext: ModelContext) -> Double {
         let ai = AIRecommender.shared
-        let s = ai.ensureState(context: modelContext)
-        let w = s.weights, b = s.bias
 
         func scoreItem(_ g: Garment) -> Double {
-            let x = ai.features(for: g, ctx: ctx)
-            var z = b; for i in 0..<x.count { z += w[i] * x[i] }
-            return 1.0 / (1.0 + exp(-z))
+            ai.score(g, ctx: ctx, modelContext: modelContext)
         }
 
         var parts = [scoreItem(top), scoreItem(bottom), scoreItem(shoes)]
@@ -196,4 +188,3 @@ enum OutfitComposer {
         return base + styleBonus - outerPenalty
     }
 }
-

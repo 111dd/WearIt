@@ -13,8 +13,6 @@ struct StatsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LiquidGlassBackdrop()
-                
                 ScrollView {
                     VStack(spacing: DS.Spacing.md) {
                         // Quick Stats

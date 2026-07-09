@@ -188,8 +188,6 @@ struct AddGarmentView: View {
     
     private var imageSelectionView: some View {
         ZStack {
-            LiquidGlassBackdrop()
-            
             VStack(spacing: DS.Spacing.xl) {
                 Spacer()
                 
@@ -247,8 +245,6 @@ struct AddGarmentView: View {
     
     private var detailsFormView: some View {
         ZStack {
-            LiquidGlassBackdrop()
-            
             ScrollView {
                 VStack(spacing: DS.Spacing.md) {
                     // Image Preview with Title
@@ -349,9 +345,7 @@ struct AddGarmentView: View {
             }
             .padding(.top, 8)
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var categorySection: some View {
@@ -363,9 +357,10 @@ struct AddGarmentView: View {
                     .foregroundColor(.red)
             }
             
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 10) {
-                ForEach(Category.allCases) { cat in
-                    Button {
+            LiquidGlassGroup(spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 10) {
+                    ForEach(Category.allCases) { cat in
+                        Button {
                         feedback.impactOccurred(intensity: 0.5)
                         category = cat
                         // Reset item type when category changes
@@ -380,30 +375,28 @@ struct AddGarmentView: View {
                         } else if let current = sizeOption, !SizeOption.options(for: cat).contains(current) {
                             sizeOption = nil
                         }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: cat.icon)
-                                .font(.title2)
-                            Text(cat.title)
-                                .font(.caption2.bold())
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: cat.icon)
+                                    .font(.title2)
+                                Text(cat.title)
+                                    .font(.caption2.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .foregroundStyle(category == cat ? Color.accentColor : .primary)
+                            .liquidGlassSurface(
+                                cornerRadius: 12,
+                                interactive: true,
+                                tint: category == cat ? Color.accentColor.opacity(0.16) : nil
+                            )
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(category == cat ? Color.accentColor.opacity(0.15) : Color.clear)
-                        .foregroundStyle(category == cat ? Color.accentColor : .primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(category == cat ? Color.accentColor : Color.primary.opacity(0.1), lineWidth: category == cat ? 2 : 1)
-                        )
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var itemTypeSection: some View {
@@ -415,9 +408,7 @@ struct AddGarmentView: View {
                 ItemTypeSelector(category: cat, selectedType: $itemType)
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
 
     private var fitSizeSection: some View {
@@ -443,9 +434,7 @@ struct AddGarmentView: View {
                 )
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var colorSection: some View {
@@ -471,9 +460,7 @@ struct AddGarmentView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var brandSection: some View {
@@ -509,9 +496,7 @@ struct AddGarmentView: View {
                 }
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var seasonSection: some View {
@@ -532,9 +517,7 @@ struct AddGarmentView: View {
                 .font(.subheadline)
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var attributesSection: some View {
@@ -596,9 +579,7 @@ struct AddGarmentView: View {
                     .tint(.pink)
             }
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var advancedSection: some View {
@@ -613,9 +594,7 @@ struct AddGarmentView: View {
             }
             .padding(.top, 12)
         }
-        .padding(16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .liquidGlassSurface(cornerRadius: 20, padding: 16, castsShadow: true)
     }
     
     private var saveButton: some View {
@@ -625,12 +604,9 @@ struct AddGarmentView: View {
         } label: {
             Text(String(localized: "garment_add_title"))
                 .font(.headline)
-                .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(canSave ? Color.accentColor : Color.gray)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+        .dsPrimaryButton()
         .disabled(!canSave)
     }
     

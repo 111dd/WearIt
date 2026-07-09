@@ -41,8 +41,6 @@ struct OutfitView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                LiquidGlassBackdrop()
-                
                 ScrollView {
                     VStack(alignment: .leading, spacing: 28) {
 
@@ -451,10 +449,7 @@ struct OutfitView: View {
         AIRecommender.shared.learn(
             from: suggested,
             shown: shownCandidates,
-            ctx: .init(desiredFormality: Int(desiredFormality),
-                       temperatureC: temperatureC,
-                       isRaining: isRaining,
-                       now: .now),
+            ctx: currentContext(),
             reward: 0.0,
             modelContext: context
         )
@@ -519,11 +514,15 @@ struct OutfitView: View {
     }
 
     private func currentContext(now: Date = .now) -> RecoContext {
-        RecoContext(
+        let profile = currentUserProfile()
+        return RecoContext(
             desiredFormality: Int(desiredFormality),
             temperatureC: temperatureC,
             isRaining: isRaining,
-            now: now
+            now: now,
+            profileID: profile?.id,
+            warmthSensitivity: profile?.warmthSensitivity ?? 3,
+            rainTolerance: profile?.rainTolerance ?? 3
         )
     }
 
@@ -549,13 +548,6 @@ struct LockTile: View {
     var body: some View {
         VStack(spacing: 6) {
             ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5)
-                            .blendMode(.plusLighter)
-                    )
                 if let img = g.resolvedImage {
                     Image(uiImage: img)
                         .resizable()
@@ -582,7 +574,7 @@ struct LockTile: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
                         .padding(4)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .liquidGlassCircle()
                         .offset(x: 28, y: -28)
                 }
                 if isUnavailable {
@@ -594,6 +586,7 @@ struct LockTile: View {
                 }
             }
             .frame(width: 84, height: 84)
+            .liquidGlassSurface(cornerRadius: 14)
             .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
             Text(g.displayTitle)
                 .font(.caption2)
@@ -613,29 +606,23 @@ struct OutfitGrid: View {
         LazyVGrid(columns: columns, spacing: 12) {
             ForEach(items) { g in
                 VStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
-                                .blendMode(.plusLighter)
-                        )
-                        .overlay {
-                            if let img = g.resolvedImage {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding(10)
-                            } else {
-                                Image(systemName: "tshirt")
-                                    .resizable()
-                                    .scaledToFit()
-                                    .padding(16)
-                                    .foregroundStyle(.secondary)
-                            }
+                    ZStack {
+                        if let img = g.resolvedImage {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFit()
+                                .padding(10)
+                        } else {
+                            Image(systemName: "tshirt")
+                                .resizable()
+                                .scaledToFit()
+                                .padding(16)
+                                .foregroundStyle(.secondary)
                         }
-                        .frame(height: 110)
-                        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
+                    }
+                    .frame(height: 110)
+                    .liquidGlassSurface(cornerRadius: 14)
+                    .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 3)
                     Text(g.displayTitle)
                         .font(.caption)
                         .lineLimit(1)

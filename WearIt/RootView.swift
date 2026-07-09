@@ -9,6 +9,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var selected: AppTab = .planner
+    @State private var appIntentRouter = WearItAppIntentRouter.shared
     @State private var showSignInSheet = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
     enum AppTab: Hashable { case planner, calendar, wardrobe, add, stats, profile }
@@ -53,8 +54,6 @@ struct RootView: View {
                 }
             }
             .tint(.accentColor)
-            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
 
             if shouldShowSignInCTA {
                 signInBanner
@@ -62,15 +61,26 @@ struct RootView: View {
         }
         .onAppear {
             UIView.appearance(whenContainedInInstancesOf: [UITabBarController.self]).backgroundColor = .clear
+            handleIncomingSystemAction()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                WidgetCommandService.consumeIfNeeded(context: context)
+                handleIncomingSystemAction()
+            }
+        }
+        .onChange(of: appIntentRouter.pendingDestination) { _, _ in
+            handleIncomingSystemAction()
+        }
+        .onChange(of: appIntentRouter.pendingAction) { _, newAction in
+            if newAction != nil {
+                selected = .planner
             }
         }
         .onOpenURL { url in
             if url.host == "planner" {
                 selected = .planner
+            } else if url.host == "add" {
+                selected = .add
             } else if url.host == "confirm-worn" {
                 selected = .planner
                 NotificationCenter.default.post(name: .confirmWornFromWidget, object: nil)
@@ -78,6 +88,24 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+        }
+    }
+
+    @MainActor
+    private func handleIncomingSystemAction() {
+        WidgetCommandService.consumeIfNeeded(context: context)
+
+        switch appIntentRouter.consume() {
+        case .todayOutfit:
+            selected = .planner
+        case .addGarment:
+            selected = .add
+        case nil:
+            break
+        }
+
+        if appIntentRouter.pendingAction != nil {
+            selected = .planner
         }
     }
 
@@ -106,22 +134,13 @@ struct RootView: View {
                         .font(.caption.weight(.semibold))
                         .padding(.horizontal, DS.Spacing.sm)
                         .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                        )
+                        .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.12))
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
-            .background(.ultraThinMaterial)
-            .overlay(
-                Rectangle()
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                    .blendMode(.plusLighter)
-            )
+            .liquidGlassSurface(cornerRadius: 0, tint: Color.accentColor.opacity(0.035))
 
             Spacer()
         }

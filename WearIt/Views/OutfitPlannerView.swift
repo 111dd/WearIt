@@ -13,6 +13,7 @@ struct OutfitPlannerView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var weather: WeatherCenter
+    @EnvironmentObject private var auth: AuthManager
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
@@ -33,6 +34,7 @@ struct OutfitPlannerView: View {
     @State private var didRunWearHistoryDebug = false
     @State private var dirtyDayIndices: Set<Int> = []
     @State private var plannerSaveDebouncer = Debouncer(interval: 15.0)
+    @State private var appIntentRouter = WearItAppIntentRouter.shared
 
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
     private static let dayNameFormatter: DateFormatter = {
@@ -127,13 +129,15 @@ struct OutfitPlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
             flushDirtyPlans()
         }
+        .onChange(of: appIntentRouter.pendingAction) { _, newAction in
+            if newAction != nil {
+                performPendingIntentAction()
+            }
+        }
     }
 
     private var plannerContent: some View {
         ZStack {
-            LiquidGlassBackdrop()
-                .ignoresSafeArea()
-
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: DS.Spacing.xl) {
                     plannerHeader
@@ -171,7 +175,21 @@ struct OutfitPlannerView: View {
             await weather.refreshForecast(source: "OutfitPlannerView.handleAppear")
             boardState.updateForecasts(weather.forecasts)
             lastForecastSignature = forecastSignature(weather.forecasts)
-            generateAllOutfits(fillMissingOnly: true)
+            if appIntentRouter.pendingAction != nil {
+                performPendingIntentAction()
+            } else {
+                generateAllOutfits(fillMissingOnly: true)
+            }
+        }
+    }
+
+    private func performPendingIntentAction() {
+        guard let action = appIntentRouter.consumeAction() else { return }
+        switch action {
+        case .refreshTodayOutfit:
+            guard !boardState.days.isEmpty else { return }
+            selectedDayIndex = 0
+            refreshDay(0)
         }
     }
 
@@ -219,11 +237,7 @@ struct OutfitPlannerView: View {
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .frame(width: 36, height: 36)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                                )
+                                .liquidGlassCircle(interactive: true)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(String(localized: "planner_replace_single_item"))
@@ -372,6 +386,10 @@ struct OutfitPlannerView: View {
 
                 dayCardActions(for: dayIndex)
 
+                if !state.assignedGarmentIDs.isEmpty {
+                    feedbackSection(for: dayIndex)
+                }
+
                 if !isDetailsExpanded(dayIndex) {
                     recommendationPreview(for: dayIndex)
                 }
@@ -381,12 +399,7 @@ struct OutfitPlannerView: View {
                 }
             }
             .padding(DS.Spacing.sm)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                    .blendMode(.plusLighter)
-            )
+            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         }
     }
 
@@ -480,12 +493,7 @@ struct OutfitPlannerView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(6)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.6)
-                        .blendMode(.plusLighter)
-                )
+                .liquidGlassCircle(interactive: true)
         }
     }
 
@@ -501,32 +509,29 @@ struct OutfitPlannerView: View {
                 .padding(.horizontal, DS.Spacing.xs)
                 .padding(.vertical, 6)
                 .foregroundStyle(tint)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(tint.opacity(0.35), lineWidth: 0.6)
-                        .blendMode(.plusLighter)
-                )
+                .liquidGlassPill(interactive: true, tint: tint.opacity(0.10))
         }
         .buttonStyle(.plain)
     }
 
     private func dayCardActions(for dayIndex: Int) -> some View {
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: DS.Spacing.xs) {
-                confirmActionPill(dayIndex: dayIndex)
-                refreshActionPill(dayIndex: dayIndex)
-                Spacer()
-                recommendationsActionPill(dayIndex: dayIndex)
-            }
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+        return LiquidGlassGroup(spacing: DS.Spacing.xs) {
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: DS.Spacing.xs) {
                     confirmActionPill(dayIndex: dayIndex)
                     refreshActionPill(dayIndex: dayIndex)
-                }
-                HStack(spacing: DS.Spacing.xs) {
+                    Spacer()
                     recommendationsActionPill(dayIndex: dayIndex)
+                }
+
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        confirmActionPill(dayIndex: dayIndex)
+                        refreshActionPill(dayIndex: dayIndex)
+                    }
+                    HStack(spacing: DS.Spacing.xs) {
+                        recommendationsActionPill(dayIndex: dayIndex)
+                    }
                 }
             }
         }
@@ -593,11 +598,7 @@ struct OutfitPlannerView: View {
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.vertical, 6)
                 .foregroundStyle(tint)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                )
+                .liquidGlassPill(interactive: true, tint: tint.opacity(0.08))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
         }
@@ -714,11 +715,7 @@ struct OutfitPlannerView: View {
             }
             .padding(.horizontal, DS.Spacing.xs)
             .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-            )
+            .liquidGlassPill()
         } else {
             EmptyView()
         }
@@ -766,12 +763,7 @@ struct OutfitPlannerView: View {
         }
         .padding(.horizontal, DS.Spacing.xs)
         .padding(.vertical, DS.Spacing.xxs)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassPill()
     }
 
     private func detailHintRow(_ hint: PlannerHint) -> some View {
@@ -788,25 +780,22 @@ struct OutfitPlannerView: View {
 
     private func smartHintsView(hints: [PlannerHint]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Spacing.xs) {
-                ForEach(hints.prefix(3)) { hint in
-                    HStack(spacing: DS.Spacing.xxs) {
-                        Image(systemName: hint.iconName)
-                            .font(.caption2)
-                            .foregroundStyle(hintTintColor(for: hint.style))
-                        Text(hint.text)
-                            .font(.caption2)
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
+            LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    ForEach(hints.prefix(3)) { hint in
+                        HStack(spacing: DS.Spacing.xxs) {
+                            Image(systemName: hint.iconName)
+                                .font(.caption2)
+                                .foregroundStyle(hintTintColor(for: hint.style))
+                            Text(hint.text)
+                                .font(.caption2)
+                                .foregroundStyle(.primary)
+                                .lineLimit(2)
+                        }
+                        .padding(.horizontal, DS.Spacing.xs)
+                        .padding(.vertical, DS.Spacing.xxs)
+                        .liquidGlassPill()
                     }
-                    .padding(.horizontal, DS.Spacing.xs)
-                    .padding(.vertical, DS.Spacing.xxs)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
-                            .blendMode(.plusLighter)
-                    )
                 }
             }
         }
@@ -966,18 +955,11 @@ struct OutfitPlannerView: View {
         return Button {
             openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
         } label: {
-            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                        .strokeBorder(DS.Border.subtle, lineWidth: 0.8)
-                )
-                .overlay(
-                    Image(systemName: "plus")
-                        .font(.system(size: iconSize, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                )
+            Image(systemName: "plus")
+                .font(.system(size: iconSize, weight: .semibold))
+                .foregroundStyle(.secondary)
                 .frame(width: dimension, height: dimension)
+                .liquidGlassSurface(cornerRadius: DS.Radius.tile, interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "planner_add_new_item"))
@@ -995,11 +977,7 @@ struct OutfitPlannerView: View {
                 }
             }
             .padding(4)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-            )
+            .liquidGlassPill()
             .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
             .padding(4)
         }
@@ -1031,11 +1009,7 @@ struct OutfitPlannerView: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .foregroundStyle(.secondary)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-            )
+            .liquidGlassPill()
             .padding(4)
     }
 
@@ -1410,12 +1384,7 @@ struct OutfitPlannerView: View {
             Image(systemName: "plus")
                 .font(.caption.weight(.semibold))
                 .padding(10)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.6)
-                        .blendMode(.plusLighter)
-                )
+                .liquidGlassCircle(interactive: true)
         }
         .buttonStyle(.plain)
     }
@@ -1449,47 +1418,74 @@ struct OutfitPlannerView: View {
     private func feedbackSection(for dayIndex: Int) -> some View {
         let state = boardState.days[dayIndex]
         
-        return VStack(spacing: DS.Spacing.xs) {
-            Text(String(localized: "planner_what_do_you_think"))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-            
-            HStack(spacing: DS.Spacing.xs) {
-                FeedbackButton(
-                    label: String(localized: "planner_wear_this"),
-                    icon: "checkmark.seal.fill",
-                    color: .green,
-                    isSelected: state.feedback == .worn
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.xxs) {
+                Image(systemName: "sparkles")
+                    .font(.caption2)
+                    .foregroundStyle(.tint)
+                Text(String(localized: "planner_what_do_you_think"))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 96), spacing: DS.Spacing.xs)],
+                    alignment: .leading,
+                    spacing: DS.Spacing.xs
                 ) {
-                    submitFeedback(for: dayIndex, rating: .worn)
-                }
-                
-                FeedbackButton(
-                    label: String(localized: "planner_love_it"),
-                    icon: "heart.fill",
-                    color: .pink,
-                    isSelected: state.feedback == .loved
-                ) {
-                    submitFeedback(for: dayIndex, rating: .loved)
-                }
-                
-                FeedbackButton(
-                    label: String(localized: "planner_skip"),
-                    icon: "arrow.clockwise",
-                    color: .orange,
-                    isSelected: state.feedback == .rejected
-                ) {
-                    submitFeedback(for: dayIndex, rating: .rejected)
+                    FeedbackButton(
+                        label: String(localized: "planner_love_it"),
+                        icon: "heart.fill",
+                        color: .pink,
+                        isSelected: state.feedback == .loved
+                    ) {
+                        submitFeedback(for: dayIndex, rating: .loved)
+                    }
+
+                    FeedbackButton(
+                        label: String(localized: "planner_not_my_style"),
+                        icon: "arrow.clockwise",
+                        color: .orange,
+                        isSelected: state.feedback == .rejected
+                    ) {
+                        submitFeedback(for: dayIndex, rating: .rejected)
+                    }
+
+                    TempFeedbackButton(
+                        feedback: .tooWarm,
+                        isSelected: state.temperatureFeedback == .tooWarm
+                    ) {
+                        submitTemperatureFeedback(for: dayIndex, feedback: .tooWarm)
+                    }
+
+                    TempFeedbackButton(
+                        feedback: .tooCold,
+                        isSelected: state.temperatureFeedback == .tooCold
+                    ) {
+                        submitTemperatureFeedback(for: dayIndex, feedback: .tooCold)
+                    }
+
+                    LearningFeedbackChip(
+                        label: String(localized: "planner_too_formal"),
+                        icon: "briefcase.fill",
+                        color: .purple
+                    ) {
+                        submitFormalityFeedback(for: dayIndex, direction: -1)
+                    }
+
+                    LearningFeedbackChip(
+                        label: String(localized: "planner_too_casual"),
+                        icon: "tshirt.fill",
+                        color: .blue
+                    ) {
+                        submitFormalityFeedback(for: dayIndex, direction: 1)
+                    }
                 }
             }
         }
         .padding(DS.Spacing.sm)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                .blendMode(.plusLighter)
-        )
+        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.025))
     }
     
     // MARK: - Drag & Drop
@@ -1931,8 +1927,16 @@ struct OutfitPlannerView: View {
     }
 
     private var preferredFormality: Int {
-        let value = profiles.first?.preferredFormality ?? 3
-        return min(max(value, 1), 4)
+        let value = activeProfile?.preferredFormality ?? 3
+        return min(max(value, 1), 5)
+    }
+
+    private var activeProfile: UserProfile? {
+        if let userIdentifier = auth.userIdentifier,
+           let profile = profiles.first(where: { $0.userIdentifier == userIdentifier }) {
+            return profile
+        }
+        return profiles.first(where: { $0.userIdentifier == nil }) ?? profiles.first
     }
 
     private func cooldownDays(for category: Category, ctx: RecoContext) -> Int {
@@ -2051,8 +2055,9 @@ struct OutfitPlannerView: View {
 
     private func recoContext(for dayIndex: Int, isEvening: Bool = false) -> RecoContext {
         let state = boardState.days[dayIndex]
+        let profile = activeProfile
         let baseFormality = state.overrides.desiredFormality ?? preferredFormality
-        let desiredFormality = isEvening ? min(baseFormality + 1, 4) : baseFormality
+        let desiredFormality = isEvening ? min(baseFormality + 1, 5) : baseFormality
 
         let temperatureC: Double
         if isEvening, let forecast = state.forecast {
@@ -2065,7 +2070,11 @@ struct OutfitPlannerView: View {
             desiredFormality: desiredFormality,
             temperatureC: temperatureC,
             isRaining: state.effectiveIsRaining,
-            now: state.date
+            now: state.date,
+            profileID: profile?.id,
+            warmthSensitivity: profile?.warmthSensitivity ?? 3,
+            rainTolerance: profile?.rainTolerance ?? 3,
+            lookTime: isEvening ? .evening : .day
         )
     }
 
@@ -2572,6 +2581,9 @@ struct OutfitPlannerView: View {
                 }
             }
         }
+
+        boardState.days[dayIndex].feedback = plan.feedback
+        boardState.days[dayIndex].temperatureFeedback = plan.temperatureFeedback
     }
 
     /// Persist a day: debounced unless `immediate` (e.g. confirm worn/plan, or flush on background).
@@ -2626,6 +2638,12 @@ struct OutfitPlannerView: View {
         plan.setEveningSlotAssignments(eveningAssignments, lockedSlots: eveningLockedSlots)
         plan.setEveningLinkedSlots(day.eveningLinkedSlots)
         plan.eveningUsesDayBottom = day.eveningLinkedSlots.contains(.bottom)
+        if let feedback = day.feedback {
+            plan.setFeedback(feedback)
+        }
+        if let temperatureFeedback = day.temperatureFeedback {
+            plan.setTemperatureFeedback(temperatureFeedback)
+        }
         try? context.save()
 
         if Calendar.current.isDateInToday(day.date) {
@@ -2649,27 +2667,137 @@ struct OutfitPlannerView: View {
     }
     
     private func submitFeedback(for dayIndex: Int, rating: OutfitFeedbackRating) {
+        guard dayIndex < boardState.days.count else { return }
+        let previousRating = boardState.days[dayIndex].feedback
+        guard previousRating != rating else { return }
         DS.haptic(0.5)
         boardState.days[dayIndex].feedback = rating
         
         // Update garment love scores
         let garmentIDs = boardState.days[dayIndex].assignedGarmentIDs
         for garment in allGarments where garmentIDs.contains(garment.id) {
-            let delta: Int
-            switch rating {
-            case .loved: delta = 5
-            case .worn: delta = 2
-            case .rejected: delta = -3
-            case .neutral: delta = 0
-            }
+            let delta = loveScoreAdjustment(for: rating) - loveScoreAdjustment(for: previousRating)
             garment.loveScore = max(0, min(100, garment.loveScore + delta))
         }
-        
+
+        let reward: Double
+        switch rating {
+        case .loved: reward = 0.92
+        case .worn: reward = 0.75
+        case .rejected: reward = 0.18
+        case .neutral: reward = 0.5
+        }
+        let kind: RecommendationFeedbackKind
+        switch rating {
+        case .loved: kind = .loved
+        case .rejected: kind = .notMyStyle
+        case .worn: kind = .worn
+        case .neutral: kind = .justRight
+        }
+        learnFromPlannerFeedback(dayIndex: dayIndex, kind: kind, reward: reward)
+        persistDayPlan(dayIndex, immediate: true)
         try? context.save()
         
         if rating == .rejected {
             refreshDay(dayIndex)
         }
+    }
+
+    private func submitTemperatureFeedback(for dayIndex: Int, feedback: TemperatureFeedback) {
+        guard dayIndex < boardState.days.count else { return }
+        guard boardState.days[dayIndex].temperatureFeedback != feedback else { return }
+        DS.haptic(0.4)
+        boardState.days[dayIndex].temperatureFeedback = feedback
+
+        let kind: RecommendationFeedbackKind
+        switch feedback {
+        case .tooWarm: kind = .tooWarm
+        case .tooCold: kind = .tooCold
+        case .justRight:
+            learnFromPlannerFeedback(dayIndex: dayIndex, kind: .justRight, reward: 0.7)
+            persistDayPlan(dayIndex, immediate: true)
+            return
+        }
+        applyDirectionalFeedback(dayIndex: dayIndex, kind: kind)
+        persistDayPlan(dayIndex, immediate: true)
+    }
+
+    private func submitFormalityFeedback(for dayIndex: Int, direction: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        let kind: RecommendationFeedbackKind = direction < 0 ? .tooFormal : .tooCasual
+        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+        DS.haptic(0.4)
+        let current = boardState.days[dayIndex].overrides.desiredFormality ?? preferredFormality
+        boardState.days[dayIndex].overrides.desiredFormality = min(max(current + direction, 1), 5)
+        boardState.days[dayIndex].feedback = .rejected
+        AIRecommender.shared.applyDirectionalFeedback(
+            kind,
+            ctx: recoContext(for: dayIndex),
+            modelContext: context
+        )
+        persistDayPlan(dayIndex, immediate: true)
+        refreshDay(dayIndex)
+    }
+
+    private func loveScoreAdjustment(for rating: OutfitFeedbackRating?) -> Int {
+        switch rating {
+        case .loved: return 5
+        case .worn: return 2
+        case .rejected: return -3
+        case .neutral, nil: return 0
+        }
+    }
+
+    private func learnFromPlannerFeedback(
+        dayIndex: Int,
+        kind: RecommendationFeedbackKind,
+        reward: Double
+    ) {
+        guard dayIndex < boardState.days.count else { return }
+        let day = boardState.days[dayIndex]
+        let selected = day.assignedGarmentIDs.compactMap { id in
+            allGarments.first { $0.id == id }
+        }
+        guard !selected.isEmpty else { return }
+        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+
+        let ctx = recoContext(for: dayIndex)
+        AIRecommender.shared.learn(
+            from: selected,
+            shown: nil,
+            ctx: ctx,
+            reward: reward,
+            modelContext: context
+        )
+    }
+
+    private func applyDirectionalFeedback(dayIndex: Int, kind: RecommendationFeedbackKind) {
+        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+        AIRecommender.shared.applyDirectionalFeedback(
+            kind,
+            ctx: recoContext(for: dayIndex),
+            modelContext: context
+        )
+    }
+
+    private func recordLearningEvent(
+        dayIndex: Int,
+        kind: RecommendationFeedbackKind
+    ) -> Bool {
+        guard dayIndex < boardState.days.count else { return false }
+        let day = boardState.days[dayIndex]
+        let garmentIDs = day.assignedGarmentIDs
+        guard !garmentIDs.isEmpty else { return false }
+        let plan = DayPlanService.shared.planFor(date: day.date, context: context)
+
+        return RecommendationEventStore.record(
+            kind: kind,
+            selectedGarmentIDs: garmentIDs,
+            shownGarmentIDs: garmentIDs,
+            dayPlanID: plan.id,
+            context: recoContext(for: dayIndex),
+            modelContext: context
+        )
     }
     
     private func markUnavailable(_ garment: Garment) {
@@ -2734,6 +2862,7 @@ struct OutfitPlannerView: View {
             incrementTimesWorn: true,
             loveScoreDelta: 1
         )
+        learnFromPlannerFeedback(dayIndex: dayIndex, kind: .worn, reward: 0.82)
         DS.haptic(0.4)
 
         if Calendar.current.isDateInToday(date) {
@@ -3076,11 +3205,7 @@ struct OutfitPlannerView: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .foregroundStyle(.secondary)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                            )
+                            .liquidGlassPill()
                             .padding(4)
                     }
                 }
@@ -3098,11 +3223,7 @@ struct OutfitPlannerView: View {
                 }
             }
             .padding(DS.Spacing.xs)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
-                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-            )
+            .liquidGlassSurface(cornerRadius: DS.Radius.sm)
         }
 
         private func badgeText(for status: AvailabilityStatus) -> String? {
@@ -3150,7 +3271,7 @@ struct OutfitPlannerView: View {
     }
 
     private var greetingLine: String {
-        let name = profiles.first?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = activeProfile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if name.isEmpty {
             return greetingTitle
         }
@@ -3345,21 +3466,39 @@ struct FeedbackButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, DS.Spacing.xs)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
-                    .fill(color.opacity(isSelected ? 0.18 : 0))
-            )
             .foregroundStyle(isSelected ? color : .primary)
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
-                    .strokeBorder(isSelected ? color.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 0.6)
-                    .blendMode(.plusLighter)
+            .liquidGlassSurface(
+                cornerRadius: DS.Radius.sm,
+                interactive: true,
+                tint: isSelected ? color.opacity(0.18) : nil
             )
         }
         .buttonStyle(.plain)
         .animation(DS.Animation.fast, value: isSelected)
+    }
+}
+
+private struct LearningFeedbackChip: View {
+    let label: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            DS.haptic(0.3)
+            action()
+        } label: {
+            Label(label, systemImage: icon)
+                .font(.caption2.weight(.medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.vertical, DS.Spacing.xs)
+                .foregroundStyle(color)
+                .liquidGlassPill(interactive: true, tint: color.opacity(0.10))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -3383,13 +3522,11 @@ struct TempFeedbackButton: View {
             }
             .padding(.horizontal, DS.Spacing.sm)
             .padding(.vertical, DS.Spacing.xxs)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .fill(Color.accentColor.opacity(isSelected ? 0.18 : 0))
-            )
             .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-            .clipShape(Capsule())
+            .liquidGlassPill(
+                interactive: true,
+                tint: isSelected ? Color.accentColor.opacity(0.18) : nil
+            )
         }
         .buttonStyle(.plain)
     }

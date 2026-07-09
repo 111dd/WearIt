@@ -296,15 +296,6 @@
 			);
 			mainGroup = 3781B3302E6A5B120064BE46;
 			minimizedProjectReferenceProxies = 1;
-			packageReferences = (
-				37CDD55A2F0048F800CBED5D /* XCRemoteSwiftPackageReference "Mantis" */,
-				37CDD55D2F004AB900CBED5D /* XCRemoteSwiftPackageReference "SwiftUIX" */,
-				37CDD55E2F004AE700CBED5D /* XCRemoteSwiftPackageReference "Kingfisher" */,
-				37CDD55F2F004B0F00CBED5D /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */,
-				37CDD5622F004B3600CBED5D /* XCRemoteSwiftPackageReference "Alamofire" */,
-				37CDD5672F004B5F00CBED5D /* XCRemoteSwiftPackageReference "apollo-ios" */,
-				37AD54A82F006C330090F22F /* XCRemoteSwiftPackageReference "ml-mobileclip" */,
-			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3781B33A2E6A5B120064BE46 /* Products */;
 			projectDirPath = "";
@@ -408,7 +399,7 @@
 				INFOPLIST_FILE = WearItWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WearItWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -442,7 +433,7 @@
 				INFOPLIST_FILE = WearItWidget/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WearItWidget;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -796,65 +787,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		37AD54A82F006C330090F22F /* XCRemoteSwiftPackageReference "ml-mobileclip" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/ml-mobileclip";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
-		37CDD55A2F0048F800CBED5D /* XCRemoteSwiftPackageReference "Mantis" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/guoyingtao/Mantis";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.7.5;
-			};
-		};
-		37CDD55D2F004AB900CBED5D /* XCRemoteSwiftPackageReference "SwiftUIX" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/SwiftUIX/SwiftUIX";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.2.4;
-			};
-		};
-		37CDD55E2F004AE700CBED5D /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/onevcat/Kingfisher";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 8.6.2;
-			};
-		};
-		37CDD55F2F004B0F00CBED5D /* XCRemoteSwiftPackageReference "SDWebImageSwiftUI" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/SDWebImage/SDWebImageSwiftUI";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 3.1.4;
-			};
-		};
-		37CDD5622F004B3600CBED5D /* XCRemoteSwiftPackageReference "Alamofire" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Alamofire/Alamofire";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.11.0;
-			};
-		};
-		37CDD5672F004B5F00CBED5D /* XCRemoteSwiftPackageReference "apollo-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apollographql/apollo-ios";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.0.4;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = 3781B3312E6A5B120064BE46 /* Project object */;
 }

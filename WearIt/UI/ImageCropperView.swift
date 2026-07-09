@@ -110,8 +110,7 @@ struct ImageCropperView: View {
                 .padding(.leading, 6)
         }
         .padding(10)
-        .background(.ultraThinMaterial)
-        .clipShape(Capsule())
+        .liquidGlassPill()
     }
 
     private func imageView(in container: CGSize) -> some View {
@@ -288,4 +287,3 @@ struct ImageCropperView: View {
         }
     }
 }
-

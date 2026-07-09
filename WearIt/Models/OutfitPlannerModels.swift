@@ -58,9 +58,9 @@ enum TemperatureFeedback: String, Codable, CaseIterable, Identifiable {
     
     var label: String {
         switch self {
-        case .tooCold: return "Too cold"
-        case .justRight: return "Just right"
-        case .tooWarm: return "Too warm"
+        case .tooCold: return String(localized: "planner_too_cold")
+        case .justRight: return String(localized: "planner_just_right")
+        case .tooWarm: return String(localized: "planner_too_warm")
         }
     }
     

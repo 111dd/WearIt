@@ -11,9 +11,6 @@ struct SignInView: View {
 
     var body: some View {
         ZStack {
-            // Liquid glass backdrop (משתמש ב-backdrop הגלובלי)
-            LiquidGlassBackdrop()
-
             VStack(spacing: 32) {
                 Spacer()
 

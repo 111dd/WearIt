@@ -1,0 +1,10 @@
+"Open today's outfit in ${applicationName}" = "פתח את הלוק של היום ב־${applicationName}";
+"Show my outfit in ${applicationName}" = "הצג את הלוק שלי ב־${applicationName}";
+"Add a garment in ${applicationName}" = "הוסף פריט לבוש ב־${applicationName}";
+"Add clothes to ${applicationName}" = "הוסף בגד ל־${applicationName}";
+"Mark today's outfit as worn in ${applicationName}" = "סמן את הלוק של היום כנלבש ב־${applicationName}";
+"I wore my outfit in ${applicationName}" = "לבשתי את הלוק שלי ב־${applicationName}";
+"What's my outfit in ${applicationName}" = "מה הלוק שלי היום ב־${applicationName}";
+"Read today's outfit in ${applicationName}" = "הקרא את הלוק של היום ב־${applicationName}";
+"Suggest another outfit in ${applicationName}" = "הצע לוק אחר ב־${applicationName}";
+"Give me another outfit in ${applicationName}" = "תן לי לוק אחר ב־${applicationName}";

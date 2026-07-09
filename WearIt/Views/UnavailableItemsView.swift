@@ -28,6 +28,7 @@ struct UnavailableItemsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var weather: WeatherCenter
+    @EnvironmentObject private var auth: AuthManager
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
     @Query(sort: \WearEvent.date, order: .reverse) private var wearEvents: [WearEvent]
@@ -52,15 +53,27 @@ struct UnavailableItemsView: View {
     }
 
     private var recoContext: RecoContext {
-        let preferredFormality = profiles.first?.preferredFormality ?? 3
+        let profile = activeProfile
+        let preferredFormality = profile?.preferredFormality ?? 3
         let temperatureC = weather.forecasts.first?.temperatureC ?? weather.currentTempC ?? 18
         let isRaining = weather.forecasts.first?.isRaining ?? weather.isRainingNow
         return RecoContext(
-            desiredFormality: min(max(preferredFormality, 1), 4),
+            desiredFormality: min(max(preferredFormality, 1), 5),
             temperatureC: temperatureC,
             isRaining: isRaining,
-            now: currentDate
+            now: currentDate,
+            profileID: profile?.id,
+            warmthSensitivity: profile?.warmthSensitivity ?? 3,
+            rainTolerance: profile?.rainTolerance ?? 3
         )
+    }
+
+    private var activeProfile: UserProfile? {
+        if let userIdentifier = auth.userIdentifier,
+           let profile = profiles.first(where: { $0.userIdentifier == userIdentifier }) {
+            return profile
+        }
+        return profiles.first(where: { $0.userIdentifier == nil }) ?? profiles.first
     }
 
     private func count(for segment: AvailabilitySegment) -> Int {

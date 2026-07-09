@@ -10,6 +10,7 @@ struct ProfileView: View {
 
     @Query<UserProfile> private var users: [UserProfile]
     @Query<NotificationPreferences> private var notificationPrefs: [NotificationPreferences]
+    @Query<RecoState> private var recoStates: [RecoState]
 
     @State private var avatarEmoji: String = "🧑🏻"
     @State private var displayName: String = ""
@@ -20,6 +21,7 @@ struct ProfileView: View {
     @State private var rainTolerance: Int = 3
     @State private var showSignInSheet = false
     @State private var showSignOutDialog = false
+    @State private var showResetLearningDialog = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
 
     @State private var currentDate: Date = Date()
@@ -30,14 +32,11 @@ struct ProfileView: View {
 
     var body: some View {
         ZStack {
-            LiquidGlassBackdrop()
-                .ignoresSafeArea()
-            
             ScrollView {
                 VStack(spacing: DS.Spacing.lg) {
                     heroProfileCard
                     accountCard
-                    algorithmSection
+                    tasteLearningSection
                     notificationsSection
                     dataManagementSection
                     languageSection
@@ -114,6 +113,19 @@ struct ProfileView: View {
         } message: {
             Text(String(localized: "profile_signout_message"))
         }
+        .confirmationDialog(
+            String(localized: "profile_reset_learning_title"),
+            isPresented: $showResetLearningDialog,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "profile_reset_learning_confirm"), role: .destructive) {
+                AIRecommender.shared.resetLearning(profileID: activeProfileID, modelContext: context)
+                RecommendationEventStore.removeAll(profileID: activeProfileID, modelContext: context)
+            }
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "profile_reset_learning_message"))
+        }
     }
 
     // MARK: - Sections
@@ -122,12 +134,6 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack(alignment: .center, spacing: DS.Spacing.md) {
                 ZStack {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(DS.Border.subtle, lineWidth: 0.8)
-                        )
                     if avatarEmoji.isEmpty {
                         Image(systemName: "person.crop.circle.fill")
                             .font(.system(size: 36))
@@ -138,6 +144,7 @@ struct ProfileView: View {
                     }
                 }
                 .frame(width: 72, height: 72)
+                .liquidGlassCircle()
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(displayNameText)
@@ -165,11 +172,7 @@ struct ProfileView: View {
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, DS.Spacing.sm)
                     .padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                    )
+                    .liquidGlassPill()
                     .disabled(true)
                     .opacity(0.5)
             }
@@ -203,11 +206,7 @@ struct ProfileView: View {
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, DS.Spacing.sm)
                             .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                            )
+                            .liquidGlassPill(interactive: true)
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -218,11 +217,7 @@ struct ProfileView: View {
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, DS.Spacing.sm)
                             .padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                            )
+                            .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.10))
                     }
                     .buttonStyle(.plain)
                 }
@@ -271,19 +266,32 @@ struct ProfileView: View {
         .dsCard()
     }
 
-    private var algorithmSection: some View {
+    private var tasteLearningSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_algorithm_title"), icon: "sparkles")
+            DSSectionHeader(String(localized: "profile_taste_title"), icon: "sparkles")
 
-            Text(String(localized: "profile_algorithm_intro"))
+            Text(String(localized: "profile_taste_intro"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 120), spacing: DS.Spacing.xs)],
+                    alignment: .leading,
+                    spacing: DS.Spacing.xs
+                ) {
+                    TasteInsightChip(icon: "briefcase", text: formalityInsight)
+                    TasteInsightChip(icon: "thermometer.medium", text: warmthInsight)
+                    TasteInsightChip(icon: "umbrella", text: rainInsight)
+                }
+            }
+            .padding(.vertical, DS.Spacing.xxs)
 
             PreferenceRow(
                 label: String(localized: "profile_formality"),
                 icon: "briefcase",
                 value: $preferredFormality,
-                range: 1...4,
+                range: 1...5,
                 labels: [String(localized: "profile_casual"), String(localized: "profile_elegant")]
             )
 
@@ -302,6 +310,32 @@ struct ProfileView: View {
                 range: 1...5,
                 labels: [String(localized: "profile_dont_care"), String(localized: "profile_prefer_dry")]
             )
+
+            Divider()
+
+            HStack(alignment: .center, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_learning_status_title"))
+                        .font(.subheadline.weight(.medium))
+                    Text(learningStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    showResetLearningDialog = true
+                } label: {
+                    Label(String(localized: "profile_reset_learning"), systemImage: "arrow.counterclockwise")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.vertical, 6)
+                .liquidGlassPill(interactive: true)
+            }
         }
         .dsCard()
     }
@@ -455,6 +489,43 @@ struct ProfileView: View {
         return String(localized: "profile_icloud_signin_separate")
     }
 
+    private var formalityInsight: String {
+        if preferredFormality <= 2 { return String(localized: "profile_taste_casual") }
+        if preferredFormality >= 4 { return String(localized: "profile_taste_elegant") }
+        return String(localized: "profile_taste_balanced")
+    }
+
+    private var warmthInsight: String {
+        if warmthSensitivity <= 2 { return String(localized: "profile_taste_cool_resistant") }
+        if warmthSensitivity >= 4 { return String(localized: "profile_taste_cold_sensitive") }
+        return String(localized: "profile_taste_medium_warmth")
+    }
+
+    private var rainInsight: String {
+        if rainTolerance <= 2 { return String(localized: "profile_taste_rain_flexible") }
+        if rainTolerance >= 4 { return String(localized: "profile_taste_prefers_dry") }
+        return String(localized: "profile_taste_medium_rain")
+    }
+
+    private var learningStatusText: String {
+        let count = activeRecoState?.interactionCount ?? 0
+        if count == 0 { return String(localized: "profile_learning_status_empty") }
+        return String(format: NSLocalizedString("profile_learning_status_count", comment: ""), count)
+    }
+
+    private var activeProfileID: UUID? {
+        if let userIdentifier = auth.userIdentifier,
+           let profile = users.first(where: { $0.userIdentifier == userIdentifier }) {
+            return profile.id
+        }
+        return users.first(where: { $0.userIdentifier == nil })?.id ?? users.first?.id
+    }
+
+    private var activeRecoState: RecoState? {
+        recoStates.first(where: { $0.profileID == activeProfileID })
+            ?? recoStates.first(where: { $0.profileID == nil && $0.id == "global" })
+    }
+
     #if DEBUG
     private var debugSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
@@ -556,40 +627,13 @@ struct ProfileView: View {
     // MARK: - Data
 
     private func loadOrCreateUser() {
-        guard let uid = auth.userIdentifier else {
-            avatarEmoji = "🧑🏻"
-            displayName = ""
-            email = auth.email ?? ""
-            phone = ""
-            preferredFormality = 3
-            warmthSensitivity = 3
-            rainTolerance = 3
-            return
-        }
-        
-        let fd = FetchDescriptor<UserProfile>(
-            predicate: #Predicate { $0.userIdentifier == uid },
-            sortBy: [SortDescriptor(\.createdAt)]
-        )
-        
-        if let results = try? context.fetch(fd), let me = results.first {
+        let uid = auth.userIdentifier
+        let me = fetchOrCreateProfile(userIdentifier: uid)
+
+        if uid != nil || me.userIdentifier == nil {
             avatarEmoji = me.avatarEmoji ?? "🧑🏻"
             displayName = me.displayName
             email = me.email ?? (auth.email ?? "")
-            phone = me.phone ?? ""
-            preferredFormality = me.preferredFormality
-            warmthSensitivity = me.warmthSensitivity
-            rainTolerance = me.rainTolerance
-        } else {
-            let me = UserProfile()
-            me.userIdentifier = uid
-            me.displayName = auth.displayName ?? String(localized: "profile_default_name")
-            me.email = auth.email
-            context.insert(me)
-            try? context.save()
-            avatarEmoji = me.avatarEmoji ?? "🧑🏻"
-            displayName = me.displayName
-            email = me.email ?? ""
             phone = me.phone ?? ""
             preferredFormality = me.preferredFormality
             warmthSensitivity = me.warmthSensitivity
@@ -598,22 +642,7 @@ struct ProfileView: View {
     }
 
     private func saveProfile() {
-        guard let uid = auth.userIdentifier else { return }
-        
-        let fd = FetchDescriptor<UserProfile>(
-            predicate: #Predicate { $0.userIdentifier == uid },
-            sortBy: [SortDescriptor(\.createdAt)]
-        )
-        
-        let me: UserProfile
-        if let results = try? context.fetch(fd), let existing = results.first {
-            me = existing
-        } else {
-            let new = UserProfile()
-            new.userIdentifier = uid
-            context.insert(new)
-            me = new
-        }
+        let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
 
         me.avatarEmoji = avatarEmoji.isEmpty ? "🧑🏻" : avatarEmoji
         me.displayName = displayName.isEmpty ? (auth.displayName ?? String(localized: "profile_default_name")) : displayName
@@ -626,9 +655,46 @@ struct ProfileView: View {
         try? context.save()
     }
 
+    private func fetchOrCreateProfile(userIdentifier uid: String?) -> UserProfile {
+        let fd = FetchDescriptor<UserProfile>(
+            sortBy: [SortDescriptor(\.createdAt)]
+        )
+
+        if let results = try? context.fetch(fd),
+           let existing = results.first(where: { $0.userIdentifier == uid }) {
+            return existing
+        }
+
+        let new = UserProfile()
+        new.userIdentifier = uid
+        new.displayName = auth.displayName ?? String(localized: "profile_default_name")
+        new.email = auth.email
+        context.insert(new)
+        try? context.save()
+        return new
+    }
+
     private func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
+    }
+}
+
+// MARK: - Taste Insight Chip
+
+private struct TasteInsightChip: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.semibold))
+            .lineLimit(2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, DS.Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassPill()
     }
 }
 
@@ -655,11 +721,7 @@ private struct PreferenceRow: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, DS.Spacing.xs)
                     .padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                    )
+                    .liquidGlassPill()
             }
             
             HStack {

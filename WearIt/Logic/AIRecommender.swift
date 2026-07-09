@@ -17,20 +17,28 @@ import CoreGraphics
 
 @Model final class RecoState {
     var id: String = "global"
-    var version: Int = 1
+    var version: Int = 2
+    var profileID: UUID?
     var weights: [Double] = []
     var bias: Double = 0.0
     var epsilon: Double = 0.0      // exploration rate (0 = stable, 0.1 = some exploration)
     var lr: Double = 0.08          // learning rate
+    var learnedWarmthOffset: Double = 0.0
+    var learnedFormalityOffset: Double = 0.0
     
     /// Track how many times user has given feedback. Optional for migration compatibility.
     var totalInteractions: Int?
 
-    init(size: Int) {
+    init(size: Int, profileID: UUID? = nil) {
+        self.id = profileID.map { "profile-\($0.uuidString)" } ?? "global"
+        self.version = 2
+        self.profileID = profileID
         self.weights = Array(repeating: 0.0, count: size)
         self.bias = 0.0
         self.epsilon = 0.0   // MVP: No randomness by default
         self.lr = 0.08
+        self.learnedWarmthOffset = 0
+        self.learnedFormalityOffset = 0
         self.totalInteractions = 0
     }
     
@@ -72,8 +80,12 @@ enum FeatureSpace {
     // Cold-start helpers
     static let iNeverWorn     = iShoesInRain + 1 // never been worn (boost new items)
     static let iFavorite      = iNeverWorn + 1   // is favorite
-    
-    static let total          = iFavorite + 1
+    static let iTempInRange   = iFavorite + 1    // explicit temperature suitability
+    static let iWarmthTaste   = iTempInRange + 1 // explicit profile warmth preference
+    static let iRainTaste     = iWarmthTaste + 1 // explicit rain avoidance preference
+    static let iEvening       = iRainTaste + 1   // evening look context
+
+    static let total          = iEvening + 1
 }
 
 // MARK: - Recommendation Context
@@ -83,12 +95,44 @@ struct RecoContext {
     let temperatureC: Double
     let isRaining: Bool
     let now: Date
+    let profileID: UUID?
+    let warmthSensitivity: Int
+    let rainTolerance: Int
+    let lookTime: LookTime
+
+    init(
+        desiredFormality: Int,
+        temperatureC: Double,
+        isRaining: Bool,
+        now: Date,
+        profileID: UUID? = nil,
+        warmthSensitivity: Int = 3,
+        rainTolerance: Int = 3,
+        lookTime: LookTime = .day
+    ) {
+        self.desiredFormality = min(max(desiredFormality, 1), 5)
+        self.temperatureC = temperatureC
+        self.isRaining = isRaining
+        self.now = now
+        self.profileID = profileID
+        self.warmthSensitivity = min(max(warmthSensitivity, 1), 5)
+        self.rainTolerance = min(max(rainTolerance, 1), 5)
+        self.lookTime = lookTime
+    }
     
     // Temperature bucket helpers
     var isCold: Bool { temperatureC < 10 }
     var isMild: Bool { temperatureC >= 10 && temperatureC < 20 }
     var isWarm: Bool { temperatureC >= 20 && temperatureC < 28 }
     var isHot: Bool { temperatureC >= 28 }
+
+    var warmthTaste: Double {
+        Double(warmthSensitivity - 3) / 2.0
+    }
+
+    var rainAvoidance: Double {
+        Double(rainTolerance - 1) / 4.0
+    }
 }
 
 // MARK: - AI Recommender
@@ -99,25 +143,50 @@ final class AIRecommender {
 
     // MARK: - State Management
 
-    func ensureState(context: ModelContext) -> RecoState {
-        if let s = try? context.fetch(FetchDescriptor<RecoState>()).first {
-            // Migrate if feature space changed
-            if s.weights.count != FeatureSpace.total {
-                s.weights = Array(repeating: 0.0, count: FeatureSpace.total)
-            }
-            // MVP: Keep epsilon at 0 for stability
-            s.epsilon = 0.0
-            return s
+    func ensureState(context: ModelContext, profileID: UUID? = nil) -> RecoState {
+        let states = (try? context.fetch(FetchDescriptor<RecoState>())) ?? []
+
+        if let matching = states.first(where: { $0.profileID == profileID && (profileID != nil || $0.id == "global") }) {
+            migrateStateIfNeeded(matching)
+            return matching
         }
-        let st = RecoState(size: FeatureSpace.total)
+
+        if let profileID,
+           let legacy = states.first(where: { $0.profileID == nil && $0.id == "global" }) {
+            legacy.profileID = profileID
+            legacy.id = "profile-\(profileID.uuidString)"
+            migrateStateIfNeeded(legacy)
+            try? context.save()
+            return legacy
+        }
+
+        let st = RecoState(size: FeatureSpace.total, profileID: profileID)
         context.insert(st)
         try? context.save()
         return st
     }
 
+    private func migrateStateIfNeeded(_ state: RecoState) {
+        if state.weights.count < FeatureSpace.total {
+            state.weights.append(contentsOf: repeatElement(0.0, count: FeatureSpace.total - state.weights.count))
+        } else if state.weights.count > FeatureSpace.total {
+            state.weights = Array(state.weights.prefix(FeatureSpace.total))
+        }
+        state.version = 2
+    }
+
     // MARK: - Feature Extraction
 
     func features(for g: Garment, ctx: RecoContext) -> [Double] {
+        features(for: g, ctx: ctx, warmthOffset: 0, formalityOffset: 0)
+    }
+
+    private func features(
+        for g: Garment,
+        ctx: RecoContext,
+        warmthOffset: Double,
+        formalityOffset: Double
+    ) -> [Double] {
         var x = Array(repeating: 0.0, count: FeatureSpace.total)
 
         // 1) One-hot category
@@ -126,15 +195,16 @@ final class AIRecommender {
         }
 
         // 2) Warmth match (based on temperature)
-        let targetWarmth: Int
+        let baseTargetWarmth: Double
         switch ctx.temperatureC {
-        case ..<8:   targetWarmth = 5
-        case ..<14:  targetWarmth = 4
-        case ..<20:  targetWarmth = 3
-        case ..<26:  targetWarmth = 2
-        default:     targetWarmth = 1
+        case ..<8:   baseTargetWarmth = 5
+        case ..<14:  baseTargetWarmth = 4
+        case ..<20:  baseTargetWarmth = 3
+        case ..<26:  baseTargetWarmth = 2
+        default:     baseTargetWarmth = 1
         }
-        let warmthDelta = abs(Double(g.warmth - targetWarmth))
+        let targetWarmth = min(max(baseTargetWarmth + (ctx.warmthTaste * 0.5) + warmthOffset, 1), 5)
+        let warmthDelta = abs(Double(g.warmth) - targetWarmth)
         x[FeatureSpace.iWarmthMatch] = max(0, 1.0 - warmthDelta / 4.0)
 
         // Fit comfort adjustments (light penalty in cold/hot extremes)
@@ -149,7 +219,8 @@ final class AIRecommender {
         }
 
         // 3) Formality match
-        let formalDelta = abs(Double(g.formality - ctx.desiredFormality))
+        let targetFormality = min(max(Double(ctx.desiredFormality) + formalityOffset, 1), 5)
+        let formalDelta = abs(Double(g.formality) - targetFormality)
         x[FeatureSpace.iFormalMatch] = max(0, 1.0 - formalDelta / 4.0)
 
         // 4) Love score
@@ -180,7 +251,7 @@ final class AIRecommender {
         }
         // Shoes in rain (penalize formal shoes)
         if g.category == .shoes && ctx.isRaining && g.formality >= 4 {
-            x[FeatureSpace.iShoesInRain] = -1.0  // Negative = penalty
+            x[FeatureSpace.iShoesInRain] = -(0.5 + ctx.rainAvoidance)
         }
 
         // 9) Cold-start helpers
@@ -190,8 +261,7 @@ final class AIRecommender {
         // 10) Temperature suitability (using garment's temp range)
         let tempRange = g.effectiveTempRange
         if ctx.temperatureC >= tempRange.min && ctx.temperatureC <= tempRange.max {
-            // Perfect temperature match - strong bonus
-            x[FeatureSpace.iNeverWorn] += 0.3  // Reuse slot for bonus (temp hack)
+            x[FeatureSpace.iTempInRange] = 1.0
         } else {
             // Calculate how far outside the range
             let distanceOutside: Double
@@ -203,6 +273,21 @@ final class AIRecommender {
             // Penalty based on distance (max penalty at 15°C outside range)
             let penalty = min(0.5, distanceOutside / 30.0)
             x[FeatureSpace.iWarmthMatch] -= penalty
+        }
+
+        // 11) Explicit user-context interactions. These vary per garment, so the
+        // linear model can learn useful ranking differences within one request.
+        let normalizedGarmentWarmth = Double(g.warmth - 3) / 2.0
+        x[FeatureSpace.iWarmthTaste] = ctx.warmthTaste * normalizedGarmentWarmth
+
+        let rainTags = Set(g.weatherTags ?? [])
+        let isRainReady = rainTags.contains(.rainFriendly) || rainTags.contains(.waterproof)
+        if ctx.isRaining, isRainReady {
+            x[FeatureSpace.iRainTaste] = 0.5 + ctx.rainAvoidance
+        }
+
+        if ctx.lookTime == .evening {
+            x[FeatureSpace.iEvening] = Double(g.formality - 1) / 4.0
         }
 
         return x
@@ -271,7 +356,12 @@ final class AIRecommender {
     }
 
     /// Cold-start heuristic score (used when model has few interactions)
-    private func heuristicScore(for g: Garment, ctx: RecoContext) -> Double {
+    private func heuristicScore(
+        for g: Garment,
+        ctx: RecoContext,
+        warmthOffset: Double,
+        formalityOffset: Double
+    ) -> Double {
         var score = 0.5
         
         // Temperature suitability (primary signal)
@@ -290,15 +380,16 @@ final class AIRecommender {
         }
         
         // Warmth match (secondary)
-        let targetWarmth: Int
+        let baseTargetWarmth: Double
         switch ctx.temperatureC {
-        case ..<8:   targetWarmth = 5
-        case ..<14:  targetWarmth = 4
-        case ..<20:  targetWarmth = 3
-        case ..<26:  targetWarmth = 2
-        default:     targetWarmth = 1
+        case ..<8:   baseTargetWarmth = 5
+        case ..<14:  baseTargetWarmth = 4
+        case ..<20:  baseTargetWarmth = 3
+        case ..<26:  baseTargetWarmth = 2
+        default:     baseTargetWarmth = 1
         }
-        var warmthMatch = 1.0 - abs(Double(g.warmth - targetWarmth)) / 4.0
+        let targetWarmth = min(max(baseTargetWarmth + (ctx.warmthTaste * 0.5) + warmthOffset, 1), 5)
+        var warmthMatch = 1.0 - abs(Double(g.warmth) - targetWarmth) / 4.0
         if let fit = g.fitTag {
             if ctx.isCold, fit == .skinny { warmthMatch -= 0.12 }
             if ctx.isCold, fit == .slim { warmthMatch -= 0.06 }
@@ -307,7 +398,8 @@ final class AIRecommender {
         score += warmthMatch * 0.15
         
         // Formality match
-        let formalMatch = 1.0 - abs(Double(g.formality - ctx.desiredFormality)) / 4.0
+        let targetFormality = min(max(Double(ctx.desiredFormality) + formalityOffset, 1), 5)
+        let formalMatch = 1.0 - abs(Double(g.formality) - targetFormality) / 4.0
         score += formalMatch * 0.1
         
         // Love score boost
@@ -328,7 +420,14 @@ final class AIRecommender {
         
         // Rain penalty for formal shoes
         if ctx.isRaining && g.category == .shoes && g.formality >= 4 {
-            score -= 0.15
+            score -= 0.15 * (0.5 + ctx.rainAvoidance)
+        }
+
+        // Prefer explicitly rain-ready pieces when the user cares about staying dry.
+        let rainTags = Set(g.weatherTags ?? [])
+        if ctx.isRaining,
+           rainTags.contains(.rainFriendly) || rainTags.contains(.waterproof) {
+            score += 0.08 * (0.5 + ctx.rainAvoidance)
         }
         
         // Cold weather: boost outer
@@ -346,9 +445,19 @@ final class AIRecommender {
 
     /// Combined score blending heuristics and learned model
     private func combinedScore(g: Garment, ctx: RecoContext, state: RecoState) -> Double {
-        let x = features(for: g, ctx: ctx)
+        let x = features(
+            for: g,
+            ctx: ctx,
+            warmthOffset: state.learnedWarmthOffset,
+            formalityOffset: state.learnedFormalityOffset
+        )
         let learned = modelScore(w: state.weights, b: state.bias, x: x)
-        let heuristic = heuristicScore(for: g, ctx: ctx)
+        let heuristic = heuristicScore(
+            for: g,
+            ctx: ctx,
+            warmthOffset: state.learnedWarmthOffset,
+            formalityOffset: state.learnedFormalityOffset
+        )
         
         // Blend based on interaction count
         // More interactions = trust learned model more
@@ -359,6 +468,11 @@ final class AIRecommender {
         let heuristicWeight = 1.0 - learnedWeight
         
         return (learned * learnedWeight) + (heuristic * heuristicWeight)
+    }
+
+    func score(_ garment: Garment, ctx: RecoContext, modelContext: ModelContext) -> Double {
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
+        return combinedScore(g: garment, ctx: ctx, state: state)
     }
 
     // MARK: - Suggestion
@@ -385,7 +499,7 @@ final class AIRecommender {
         }
         guard !pool.isEmpty else { return [] }
         
-        let state = ensureState(context: modelContext)
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
 
         // Score all garments
         var scored: [(Garment, Double)] = pool.map { g in
@@ -509,14 +623,19 @@ final class AIRecommender {
         reward: Double,
         modelContext: ModelContext
     ) {
-        let state = ensureState(context: modelContext)
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
         var w = state.weights
         var b = state.bias
         let lr = state.lr
 
         // Per-item learning for selected items (reward)
         for g in selected {
-            let x = features(for: g, ctx: ctx)
+            let x = features(
+                for: g,
+                ctx: ctx,
+                warmthOffset: state.learnedWarmthOffset,
+                formalityOffset: state.learnedFormalityOffset
+            )
             let yhat = modelScore(w: w, b: b, x: x)
             let err = reward - yhat
             
@@ -535,7 +654,12 @@ final class AIRecommender {
             // Sample up to 3 negative examples
             let negatives = Array(notSelected.prefix(3))
             for g in negatives {
-                let x = features(for: g, ctx: ctx)
+                let x = features(
+                    for: g,
+                    ctx: ctx,
+                    warmthOffset: state.learnedWarmthOffset,
+                    formalityOffset: state.learnedFormalityOffset
+                )
                 let yhat = modelScore(w: w, b: b, x: x)
                 let negReward = 0.3  // Slight negative signal (not 0, to avoid over-penalizing)
                 let err = negReward - yhat
@@ -553,21 +677,48 @@ final class AIRecommender {
         state.interactionCount += 1
         try? modelContext.save()
     }
+
+    func applyDirectionalFeedback(
+        _ kind: RecommendationFeedbackKind,
+        ctx: RecoContext,
+        modelContext: ModelContext
+    ) {
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
+        let step = 0.25
+
+        switch kind {
+        case .tooCold:
+            state.learnedWarmthOffset = min(1.5, state.learnedWarmthOffset + step)
+        case .tooWarm:
+            state.learnedWarmthOffset = max(-1.5, state.learnedWarmthOffset - step)
+        case .tooFormal:
+            state.learnedFormalityOffset = max(-1.5, state.learnedFormalityOffset - step)
+        case .tooCasual:
+            state.learnedFormalityOffset = min(1.5, state.learnedFormalityOffset + step)
+        case .loved, .notMyStyle, .justRight, .worn:
+            return
+        }
+
+        state.interactionCount += 1
+        try? modelContext.save()
+    }
     
     // MARK: - Settings
     
     /// Enable exploration (for advanced users who want variety)
-    func setExploration(enabled: Bool, modelContext: ModelContext) {
-        let state = ensureState(context: modelContext)
+    func setExploration(enabled: Bool, profileID: UUID? = nil, modelContext: ModelContext) {
+        let state = ensureState(context: modelContext, profileID: profileID)
         state.epsilon = enabled ? 0.1 : 0.0
         try? modelContext.save()
     }
     
     /// Reset learned weights (start fresh)
-    func resetLearning(modelContext: ModelContext) {
-        let state = ensureState(context: modelContext)
+    func resetLearning(profileID: UUID? = nil, modelContext: ModelContext) {
+        let state = ensureState(context: modelContext, profileID: profileID)
         state.weights = Array(repeating: 0.0, count: FeatureSpace.total)
         state.bias = 0.0
+        state.learnedWarmthOffset = 0
+        state.learnedFormalityOffset = 0
         state.interactionCount = 0
         try? modelContext.save()
     }

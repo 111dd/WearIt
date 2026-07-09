@@ -15,6 +15,7 @@ struct CalendarLookView: View {
     @State private var showAlert: Bool = false
     @State private var showGarmentPicker: Bool = false
     @State private var currentDate: Date = Date()
+    @State private var showFullHistory: Bool = false
 
     @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
@@ -56,8 +57,6 @@ struct CalendarLookView: View {
 
     var body: some View {
         ZStack {
-            LiquidGlassBackdrop()
-            
             ScrollView {
                 VStack(alignment: .leading, spacing: DS.Spacing.md) {
                     // Date Picker
@@ -68,25 +67,14 @@ struct CalendarLookView: View {
                     )
                     .datePickerStyle(.graphical)
                     .dsCard(padding: DS.Spacing.sm)
-                    
-                    // Day status badge
-                    dayStatusBadge
-                    
-                    // Planned outfit section (editable for past/today/future)
+
+                    selectedDaySummary
                     plannedOutfitSection
-                    
-                    // Photo section for past/today
+
                     if !isSelectedDateFuture {
-                        actionButtons
-                        
-                        if let look = looksForSelectedDay, !look.photoPaths.isEmpty {
-                            photoSection(for: look)
-                        } else if !isSelectedDateFuture {
-                            emptyState
-                        }
+                        dayPhotosSection
                     }
-                    
-                    // History
+
                     historySection
                 }
                 .padding(.horizontal, DS.Spacing.md)
@@ -140,27 +128,78 @@ struct CalendarLookView: View {
         }
     }
     
-    // MARK: - Day Status Badge
-    
-    private var dayStatusBadge: some View {
-        HStack(spacing: DS.Spacing.xs) {
-            Image(systemName: statusIcon)
-                .foregroundStyle(statusColor)
-            Text(statusText)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(statusColor)
-            
-            Spacer()
-            
-            if let plan = planForSelectedDay, plan.wasWornConfirmed {
-                Label(String(localized: "calendar_mark_as_worn"), systemImage: "checkmark.circle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.green)
+    // MARK: - Selected Day Summary
+
+    private var selectedDaySummary: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(formattedDate(selectedDate))
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text(selectedDaySubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                statusChip
+            }
+
+            LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                HStack(spacing: DS.Spacing.xs) {
+                    summaryChip(
+                        title: String(format: NSLocalizedString("calendar_items_count_format", comment: ""), plannedGarments.count),
+                        icon: "tshirt.fill"
+                    )
+                    if selectedPhotoCount > 0 {
+                        summaryChip(
+                            title: String(format: NSLocalizedString("calendar_photos_count_format", comment: ""), selectedPhotoCount),
+                            icon: "photo"
+                        )
+                    }
+                    if planForSelectedDay?.wasWornConfirmed == true {
+                        summaryChip(
+                            title: String(localized: "journal_status_approved"),
+                            icon: "checkmark.circle.fill",
+                            color: .green
+                        )
+                    }
+                }
             }
         }
-        .padding(.horizontal, DS.Spacing.sm)
-        .padding(.vertical, DS.Spacing.xs)
-        .background(statusColor.opacity(0.1), in: Capsule())
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+    }
+
+    private var statusChip: some View {
+        Label(statusText, systemImage: statusIcon)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(statusColor)
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, DS.Spacing.xs)
+            .liquidGlassPill(tint: statusColor.opacity(0.14))
+    }
+
+    private func summaryChip(title: String, icon: String, color: Color = .secondary) -> some View {
+        Label(title, systemImage: icon)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, DS.Spacing.xs)
+            .padding(.vertical, DS.Spacing.xxs)
+            .liquidGlassPill()
+    }
+
+    private var selectedPhotoCount: Int {
+        looksForSelectedDay?.photoPaths.count ?? 0
+    }
+
+    private var selectedDaySubtitle: String {
+        if isSelectedDateFuture { return String(localized: "calendar_summary_future") }
+        if isSelectedDateToday { return String(localized: "calendar_summary_today") }
+        return String(localized: "calendar_summary_past")
     }
     
     private var statusIcon: String {
@@ -203,7 +242,7 @@ struct CalendarLookView: View {
             }
             
             if plannedGarments.isEmpty {
-                DSEmptyState(
+                compactEmptyState(
                     icon: "calendar.badge.plus",
                     title: String(localized: "calendar_no_outfit"),
                     message: isSelectedDateFuture
@@ -213,16 +252,18 @@ struct CalendarLookView: View {
                 ) {
                     showGarmentPicker = true
                 }
+                .frame(minHeight: 140)
             } else {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 70, maximum: 90), spacing: DS.Spacing.xs)],
-                    spacing: DS.Spacing.xs
+                    columns: [
+                        GridItem(.adaptive(minimum: 100, maximum: 140), spacing: DS.Grid.columnSpacing)
+                    ],
+                    spacing: DS.Grid.rowSpacing
                 ) {
                     ForEach(plannedGarments) { garment in
                         ZStack(alignment: .topTrailing) {
-                            DSGarmentThumbnail(garment, size: .medium)
+                            DSGarmentTile(garment, showTitle: false)
                             
-                            // Lock indicator
                             if planForSelectedDay?.lockedGarmentIDs.contains(garment.id) == true {
                                 Image(systemName: "lock.fill")
                                     .font(.caption2)
@@ -234,111 +275,156 @@ struct CalendarLookView: View {
                         }
                     }
                 }
-                .dsCard(padding: DS.Spacing.sm)
+                .padding(DS.Spacing.sm)
                 
-                // Actions for past/today
-                if !isSelectedDateFuture && !plannedGarments.isEmpty {
-                    if planForSelectedDay?.wasWornConfirmed != true {
-                        Button {
-                            DS.haptic(0.6)
-                            confirmWorn()
-                        } label: {
-                            Label(String(localized: "calendar_mark_as_worn"), systemImage: "checkmark.seal.fill")
-                        }
-                        .dsPrimaryButton()
+                if !isSelectedDateFuture, planForSelectedDay?.wasWornConfirmed != true {
+                    Button {
+                        DS.haptic(0.6)
+                        confirmWorn()
+                    } label: {
+                        Label(String(localized: "calendar_mark_as_worn"), systemImage: "checkmark.seal.fill")
                     }
+                    .dsPrimaryButton()
                 }
             }
         }
-        .dsCard()
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
     // MARK: - UI Sections
 
-    private var actionButtons: some View {
-        VStack(spacing: DS.Spacing.xs) {
-            PhotosPicker(selection: $photosPickerItems, maxSelectionCount: 8, matching: .images) {
-                Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
-            }
-            .dsPrimaryButton()
-
-            Button {
-                showCamera = true
-            } label: {
-                Label(String(localized: "garment_take_photo"), systemImage: "camera")
-                    .frame(maxWidth: .infinity)
-            }
-            .dsSecondaryButton()
-        }
-        .dsCard(padding: DS.Spacing.sm)
-    }
-
-    private func photoSection(for look: DailyLook) -> some View {
+    private var dayPhotosSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack {
-                DSSectionHeader(String(format: NSLocalizedString("calendar_worn_on", comment: ""), formattedDate(look.date)))
+                DSSectionHeader(String(localized: "calendar_day_photos"), icon: "photo.on.rectangle")
                 Spacer()
-                Text("\(look.photoPaths.count)")
+                Text("\(selectedPhotoCount)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
-                ForEach(Array(look.photoPaths.enumerated()), id: \.offset) { index, path in
-                    if let img = ImageStore.loadImage(path: path) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(height: 120)
-                                .clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+            if let look = looksForSelectedDay, !look.photoPaths.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 140), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+                    ForEach(Array(look.photoPaths.enumerated()), id: \.offset) { index, path in
+                        if let img = ImageStore.loadImage(path: path) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(height: 120)
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
 
-                            Button {
-                                removePhoto(at: index, from: look)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.white, .black.opacity(0.5))
+                                Button {
+                                    removePhoto(at: index, from: look)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white, .black.opacity(0.5))
+                                }
+                                .padding(DS.Spacing.xxs)
                             }
-                            .padding(DS.Spacing.xxs)
+                        } else {
+                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                .fill(Color(.systemGray6))
+                                .frame(height: 120)
+                                .overlay {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.yellow)
+                                }
                         }
-                    } else {
-                        RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
-                            .fill(Color(.systemGray6))
-                            .frame(height: 120)
-                            .overlay {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.yellow)
-                            }
                     }
                 }
+            } else {
+                compactEmptyState(
+                    icon: "photo.on.rectangle.angled",
+                    title: String(localized: "calendar_no_photos_title"),
+                    message: String(localized: "calendar_no_photos_message")
+                )
             }
+
+            photoActions
         }
-        .dsCard()
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
-    private var emptyState: some View {
-        DSEmptyState(
-            icon: "photo.on.rectangle.angled",
-            title: String(localized: "calendar_no_outfit"),
-            message: String(localized: "calendar_add_photos")
-        )
-        .dsCardCompact()
+    private var photoActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: DS.Spacing.xs) {
+                photoLibraryButton
+                cameraButton
+            }
+
+            VStack(spacing: DS.Spacing.xs) {
+                photoLibraryButton
+                cameraButton
+            }
+        }
+    }
+
+    private var photoLibraryButton: some View {
+        PhotosPicker(selection: $photosPickerItems, maxSelectionCount: 8, matching: .images) {
+            Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
+                .frame(maxWidth: .infinity)
+        }
+        .dsSecondaryButton()
+    }
+
+    private var cameraButton: some View {
+        Button {
+            showCamera = true
+        } label: {
+            Label(String(localized: "garment_take_photo"), systemImage: "camera")
+                .frame(maxWidth: .infinity)
+        }
+        .dsSecondaryButton()
+    }
+
+    private func compactEmptyState(
+        icon: String,
+        title: String,
+        message: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        VStack(spacing: DS.Spacing.xs) {
+            Image(systemName: icon)
+                .font(.system(size: DS.IconSize.lg, weight: .light))
+                .foregroundStyle(.secondary)
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .font(.caption.weight(.semibold))
+                    .padding(.top, DS.Spacing.xxs)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.Spacing.sm)
     }
 
     private var historySection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "calendar_outfit_log"), icon: "clock.fill")
+            DSSectionHeader(String(localized: "calendar_recent_days"), icon: "clock.fill")
             
             if dailyLooks.isEmpty && dayPlans.isEmpty {
                 Text(String(localized: "calendar_add_photos"))
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                // Combined history from looks and plans
                 let combined = combinedHistory()
-                ForEach(combined, id: \.date) { entry in
+                let visible = showFullHistory ? combined : Array(combined.prefix(6))
+                ForEach(visible, id: \.date) { entry in
                     NavigationLink {
                         LookDetailView(date: entry.date)
                     } label: {
@@ -351,9 +437,26 @@ struct CalendarLookView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                if combined.count > 6 {
+                    Button {
+                        withAnimation(DS.Animation.fast) {
+                            showFullHistory.toggle()
+                        }
+                    } label: {
+                        Label(
+                            String(localized: showFullHistory ? "calendar_show_less_history" : "calendar_show_more_history"),
+                            systemImage: showFullHistory ? "chevron.up" : "chevron.down"
+                        )
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
-        .dsCard()
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
     
     private func combinedHistory() -> [HistoryEntry] {
@@ -514,7 +617,7 @@ private struct HistoryRow: View {
         HStack(spacing: DS.Spacing.sm) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(formattedDate)
-                    .font(.subheadline)
+                    .font(.caption.weight(.semibold))
                 
                 HStack(spacing: DS.Spacing.xs) {
                     if photoCount > 0 {
@@ -539,7 +642,7 @@ private struct HistoryRow: View {
             .font(.caption2)
             .foregroundStyle(wasWorn ? .green : .secondary)
         }
-        .padding(.vertical, DS.Spacing.xxs)
+        .padding(.vertical, DS.Spacing.xxxs)
     }
     
     private var formattedDate: String {
@@ -583,7 +686,8 @@ private struct LookDetailView: View {
                         title: String(localized: "journal_no_look_title"),
                         message: String(localized: "journal_no_look_message")
                     )
-                    .dsCard()
+                    .padding(DS.Spacing.lg)
+                    .frame(maxWidth: .infinity)
                 } else {
                     statusRow
 
@@ -621,11 +725,7 @@ private struct LookDetailView: View {
         }
         .padding(.horizontal, DS.Spacing.sm)
         .padding(.vertical, DS.Spacing.xs)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(
-            Capsule()
-                .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-        )
+        .liquidGlassPill()
     }
 
     private func dayLookSection(plan: DayPlan) -> some View {
@@ -652,14 +752,21 @@ private struct LookDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                HStack(spacing: DS.Spacing.xs) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: DS.Grid.columnSpacing),
+                        GridItem(.flexible(), spacing: DS.Grid.columnSpacing)
+                    ],
+                    spacing: DS.Grid.rowSpacing
+                ) {
                     ForEach(items, id: \.id) { garment in
-                        DSGarmentThumbnail(garment, size: .small)
+                        DSGarmentTile(garment, showTitle: false)
                     }
                 }
             }
         }
-        .dsCard()
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
     private func dayAssignments(for plan: DayPlan) -> [OutfitSlot: UUID] {
@@ -702,7 +809,7 @@ private struct LookDetailView: View {
     private func photoGrid(for look: DailyLook) -> some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             DSSectionHeader(String(localized: "calendar_photos"), icon: "photo.on.rectangle")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100, maximum: 140), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
                 ForEach(Array(look.photoPaths.enumerated()), id: \.offset) { _, path in
                     if let img = ImageStore.loadImage(path: path) {
                         Image(uiImage: img)
@@ -723,7 +830,8 @@ private struct LookDetailView: View {
                 }
             }
         }
-        .dsCard()
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
     private func formattedDate(_ date: Date) -> String {
@@ -932,5 +1040,3 @@ private extension UIImage {
         }
     }
 }
-
-

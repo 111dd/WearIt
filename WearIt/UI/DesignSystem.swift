@@ -140,21 +140,12 @@ struct DSCard: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .padding(padding)
-            .background(material, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.white.opacity(0.25), .white.opacity(0.1)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.5
-                    )
-                    .blendMode(.plusLighter)
+            .liquidGlassSurface(
+                cornerRadius: cornerRadius,
+                padding: padding,
+                fallbackMaterial: material,
+                castsShadow: true
             )
-            .shadow(color: DS.Shadow.subtle.color, radius: DS.Shadow.subtle.radius, y: DS.Shadow.subtle.y)
     }
 }
 
@@ -171,11 +162,12 @@ struct DSField: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(padding)
-            .background(DS.Surface.card, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(DS.Border.subtle, lineWidth: 1)
+            .liquidGlassSurface(
+                cornerRadius: cornerRadius,
+                padding: padding,
+                interactive: true,
+                tint: Color.white.opacity(0.025),
+                fallbackMaterial: .ultraThinMaterial
             )
     }
 }
@@ -256,13 +248,8 @@ struct DSChip: View {
             }
             .padding(.horizontal, DS.Spacing.sm)
             .padding(.vertical, DS.Spacing.xs)
-            .background(isSelected ? color.opacity(0.12) : Color(.tertiarySystemBackground))
             .foregroundStyle(isSelected ? color : .secondary)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(isSelected ? color.opacity(0.4) : Color.primary.opacity(0.08), lineWidth: 1)
-            )
+            .liquidGlassPill(interactive: true, tint: isSelected ? color.opacity(0.16) : nil)
         }
         .buttonStyle(.plain)
         .animation(DS.Animation.fast, value: isSelected)
@@ -617,13 +604,30 @@ extension View {
     }
     
     /// Primary button style
+    @ViewBuilder
     func dsPrimaryButton(destructive: Bool = false) -> some View {
-        buttonStyle(DSPrimaryButtonStyle(isDestructive: destructive))
+        if #available(iOS 26.0, *) {
+            self
+                .font(.headline)
+                .buttonStyle(.glassProminent)
+                .buttonBorderShape(.roundedRectangle(radius: DS.Radius.button))
+                .tint(destructive ? Color.red : Color.accentColor)
+        } else {
+            self.buttonStyle(DSPrimaryButtonStyle(isDestructive: destructive))
+        }
     }
     
     /// Secondary button style
+    @ViewBuilder
     func dsSecondaryButton() -> some View {
-        buttonStyle(DSSecondaryButtonStyle())
+        if #available(iOS 26.0, *) {
+            self
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.glass)
+                .buttonBorderShape(.roundedRectangle(radius: DS.Radius.button))
+        } else {
+            self.buttonStyle(DSSecondaryButtonStyle())
+        }
     }
 
     /// Themed text field style

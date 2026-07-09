@@ -307,6 +307,17 @@
 "calendar_unlock_garment" = "בטל נעילה";
 "calendar_past_day" = "עבר";
 "calendar_future_day" = "מתוכנן";
+"calendar_summary_today" = "הלוק והתמונות של היום";
+"calendar_summary_past" = "מה תוכנן או נלבש";
+"calendar_summary_future" = "תכנון ליום הזה";
+"calendar_items_count_format" = "%d פריטים";
+"calendar_photos_count_format" = "%d תמונות";
+"calendar_day_photos" = "תמונות מהיום";
+"calendar_no_photos_title" = "אין תמונות עדיין";
+"calendar_no_photos_message" = "אפשר להוסיף תמונה קצרה כדי לזכור את הלוק.";
+"calendar_recent_days" = "ימים אחרונים";
+"calendar_show_more_history" = "הצג עוד";
+"calendar_show_less_history" = "הצג פחות";
 
 // MARK: - Stats
 "stats_title" = "סטטיסטיקה";
@@ -535,3 +546,62 @@
 "widget_not_confirmed" = "לא אושר";
 "widget_empty_title" = "אין לוק עדיין";
 "widget_empty_body" = "פתח את WearIt כדי ליצור את לוק היום.";
+
+// MARK: - Wardrobe Season Filter
+"wardrobe_current_season_filter" = "עכשיו: %@";
+"wardrobe_show_all_seasons" = "הצג הכול";
+"wardrobe_manual_season_filter" = "עונה";
+"season_summer_short" = "קיץ";
+"season_winter_short" = "חורף";
+"season_transitional_short" = "מעבר";
+"season_all_short" = "הכול";
+
+// MARK: - Preference Learning
+"profile_taste_title" = "הטעם שלי";
+"profile_taste_intro" = "כמה סימנים קטנים עוזרים ל־WearIt להבין מה נוח לך, מה הסגנון שלך ומה כדאי להציע בפעם הבאה.";
+"profile_taste_casual" = "מעדיף קז׳ואל";
+"profile_taste_elegant" = "מעדיף אלגנטי";
+"profile_taste_balanced" = "איזון בין קז׳ואל לאלגנטי";
+"profile_taste_cool_resistant" = "פחות רגיש לקור";
+"profile_taste_cold_sensitive" = "רגיש לקור";
+"profile_taste_medium_warmth" = "רגישות חום מאוזנת";
+"profile_taste_rain_flexible" = "גמיש בגשם";
+"profile_taste_prefers_dry" = "מעדיף להישאר יבש";
+"profile_taste_medium_rain" = "סובלנות גשם מאוזנת";
+"profile_learning_status_title" = "איך WearIt לומד";
+"profile_learning_status_empty" = "עדיין אין מספיק פידבק. כל אהבתי, דילוג או סימון כנלבש יעזור.";
+"profile_learning_status_count" = "WearIt למד מ־%d פעולות פידבק.";
+"profile_reset_learning" = "אפס למידה";
+"profile_reset_learning_title" = "לאפס למידה?";
+"profile_reset_learning_message" = "העדפות ידניות יישארו, אבל המשקלים שנלמדו מהפידבק יתחילו מחדש.";
+"profile_reset_learning_confirm" = "אפס למידה";
+"planner_not_my_style" = "לא הסגנון שלי";
+"planner_too_warm" = "חם מדי";
+"planner_too_cold" = "קר מדי";
+"planner_just_right" = "בדיוק";
+"planner_too_formal" = "רשמי מדי";
+"planner_too_casual" = "קז׳ואל מדי";
+
+// MARK: - App Intents
+"Wear It destination" = "יעד ב־WearIt";
+"Today's outfit" = "הלוק של היום";
+"Add garment" = "הוספת פריט לבוש";
+"Open Wear It" = "פתיחת WearIt";
+"Opens Wear It at the requested destination." = "פותח את WearIt במסך המבוקש.";
+"Destination" = "יעד";
+"Open ${destination} in Wear It" = "פתח את ${destination} ב־WearIt";
+"Mark Today's Outfit as Worn" = "סימון הלוק של היום כנלבש";
+"Marks today's planned outfit as worn in Wear It." = "מסמן את הלוק שתוכנן להיום כנלבש ב־WearIt.";
+"Opening Wear It to mark today's outfit as worn." = "פותח את WearIt כדי לסמן את הלוק של היום כנלבש.";
+"Today's Outfit" = "הלוק של היום";
+"Add Garment" = "הוספת פריט";
+"Mark Outfit Worn" = "סימון הלוק כנלבש";
+"intent_today_outfit_summary_format" = "הלוק של היום: %@.";
+"Show Today's Outfit" = "הצגת הלוק של היום";
+"Reads today's planned outfit without opening Wear It." = "מציג את הלוק שתוכנן להיום בלי לפתוח את WearIt.";
+"No outfit is planned for today yet." = "עדיין לא תוכנן לוק להיום.";
+"Suggest Another Outfit" = "הצעת לוק אחר";
+"Opens Wear It and creates another personalized outfit recommendation." = "פותח את WearIt ויוצר המלצת לוק אישית נוספת.";
+"Opening Wear It to suggest another outfit." = "פותח את WearIt כדי להציע לוק אחר.";
+"Show Outfit" = "הצגת הלוק";
+"New Suggestion" = "המלצה חדשה";

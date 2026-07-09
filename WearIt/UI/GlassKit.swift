@@ -3,36 +3,37 @@
 //  WearIt
 //
 //  Created by Dor David on 21/10/2025.
-//  Updated for iOS 18+ Liquid Glass Design System
+//  Updated for native iOS 26+ Liquid Glass with iOS 18+ fallbacks
 //
 
 import SwiftUI
 import UIKit
 
-// MARK: - Backdrop גלובלי: liquid glass (iOS 18+ Enhanced)
+// MARK: - Global ambient backdrop
 public struct LiquidGlassBackdrop: View {
     public init() {}
 
     public var body: some View {
         GeometryReader { geo in
             ZStack {
-                // שכבת "וולפייפר" — תמונה מתוך הנכסים (לא SpringBoard אמיתי)
+                // Keep one ambient layer behind the entire app. Glass surfaces need
+                // real color and contrast behind them in order to feel transparent.
                 if let wallpaper = UIImage(named: "WallpaperMock") {
                     Image(uiImage: wallpaper)
                         .resizable()
                         .scaledToFill()
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
-                        .blur(radius: 8)
-                        .opacity(0.55)
-                        .overlay(Color.black.opacity(0.12))
+                        .blur(radius: 10)
+                        .opacity(0.34)
+                        .overlay(Color(.systemBackground).opacity(0.16))
                         .ignoresSafeArea()
                 } else {
                     Color(.systemBackground)
                         .ignoresSafeArea()
                 }
 
-                // שכבת ליקוויד שקופה יותר (סטטי כדי לא ליצור עבודה רציפה)
+                // Static ambient color: no continuous animation or redraw cost.
                 Canvas { ctx, size in
                     let phase = 0.0
                     let c1 = gradientBlob(center: movingPoint(size, phase: phase * 0.05, amp: 0.28),
@@ -44,8 +45,8 @@ public struct LiquidGlassBackdrop: View {
                     let c4 = gradientBlob(center: movingPoint(size, phase: phase * 0.04 + 1.5, amp: 0.20),
                                           baseHue: 280/360, sat: 0.55, bri: 0.93)
 
-                    ctx.addFilter(.blur(radius: 48))
-                    ctx.addFilter(.saturation(1.05))
+                    ctx.addFilter(.blur(radius: 58))
+                    ctx.addFilter(.saturation(0.92))
 
                     func drawBlob(_ blob: (gradient: Gradient, center: CGPoint)) {
                         let radius: CGFloat = 420
@@ -64,8 +65,7 @@ public struct LiquidGlassBackdrop: View {
 
                     drawBlob(c1); drawBlob(c2); drawBlob(c3); drawBlob(c4)
 
-                    // רעש עדין יותר
-                    let noiseOpacity: CGFloat = 0.025
+                    let noiseOpacity: CGFloat = 0.014
                     ctx.blendMode = .overlay
                     if let noise = Self.cachedNoise(for: size) {
                         ctx.opacity = noiseOpacity
@@ -74,10 +74,16 @@ public struct LiquidGlassBackdrop: View {
                 }
                 .ignoresSafeArea()
 
-                // שכבת Material דקה במיוחד לשקיפות גבוהה
-                Rectangle()
-                    .fill(.ultraThinMaterial.opacity(0.6))
-                    .ignoresSafeArea()
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.035),
+                        Color(.systemBackground).opacity(0.10),
+                        Color.black.opacity(0.025)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
             }
         }
     }
@@ -94,9 +100,9 @@ public struct LiquidGlassBackdrop: View {
     -> (gradient: Gradient, center: CGPoint) {
         // גרדיאנטים חלקים יותר עם יותר שלבים
         let colors = [
-            Color(hue: baseHue, saturation: sat, brightness: bri, opacity: 0.60),
-            Color(hue: baseHue, saturation: max(0, sat - 0.20), brightness: min(1, bri + 0.03), opacity: 0.35),
-            Color(hue: baseHue, saturation: max(0, sat - 0.35), brightness: min(1, bri + 0.05), opacity: 0.15),
+            Color(hue: baseHue, saturation: sat, brightness: bri, opacity: 0.32),
+            Color(hue: baseHue, saturation: max(0, sat - 0.20), brightness: min(1, bri + 0.03), opacity: 0.17),
+            Color(hue: baseHue, saturation: max(0, sat - 0.35), brightness: min(1, bri + 0.05), opacity: 0.06),
             .clear
         ]
         let gradient = Gradient(colors: colors)
@@ -131,7 +137,134 @@ public struct LiquidGlassBackdrop: View {
     }
 }
 
-// MARK: - Glass Card Modifier (iOS 18+ Enhanced)
+// MARK: - Native glass primitives
+
+public struct LiquidGlassGroup<Content: View>: View {
+    private let spacing: CGFloat
+    private let content: Content
+
+    public init(spacing: CGFloat = 16, @ViewBuilder content: () -> Content) {
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    @ViewBuilder
+    public var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing) {
+                content
+            }
+        } else {
+            content
+        }
+    }
+}
+
+private struct AdaptiveGlassSurface: ViewModifier {
+    let cornerRadius: CGFloat
+    let padding: CGFloat
+    let interactive: Bool
+    let tint: Color?
+    let fallbackMaterial: Material
+    let castsShadow: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                content
+                    .padding(padding)
+                    .glassEffect(
+                        .regular.tint(tint).interactive(),
+                        in: .rect(cornerRadius: cornerRadius)
+                    )
+                    .shadow(
+                        color: castsShadow ? Color.black.opacity(0.07) : .clear,
+                        radius: castsShadow ? 16 : 0,
+                        y: castsShadow ? 8 : 0
+                    )
+            } else {
+                content
+                    .padding(padding)
+                    .glassEffect(
+                        .regular.tint(tint),
+                        in: .rect(cornerRadius: cornerRadius)
+                    )
+                    .shadow(
+                        color: castsShadow ? Color.black.opacity(0.07) : .clear,
+                        radius: castsShadow ? 16 : 0,
+                        y: castsShadow ? 8 : 0
+                    )
+            }
+        } else {
+            content
+                .padding(padding)
+                .background(
+                    fallbackMaterial,
+                    in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.24), .white.opacity(0.06)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.6
+                        )
+                        .blendMode(.plusLighter)
+                )
+                .shadow(
+                    color: castsShadow ? Color.black.opacity(0.07) : .clear,
+                    radius: castsShadow ? 16 : 0,
+                    y: castsShadow ? 8 : 0
+                )
+        }
+    }
+}
+
+private struct AdaptiveGlassPill: ViewModifier {
+    let interactive: Bool
+    let tint: Color?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                content.glassEffect(.regular.tint(tint).interactive(), in: .capsule)
+            } else {
+                content.glassEffect(.regular.tint(tint), in: .capsule)
+            }
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.6))
+        }
+    }
+}
+
+private struct AdaptiveGlassCircle: ViewModifier {
+    let interactive: Bool
+    let tint: Color?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            if interactive {
+                content.glassEffect(.regular.tint(tint).interactive(), in: .circle)
+            } else {
+                content.glassEffect(.regular.tint(tint), in: .circle)
+            }
+        } else {
+            content
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.6))
+        }
+    }
+}
+
+// MARK: - Glass Card Modifier
 public struct GlassCard: ViewModifier {
     public init(corner: CGFloat = 24, strokeOpacity: CGFloat = 0.30, intensity: MaterialIntensity = .ultraThin) {
         self.corner = corner
@@ -160,28 +293,16 @@ public struct GlassCard: ViewModifier {
 
     public func body(content: Content) -> some View {
         content
-            .padding(16)
-            .background(
-                intensity.material,
-                in: RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .modifier(
+                AdaptiveGlassSurface(
+                    cornerRadius: corner,
+                    padding: 16,
+                    interactive: false,
+                    tint: nil,
+                    fallbackMaterial: intensity.material,
+                    castsShadow: true
+                )
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: corner, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(strokeOpacity),
-                                Color.white.opacity(strokeOpacity * 0.5)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.0
-                    )
-                    .blendMode(.plusLighter)
-            )
-            .shadow(color: Color.black.opacity(0.08), radius: 20, x: 0, y: 12)
-            .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -229,27 +350,63 @@ public struct GlassListRow: ViewModifier {
         content
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
-            .background(
-                .ultraThinMaterial,
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
-                    .blendMode(.plusLighter)
+            .modifier(
+                AdaptiveGlassSurface(
+                    cornerRadius: cornerRadius,
+                    padding: 0,
+                    interactive: false,
+                    tint: nil,
+                    fallbackMaterial: .ultraThinMaterial,
+                    castsShadow: false
+                )
             )
     }
 }
 
 public extension View {
+    func liquidGlassSurface(
+        cornerRadius: CGFloat = 18,
+        padding: CGFloat = 0,
+        interactive: Bool = false,
+        tint: Color? = nil,
+        fallbackMaterial: Material = .ultraThinMaterial,
+        castsShadow: Bool = false
+    ) -> some View {
+        modifier(
+            AdaptiveGlassSurface(
+                cornerRadius: cornerRadius,
+                padding: padding,
+                interactive: interactive,
+                tint: tint,
+                fallbackMaterial: fallbackMaterial,
+                castsShadow: castsShadow
+            )
+        )
+    }
+
+    func liquidGlassPill(interactive: Bool = false, tint: Color? = nil) -> some View {
+        modifier(AdaptiveGlassPill(interactive: interactive, tint: tint))
+    }
+
+    func liquidGlassCircle(interactive: Bool = false, tint: Color? = nil) -> some View {
+        modifier(AdaptiveGlassCircle(interactive: interactive, tint: tint))
+    }
+
     /// הופך כל View לכרטיס זכוכית מוכן (iOS 18+)
     func glassCard(corner: CGFloat = 24, intensity: GlassCard.MaterialIntensity = .ultraThin) -> some View {
         modifier(GlassCard(corner: corner, intensity: intensity))
     }
     
     /// הופך View לכפתור זכוכית
+    @ViewBuilder
     func glassButton(cornerRadius: CGFloat = 16, material: Material = .ultraThinMaterial) -> some View {
-        buttonStyle(GlassButtonStyle(cornerRadius: cornerRadius, material: material))
+        if #available(iOS 26.0, *) {
+            self
+                .buttonStyle(.glass)
+                .buttonBorderShape(.roundedRectangle(radius: cornerRadius))
+        } else {
+            self.buttonStyle(GlassButtonStyle(cornerRadius: cornerRadius, material: material))
+        }
     }
     
     /// הופך View לשורת רשימה זכוכית
@@ -337,4 +494,3 @@ private struct UsernameLoginSheet: View {
         .onAppear { focused = true }
     }
 }
-
