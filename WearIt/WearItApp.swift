@@ -18,21 +18,9 @@ struct WearItApp: App {
             Group {
                 switch bootstrapper.state {
                 case .ready(let container):
-                    ZStack {
-                        // Solid background to prevent black flash during launch
-                        Color(.systemBackground)
-                            .ignoresSafeArea()
-                        
-                        // Liquid glass backdrop (animated + noise + material layer)
-                        LiquidGlassBackdrop()
-                            .ignoresSafeArea()
-
-                        // Main app content with loading state
-                        BootstrapView()
-                            .tint(.accentColor)
-                    }
-                    .ignoresSafeArea()
-                    .modelContainer(container)
+                    BootstrapView()
+                        .tint(.accentColor)
+                        .modelContainer(container)
 
                 case .failed(let message):
                     LoadingGateView(message: message)

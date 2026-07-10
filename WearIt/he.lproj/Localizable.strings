@@ -91,6 +91,7 @@
 "planner_limited_wardrobe" = "ארון מוגבל";
 "planner_not_enough_items" = "אין מספיק פריטים להימנע מחזרות";
 "planner_what_do_you_think" = "מה אתה חושב?";
+"planner_feedback_toggle_hint" = "הצג או הסתר פידבק על הלוק";
 "planner_wear_this" = "ללבוש";
 "planner_love_it" = "אהבתי";
 "planner_skip" = "דלג";
@@ -384,6 +385,7 @@
 
 // MARK: - Errors
 "error_title" = "שגיאה";
+"edit_image_save_failed" = "לא הצלחנו לשמור את התמונה החדשה. נסה שוב.";
 "error_generic" = "משהו השתבש.";
 "error_save_failed" = "השמירה נכשלה";
 "error_load_failed" = "הטעינה נכשלה";
@@ -447,6 +449,12 @@
 "planner_unavailable_1d" = "יום אחד";
 "planner_unavailable_2d" = "יומיים";
 "planner_unavailable_1w" = "שבוע";
+"wardrobe_snooze_menu" = "אל תציע לתקופה…";
+"wardrobe_snooze_2w" = "שבועיים";
+"wardrobe_snooze_1m" = "חודש";
+"planner_unworn_nudge_title" = "פריטים שנשכחו";
+"planner_unworn_nudge_message_format" = "%d פריטים לא נלבשו זמן רב — למשל \"%@\"";
+"planner_unworn_nudge_action" = "הצע";
 "planner_days_ago_format" = "לפני %d ימים";
 "planner_no_replacement" = "אין פריט חלופי זמין";
 "planner_add_accessory" = "הוסף אביזר";
@@ -479,6 +487,14 @@
 "stats_unworn_title" = "לא נלבש";
 "stats_unworn_empty" = "כל הפריטים נלבשו לאחרונה!";
 "stats_unworn_count_format" = "לא נלבש: %d";
+"stats_top_colors" = "צבעים אהובים";
+"stats_top_colors_subtitle" = "חלק מהעדפת הארון שלך";
+"stats_top_brands" = "מותגים אהובים";
+"stats_top_brands_subtitle" = "חלק מהעדפת הארון שלך";
+"stats_favorite_combos" = "שילובים אהובים";
+"stats_favorite_combos_subtitle" = "זוגות שלבשת יחד הכי הרבה";
+"stats_today" = "היום";
+"stats_1_day_ago" = "לפני יום";
 "planner_confirm_day" = "אשר";
 "planner_confirm_plan" = "אשר תוכנית";
 "planner_confirm_worn" = "אשר כנלבש";
@@ -559,6 +575,46 @@
 // MARK: - Preference Learning
 "profile_taste_title" = "הטעם שלי";
 "profile_taste_intro" = "כמה סימנים קטנים עוזרים ל־WearIt להבין מה נוח לך, מה הסגנון שלך ומה כדאי להציע בפעם הבאה.";
+"calendar_context_section_title" = "לוח שנה ואירועים";
+"calendar_context_section_subtext" = "WearIt יכול להפעיל לוק ערב ולהעלות פורמליות לימי שישי, ערבי חג ואירועים בלוח השנה.";
+"calendar_context_hebrew_toggle" = "לוח עברי (שבת וחגים)";
+"calendar_context_hebrew_help" = "בימי שישי ובערבי חג גדולים יופעל לוק ערב אוטומטית.";
+"calendar_context_device_toggle" = "שימוש באירועי לוח השנה באייפון";
+"calendar_context_device_help" = "חתונות, מסיבות ואירועי ערב יכולים להציע לוק ערב רשמי יותר.";
+"calendar_hint_erev_shabbat" = "ערב שבת — לוק ערב";
+"calendar_hint_erev_rosh_hashanah" = "ערב ראש השנה — לוק ערב חגיגי";
+"calendar_hint_erev_yom_kippur" = "ערב יום כיפור — לוק ערב חגיגי";
+"calendar_hint_erev_sukkot" = "ערב סוכות — לוק ערב";
+"calendar_hint_erev_simchat_torah" = "ערב שמחת תורה — לוק ערב";
+"calendar_hint_erev_pesach" = "ערב פסח — לוק לליל הסדר";
+"calendar_hint_erev_shavuot" = "ערב שבועות — לוק ערב";
+"calendar_hint_event_format" = "מהיומן: %@";
+"calendar_hint_event_generic" = "אירוע ביומן — התלבש בהתאם";
+"calendar_hint_black_tie" = "אירוע רשמי מאוד — לוק חגיגי";
+"calendar_hint_formal" = "אירוע רשמי — העלה את הרמה";
+"calendar_hint_sport" = "אימון — נוח וקז'ואל";
+"calendar_hint_travel" = "יום נסיעה — נוחות קודם";
+"calendar_hint_work" = "עבודה / פגישה — קצת יותר מלוטש";
+"calendar_hint_outdoor" = "תוכניות בחוץ — לפי מזג האוויר";
+"planner_suggest_better" = "הצע התאמה טובה יותר";
+"planner_change_title" = "מה לשנות";
+"planner_change_slot_format" = "החלף %@";
+"planner_change_apply" = "החל";
+"planner_change_reason_more_formal" = "רשמי יותר לאירוע של היום";
+"planner_change_reason_more_casual" = "קז'ואל יותר לתוכניות היום";
+"planner_change_reason_weather" = "מתאים יותר למזג האוויר";
+"planner_change_reason_unworn" = "לא נלבש מזמן";
+"planner_change_reason_taste" = "קרוב יותר לצבעים שאתה אוהב";
+"planner_change_reason_better_match" = "משתלב טוב יותר עם שאר הלוק";
+"planner_change_reason_slot_format" = "אופציה חזקה יותר ל%@";
+"wardrobe_sort_last_worn" = "נלבש הכי פחות לאחרונה";
+"wardrobe_filter_temp_format" = "מתאים ל־%d°";
+"wardrobe_filter_unworn" = "מעולם לא נלבש";
+"wardrobe_filter_forgotten" = "נשכח (21+ ימים)";
+"wardrobe_filter_weather_chip" = "מזג אוויר היום";
+"wardrobe_filter_unworn_chip" = "לא נלבש";
+"wardrobe_filter_forgotten_chip" = "נשכח";
+"wardrobe_clear_filters" = "נקה מסננים";
 "profile_taste_casual" = "מעדיף קז׳ואל";
 "profile_taste_elegant" = "מעדיף אלגנטי";
 "profile_taste_balanced" = "איזון בין קז׳ואל לאלגנטי";
@@ -605,3 +661,58 @@
 "Opening Wear It to suggest another outfit." = "פותח את WearIt כדי להציע לוק אחר.";
 "Show Outfit" = "הצגת הלוק";
 "New Suggestion" = "המלצה חדשה";
+
+// MARK: - Add Garment AI
+"add_garment_hero_title" = "הוספה לארון";
+"add_garment_hero_subtitle" = "צלמו או בחרו מהגלריה — נציע קטגוריה וצבעים";
+"add_garment_take_photo" = "צילום";
+"add_garment_choose_library" = "בחירה מהגלריה";
+"add_garment_analyzing" = "מנתח את הפריט…";
+"add_garment_ai_filled" = "מילאנו הצעות — אפשר לערוך הכל";
+"add_garment_crop_hint" = "בשלב הבא תחתכו ותתאימו את התמונה לפני מילוי הפרטים.";
+"add_garment_details_title" = "פרטי הפריט";
+"add_garment_edit_photo" = "עריכת תמונה";
+"add_garment_retake" = "צילום מחדש";
+"add_garment_change_photo" = "גלריה";
+"add_garment_edit_title" = "עריכת שם";
+"add_garment_use_auto_title" = "חזרה לשם אוטומטי";
+"add_garment_new_item" = "פריט חדש";
+"add_garment_colors_selected_format" = "%d נבחרו";
+"add_garment_success_title" = "הצלחה";
+"add_garment_success_message" = "הפריט נוסף לארון.";
+"add_garment_save_failed_format" = "השמירה נכשלה: %@";
+"edit_delete_title" = "למחוק פריט?";
+"edit_delete_message" = "לא ניתן לבטל פעולה זו.";
+"edit_favorite" = "מועדף";
+"edit_last_worn" = "נלבש לאחרונה";
+"edit_never_worn" = "אף פעם";
+"edit_times_worn" = "מספר לבישות";
+"edit_notes" = "הערות";
+"edit_notes_placeholder" = "הוסף הערות…";
+"edit_open_planner" = "פתח את לוק היום";
+"crop_cancel" = "ביטול";
+"crop_done" = "סיום";
+"crop_auto" = "אוטו";
+"crop_auto_busy" = "אוטו…";
+"crop_reset" = "איפוס";
+
+// MARK: - Planner empty states
+"planner_empty_wardrobe_title" = "הארון ריק";
+"planner_empty_wardrobe_message" = "הוסיפו כמה פריטים ו־WearIt יבנה לכם את שלושת הימים הבאים.";
+"planner_empty_wardrobe_action" = "הוספת פריט ראשון";
+"planner_empty_day_title" = "עדיין אין לוק";
+"planner_empty_day_subtitle" = "הקישו כדי ליצור לוק ליום הזה";
+
+// MARK: - App Backdrop
+"backdrop_section_title" = "רקע האפליקציה";
+"backdrop_section_subtitle" = "מוצג מאחורי כל המסכים — הזכוכית צפה מעליו";
+"backdrop_soft_sky" = "שמיים רכים";
+"backdrop_warm_sand" = "חול חם";
+"backdrop_mist_forest" = "יער בערפל";
+"backdrop_dusk_rose" = "שקיעה ורודה";
+"backdrop_slate" = "אפור עדין";
+"backdrop_photo" = "התמונה שלי";
+"backdrop_remove_photo" = "הסרת תמונה";
+"backdrop_blur_label" = "טשטוש";
+"backdrop_blur_hint" = "טשטוש נמוך משאיר יותר פרטים; גבוה מרגיש רך יותר מתחת לזכוכית";
+"backdrop_blur_percent_format" = "%d%%";

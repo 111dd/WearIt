@@ -5,6 +5,8 @@ import Foundation
 import SwiftData
 
 enum WearHistoryService {
+    /// Records a wear event for the given day.
+    /// - Parameter outfitID: Optional `Outfit.id` only. Do not pass `DayPlan.id`.
     static func recordWorn(
         date: Date,
         garmentIDs: [UUID],
@@ -18,12 +20,17 @@ enum WearHistoryService {
         let uniqueIDs = Array(Set(garmentIDs))
         guard !uniqueIDs.isEmpty else { return }
 
-        let events = (try? context.fetch(FetchDescriptor<WearEvent>())) ?? []
-        if let existing = events.first(where: { event in
-            Calendar.current.isDate(event.date, inSameDayAs: day) &&
-            event.source == source &&
-            event.slot == nil
-        }) {
+        let sourceRaw = source.rawValue
+        var eventDescriptor = FetchDescriptor<WearEvent>(
+            predicate: #Predicate { event in
+                event.date == day &&
+                event.sourceRaw == sourceRaw &&
+                event.slotRaw == nil
+            }
+        )
+        eventDescriptor.fetchLimit = 1
+
+        if let existing = (try? context.fetch(eventDescriptor))?.first {
             existing.garmentIDs = uniqueIDs
             existing.outfitID = outfitID
         } else {
@@ -37,10 +44,14 @@ enum WearHistoryService {
             context.insert(event)
         }
 
-        let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
-        let garmentsByID = Dictionary(uniqueKeysWithValues: garments.map { ($0.id, $0) })
-        for id in uniqueIDs {
-            guard let garment = garmentsByID[id] else { continue }
+        let targetIDs = uniqueIDs
+        let garmentDescriptor = FetchDescriptor<Garment>(
+            predicate: #Predicate { garment in
+                targetIDs.contains(garment.id)
+            }
+        )
+        let garments = (try? context.fetch(garmentDescriptor)) ?? []
+        for garment in garments {
             let shouldUpdate = garment.lastWorn == nil || garment.lastWorn! < day
             if shouldUpdate {
                 garment.lastWorn = day
@@ -79,12 +90,10 @@ enum WearHistoryService {
         let map = latestWearMap(events: events)
         let sample = garments.prefix(sampleCount)
         for garment in sample {
-            let cached = garment.lastWorn.map { Calendar.current.startOfDay(for: $0) }
-            let latest = map[garment.id]
-            if cached != latest {
-                let cachedString = cached?.description ?? "nil"
-                let latestString = latest?.description ?? "nil"
-                print("WEAR_HISTORY_MISMATCH,id=\(garment.id.uuidString),cached=\(cachedString),latest=\(latestString)")
+            let fromMap = map[garment.id]
+            if garment.lastWorn != fromMap {
+                Logger(subsystem: "com.dordavid.WearIt", category: "WearHistory")
+                    .debug("lastWorn mismatch id=\(garment.id.uuidString) garment=\(String(describing: garment.lastWorn)) map=\(String(describing: fromMap))")
             }
         }
     }

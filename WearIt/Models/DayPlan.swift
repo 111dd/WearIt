@@ -15,6 +15,7 @@ struct PlannerHint: Equatable, Identifiable {
         case info
         case temp
         case rain
+        case calendar
     }
 
     let id = UUID()

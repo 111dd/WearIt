@@ -8,132 +8,89 @@
 
 import SwiftUI
 import UIKit
+import CoreImage
 
-// MARK: - Global ambient backdrop
+// MARK: - Global ambient backdrop (simple + reliable)
+
 public struct LiquidGlassBackdrop: View {
+    @AppStorage(AppBackdropKeys.preset) private var presetRaw: String = AppBackdropPreset.softSky.rawValue
+    @AppStorage(AppBackdropKeys.customImagePath) private var customImagePath: String = ""
+    @AppStorage(AppBackdropKeys.blurAmount) private var blurAmount: Double = AppBackdropBlur.defaultAmount
+
+    @State private var photo: UIImage?
+
     public init() {}
 
+    private var preset: AppBackdropPreset {
+        AppBackdropPreset(rawValue: presetRaw) ?? .softSky
+    }
+
+    private var blurRadius: CGFloat {
+        // Cap for scroll performance — still readable under glass.
+        min(AppBackdropBlur.radius(for: blurAmount), 18)
+    }
+
+    private var fillColors: [Color] {
+        if preset == .photo {
+            return AppBackdropPreset.softSky.previewColors
+        }
+        return preset.previewColors
+    }
+
     public var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                // Keep one ambient layer behind the entire app. Glass surfaces need
-                // real color and contrast behind them in order to feel transparent.
-                if let wallpaper = UIImage(named: "WallpaperMock") {
-                    Image(uiImage: wallpaper)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .clipped()
-                        .blur(radius: 10)
-                        .opacity(0.34)
-                        .overlay(Color(.systemBackground).opacity(0.16))
-                        .ignoresSafeArea()
-                } else {
-                    Color(.systemBackground)
-                        .ignoresSafeArea()
-                }
+        ZStack {
+            LinearGradient(
+                colors: fillColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-                // Static ambient color: no continuous animation or redraw cost.
-                Canvas { ctx, size in
-                    let phase = 0.0
-                    let c1 = gradientBlob(center: movingPoint(size, phase: phase * 0.05, amp: 0.28),
-                                          baseHue: 208/360, sat: 0.70, bri: 0.96)
-                    let c2 = gradientBlob(center: movingPoint(size, phase: phase * 0.035 + 2.1, amp: 0.25),
-                                          baseHue: 315/360, sat: 0.55, bri: 0.95)
-                    let c3 = gradientBlob(center: movingPoint(size, phase: phase * 0.045 + 4.2, amp: 0.22),
-                                          baseHue: 45/360, sat: 0.60, bri: 0.95)
-                    let c4 = gradientBlob(center: movingPoint(size, phase: phase * 0.04 + 1.5, amp: 0.20),
-                                          baseHue: 280/360, sat: 0.55, bri: 0.93)
-
-                    ctx.addFilter(.blur(radius: 58))
-                    ctx.addFilter(.saturation(0.92))
-
-                    func drawBlob(_ blob: (gradient: Gradient, center: CGPoint)) {
-                        let radius: CGFloat = 420
-                        let rect = CGRect(x: blob.center.x - radius,
-                                          y: blob.center.y - radius,
-                                          width: radius * 2,
-                                          height: radius * 2)
-                        let path = Path(ellipseIn: rect)
-                        ctx.fill(path, with: .radialGradient(
-                            blob.gradient,
-                            center: blob.center,
-                            startRadius: 0,
-                            endRadius: radius
-                        ))
-                    }
-
-                    drawBlob(c1); drawBlob(c2); drawBlob(c3); drawBlob(c4)
-
-                    let noiseOpacity: CGFloat = 0.014
-                    ctx.blendMode = .overlay
-                    if let noise = Self.cachedNoise(for: size) {
-                        ctx.opacity = noiseOpacity
-                        ctx.draw(noise, in: CGRect(origin: .zero, size: size))
-                    }
-                }
-                .ignoresSafeArea()
-
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.035),
-                        Color(.systemBackground).opacity(0.10),
-                        Color.black.opacity(0.025)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+            // `photo` is already downsampled (and softly blurred offline) —
+            // never apply live SwiftUI `.blur` here; that tanks scroll FPS.
+            // Constrain fill so scaledToFill cannot expand parent layout.
+            if preset == .photo, let photo {
+                Image(uiImage: photo)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
             }
+
+            Color(.systemBackground)
+                .opacity(AppBackdropBlur.veilOpacity(for: blurAmount))
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+        .clipped()
+        .allowsHitTesting(false)
+        .task(id: "\(presetRaw)|\(customImagePath)|\(Int((blurAmount * 100).rounded()))") {
+            guard preset == .photo, !customImagePath.isEmpty else {
+                photo = nil
+                return
+            }
+            let path = customImagePath
+            let radius = blurRadius
+            photo = await Task.detached(priority: .utility) {
+                Self.prepareWallpaper(path: path, blurRadius: radius)
+            }.value
         }
     }
 
-    private func movingPoint(_ size: CGSize, phase: Double, amp: CGFloat) -> CGPoint {
-        let w = size.width, h = size.height
-        // תנועה חלקה יותר עם easing
-        let x = w*0.5 + cos(phase) * w*amp
-        let y = h*0.5 + sin(phase*0.87) * h*amp
-        return CGPoint(x: x, y: y)
-    }
+    /// Downsample + optional one-shot blur off the main thread.
+    nonisolated private static func prepareWallpaper(path: String, blurRadius: CGFloat) -> UIImage? {
+        // Prefer a modest decode size — full-screen wallpaper doesn't need 4K.
+        let maxPixel = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
+        guard let base = ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
+                ?? ImageStore.loadImage(path: path) else { return nil }
+        guard blurRadius > 0.5, let cg = base.cgImage else { return base }
 
-    private func gradientBlob(center: CGPoint, baseHue: CGFloat, sat: CGFloat, bri: CGFloat)
-    -> (gradient: Gradient, center: CGPoint) {
-        // גרדיאנטים חלקים יותר עם יותר שלבים
-        let colors = [
-            Color(hue: baseHue, saturation: sat, brightness: bri, opacity: 0.32),
-            Color(hue: baseHue, saturation: max(0, sat - 0.20), brightness: min(1, bri + 0.03), opacity: 0.17),
-            Color(hue: baseHue, saturation: max(0, sat - 0.35), brightness: min(1, bri + 0.05), opacity: 0.06),
-            .clear
-        ]
-        let gradient = Gradient(colors: colors)
-        return (gradient, center)
-    }
-
-    // Cache רעש סטטי כדי להימנע מכתיבת state בזמן ציור
-    private static var noiseCache: [String: Image] = [:]
-    private static func cachedNoise(for size: CGSize) -> Image? {
-        let key = "\(Int(size.width))x\(Int(size.height))"
-        if let cached = noiseCache[key] { return cached }
-        guard let generated = generateNoise(size: size) else { return nil }
-        noiseCache[key] = generated
-        return generated
-    }
-
-    private static func generateNoise(size: CGSize) -> Image? {
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let ui = renderer.image { ctx in
-            let cg = ctx.cgContext
-            // רעש עדין יותר עם צפיפות דינמית
-            let density = Int(size.width * size.height / 1800)
-            for _ in 0..<max(1000, density) {
-                let x = CGFloat.random(in: 0..<size.width)
-                let y = CGFloat.random(in: 0..<size.height)
-                let a = CGFloat.random(in: 0.015...0.06)
-                cg.setFillColor(UIColor.white.withAlphaComponent(a).cgColor)
-                cg.fill(CGRect(x: x, y: y, width: 1.5, height: 1.5))
-            }
-        }
-        return Image(uiImage: ui)
+        let ciImage = CIImage(cgImage: cg)
+        let filter = CIFilter(name: "CIGaussianBlur")
+        filter?.setValue(ciImage, forKey: kCIInputImageKey)
+        filter?.setValue(blurRadius, forKey: kCIInputRadiusKey)
+        guard let output = filter?.outputImage?.cropped(to: ciImage.extent) else { return base }
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let result = context.createCGImage(output, from: ciImage.extent) else { return base }
+        return UIImage(cgImage: result, scale: base.scale, orientation: base.imageOrientation)
     }
 }
 
@@ -334,7 +291,7 @@ public struct GlassButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
             .opacity(configuration.isPressed ? 0.8 : 1.0)
-            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: configuration.isPressed)
+            .animation(DS.Animation.interactive, value: configuration.isPressed)
     }
 }
 

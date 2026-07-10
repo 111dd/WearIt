@@ -17,7 +17,8 @@ import CoreGraphics
 
 @Model final class RecoState {
     var id: String = "global"
-    var version: Int = 2
+    /// 2 = original feature set; 3 = + color/brand affinity features
+    var version: Int = 3
     var profileID: UUID?
     var weights: [Double] = []
     var bias: Double = 0.0
@@ -31,7 +32,7 @@ import CoreGraphics
 
     init(size: Int, profileID: UUID? = nil) {
         self.id = profileID.map { "profile-\($0.uuidString)" } ?? "global"
-        self.version = 2
+        self.version = 3
         self.profileID = profileID
         self.weights = Array(repeating: 0.0, count: size)
         self.bias = 0.0
@@ -85,7 +86,11 @@ enum FeatureSpace {
     static let iRainTaste     = iWarmthTaste + 1 // explicit rain avoidance preference
     static let iEvening       = iRainTaste + 1   // evening look context
 
-    static let total          = iEvening + 1
+    // Taste affinities (v3) — appended so older RecoState weights migrate by zero-pad
+    static let iColorAffinity = iEvening + 1     // 0..1 from wardrobe color taste
+    static let iBrandAffinity = iColorAffinity + 1 // 0..1 from wardrobe brand taste
+
+    static let total          = iBrandAffinity + 1
 }
 
 // MARK: - Recommendation Context
@@ -99,6 +104,12 @@ struct RecoContext {
     let warmthSensitivity: Int
     let rainTolerance: Int
     let lookTime: LookTime
+    /// Soft wardrobe-derived taste. Empty maps → affinity features stay 0 (neutral).
+    let taste: TasteAffinityBuilder.Profile
+    /// Soft co-wear / dismissed pair affinities.
+    let combination: CombinationAffinity
+    /// Calendar-derived occasion (wedding, sport, work…).
+    let occasionKind: CalendarOccasionKind
 
     init(
         desiredFormality: Int,
@@ -108,7 +119,10 @@ struct RecoContext {
         profileID: UUID? = nil,
         warmthSensitivity: Int = 3,
         rainTolerance: Int = 3,
-        lookTime: LookTime = .day
+        lookTime: LookTime = .day,
+        taste: TasteAffinityBuilder.Profile = .empty,
+        combination: CombinationAffinity = .empty,
+        occasionKind: CalendarOccasionKind = .none
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -118,6 +132,9 @@ struct RecoContext {
         self.warmthSensitivity = min(max(warmthSensitivity, 1), 5)
         self.rainTolerance = min(max(rainTolerance, 1), 5)
         self.lookTime = lookTime
+        self.taste = taste
+        self.combination = combination
+        self.occasionKind = occasionKind
     }
     
     // Temperature bucket helpers
@@ -172,7 +189,7 @@ final class AIRecommender {
         } else if state.weights.count > FeatureSpace.total {
             state.weights = Array(state.weights.prefix(FeatureSpace.total))
         }
-        state.version = 2
+        state.version = 3
     }
 
     // MARK: - Feature Extraction
@@ -290,6 +307,10 @@ final class AIRecommender {
             x[FeatureSpace.iEvening] = Double(g.formality - 1) / 4.0
         }
 
+        // 12) Taste affinities (color / brand) — 0 when taste profile is empty
+        x[FeatureSpace.iColorAffinity] = ctx.taste.colorScore(for: g)
+        x[FeatureSpace.iBrandAffinity] = ctx.taste.brandScore(for: g)
+
         return x
     }
 
@@ -405,12 +426,16 @@ final class AIRecommender {
         // Love score boost
         score += (Double(g.loveScore) / 100.0) * 0.1
         
-        // Recency boost (haven't worn in a while)
+        // Recency boost (haven't worn in a while — stronger after ~3 weeks)
         if g.lastWorn == nil {
-            score += 0.08
+            score += 0.12
         } else if let last = g.lastWorn {
             let days = ctx.now.timeIntervalSince(last) / 86400.0
-            score += min(0.08, days / 140.0)
+            if days >= 21 {
+                score += min(0.14, 0.06 + (days - 21) / 120.0)
+            } else {
+                score += min(0.08, days / 140.0)
+            }
         }
         
         // Favorite boost
@@ -439,7 +464,50 @@ final class AIRecommender {
         if ctx.isHot && g.category == .outer {
             score -= 0.2
         }
-        
+
+        // Soft taste priors from wardrobe history (safe when affinities are empty)
+        let colorAffinity = ctx.taste.colorScore(for: g)
+        if colorAffinity > 0 {
+            score += colorAffinity * 0.08
+        }
+        let brandAffinity = ctx.taste.brandScore(for: g)
+        if brandAffinity > 0 {
+            score += brandAffinity * 0.06
+        }
+        let styleAffinity = ctx.taste.styleScore(for: g)
+        if styleAffinity > 0 {
+            score += styleAffinity * 0.05
+        }
+        let materialAffinity = ctx.taste.materialScore(for: g)
+        if materialAffinity > 0 {
+            score += materialAffinity * 0.03
+        }
+        let fitAffinity = ctx.taste.fitScore(for: g)
+        if fitAffinity > 0 {
+            score += fitAffinity * 0.03
+        }
+
+        // Occasion priors from calendar context
+        switch ctx.occasionKind {
+        case .sport:
+            if g.formality <= 2 { score += 0.08 }
+            if g.category == .shoes, (g.itemType == .sneakers || g.itemType == .slippers) {
+                score += 0.05
+            }
+            if g.category == .outer, g.formality >= 4 { score -= 0.08 }
+        case .work:
+            if g.formality >= 3 { score += 0.05 }
+        case .formal, .blackTie, .holiday, .shabbat:
+            if g.formality >= 4 { score += 0.06 }
+            if ctx.occasionKind == .blackTie, g.formality >= 4 { score += 0.04 }
+        case .travel:
+            if g.fitTag == .relaxed || g.fitTag == .oversized { score += 0.03 }
+        case .outdoor:
+            if g.category == .outer { score += 0.04 }
+        case .socialEvening, .none:
+            break
+        }
+
         return max(0, min(1, score))
     }
 
@@ -491,7 +559,8 @@ final class AIRecommender {
         ctx: RecoContext,
         modelContext: ModelContext,
         excludedIDs: Set<UUID> = [],
-        penalizedIDs: Set<UUID> = []
+        penalizedIDs: Set<UUID> = [],
+        pairedWith: [Garment] = []
     ) -> [Garment] {
         // Filter out blocked and excluded garments
         let pool = garments.filter { g in
@@ -512,6 +581,12 @@ final class AIRecommender {
 
             // Similarity prior for new items (AI-ready without AI)
             score += similarityBonus(for: g, among: pool)
+
+            // Soft boost/penalty from historically co-worn or dismissed pairs
+            if !pairedWith.isEmpty {
+                let pairAffinity = ctx.combination.affinity(of: g, with: pairedWith)
+                score += pairAffinity * 0.12
+            }
             
             return (g, score)
         }
@@ -593,14 +668,15 @@ final class AIRecommender {
             
             guard !categoryPool.isEmpty else { continue }
             
-            // Get top suggestion for this category
+            // Get top suggestion for this category, biased by already-picked pieces
             let suggestions = suggest(
                 from: categoryPool,
                 k: 1,
                 ctx: ctx,
                 modelContext: modelContext,
                 excludedIDs: excludeSet,
-                penalizedIDs: penalizedIDs
+                penalizedIDs: penalizedIDs,
+                pairedWith: result
             )
             
             if let item = suggestions.first {

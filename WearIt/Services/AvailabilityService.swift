@@ -25,7 +25,8 @@ enum AvailabilityService {
             return .unavailable
         }
 
-        if garment.isWorn || isWornOnDate(garmentID: garment.id, date: date, latestWearMap: latestWearMap) {
+        // Source of truth is WearEvent / lastWorn map — not the legacy Garment.isWorn flag.
+        if isWornOnDate(garmentID: garment.id, date: date, latestWearMap: latestWearMap) {
             return .worn
         }
 

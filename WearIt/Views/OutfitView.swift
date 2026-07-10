@@ -515,6 +515,9 @@ struct OutfitView: View {
 
     private func currentContext(now: Date = .now) -> RecoContext {
         let profile = currentUserProfile()
+        let wardrobe = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
+        let events = (try? context.fetch(FetchDescriptor<WearEvent>())) ?? []
+        let dismissed = (try? context.fetch(FetchDescriptor<DismissedOutfit>())) ?? []
         return RecoContext(
             desiredFormality: Int(desiredFormality),
             temperatureC: temperatureC,
@@ -522,7 +525,12 @@ struct OutfitView: View {
             now: now,
             profileID: profile?.id,
             warmthSensitivity: profile?.warmthSensitivity ?? 3,
-            rainTolerance: profile?.rainTolerance ?? 3
+            rainTolerance: profile?.rainTolerance ?? 3,
+            taste: TasteAffinityBuilder.build(from: wardrobe),
+            combination: CombinationAffinityBuilder.build(
+                wearEvents: events,
+                dismissed: dismissed
+            )
         )
     }
 
@@ -532,9 +540,11 @@ struct OutfitView: View {
     }
 
     private func currentUserProfile() -> UserProfile? {
-        // MVP: Return first profile if any exists
-        let desc = FetchDescriptor<UserProfile>()
-        return (try? context.fetch(desc))?.first
+        CurrentUser.activeProfile(
+            in: context,
+            userIdentifier: AuthManager.shared.userIdentifier,
+            createIfNeeded: false
+        )
     }
 }
 

@@ -82,12 +82,20 @@ enum DS {
         static let hero: CGFloat = 64
     }
     
-    // MARK: Animation
+    // MARK: Animation (tuned for ProMotion 120Hz — short springs, interactive feel)
     enum Animation {
-        static let fast = SwiftUI.Animation.spring(response: 0.25, dampingFraction: 0.8)
-        static let standard = SwiftUI.Animation.spring(response: 0.35, dampingFraction: 0.75)
-        static let slow = SwiftUI.Animation.spring(response: 0.5, dampingFraction: 0.7)
-        static let gentle = SwiftUI.Animation.easeOut(duration: 0.3)
+        /// Press / chip / micro feedback — tracks finger well at 120Hz.
+        static let interactive = SwiftUI.Animation.interactiveSpring(
+            response: 0.28,
+            dampingFraction: 0.86,
+            blendDuration: 0.08
+        )
+        static let fast = SwiftUI.Animation.spring(response: 0.22, dampingFraction: 0.86)
+        static let standard = SwiftUI.Animation.spring(response: 0.30, dampingFraction: 0.84)
+        static let slow = SwiftUI.Animation.spring(response: 0.42, dampingFraction: 0.82)
+        static let gentle = SwiftUI.Animation.easeOut(duration: 0.22)
+        /// Tab / screen crossfade
+        static let transition = SwiftUI.Animation.snappy(duration: 0.22, extraBounce: 0.02)
     }
     
     // MARK: Shadows
@@ -252,7 +260,7 @@ struct DSChip: View {
             .liquidGlassPill(interactive: true, tint: isSelected ? color.opacity(0.16) : nil)
         }
         .buttonStyle(.plain)
-        .animation(DS.Animation.fast, value: isSelected)
+        .animation(DS.Animation.interactive, value: isSelected)
     }
 }
 
@@ -278,7 +286,7 @@ struct DSPrimaryButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(DS.Animation.fast, value: configuration.isPressed)
+            .animation(DS.Animation.interactive, value: configuration.isPressed)
     }
 }
 
@@ -300,7 +308,7 @@ struct DSSecondaryButtonStyle: ButtonStyle {
                     .strokeBorder(.primary.opacity(0.1), lineWidth: 1)
             )
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
-            .animation(DS.Animation.fast, value: configuration.isPressed)
+            .animation(DS.Animation.interactive, value: configuration.isPressed)
     }
 }
 
@@ -309,6 +317,7 @@ struct DSSecondaryButtonStyle: ButtonStyle {
 struct DSGarmentThumbnail: View {
     let garment: Garment
     let size: ThumbnailSize
+    @State private var image: UIImage?
     
     enum ThumbnailSize {
         case small  // 50pt
@@ -342,8 +351,8 @@ struct DSGarmentThumbnail: View {
             RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                 .fill(Color(.systemGray6))
             
-            if let img = thumbnailImage {
-                Image(uiImage: img)
+            if let image {
+                Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .frame(width: size.dimension, height: size.dimension)
@@ -359,13 +368,18 @@ struct DSGarmentThumbnail: View {
             RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                 .strokeBorder(.primary.opacity(0.05), lineWidth: 1)
         )
-        .task(id: garment.imagePath) {
-            guard let path = garment.imagePath else { return }
-            if !ImageStore.fileExists(path: path) {
+        .task(id: "\(garment.id.uuidString)|\(garment.thumbnailPath ?? "")|\(garment.imagePath ?? "")|\(size.dimension)") {
+            let thumbPath = garment.thumbnailPath
+            let imagePath = garment.imagePath
+            let cacheKey = garment.id.uuidString
+            let pixelSize = size.dimension * UIScreen.main.scale
+            let garmentID = garment.id
+
+            if let path = imagePath, !ImageStore.fileExists(path: path) {
                 CloudKitImageSyncService.shared.ensureLocalMainImage(
-                    garmentID: garment.id,
+                    garmentID: garmentID,
                     imagePath: path,
-                    thumbnailPath: garment.thumbnailPath,
+                    thumbnailPath: thumbPath,
                     updateThumbnail: { newPath in
                         if let newPath {
                             garment.thumbnailPath = newPath
@@ -373,21 +387,19 @@ struct DSGarmentThumbnail: View {
                     }
                 )
             }
-        }
-    }
 
-    private var thumbnailImage: UIImage? {
-        if let thumbPath = garment.thumbnailPath {
-            let cacheKey = garment.id.uuidString
-            if let image = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                return image
-            }
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                if let thumbPath,
+                   let cached = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
+                    return cached
+                }
+                if let imagePath {
+                    return ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize)
+                }
+                return nil as UIImage?
+            }.value
+            image = loaded
         }
-        if let path = garment.imagePath {
-            let pixelSize = size.dimension * UIScreen.main.scale
-            return ImageStore.loadThumbnail(path: path, maxPixelSize: pixelSize)
-        }
-        return garment.resolvedImage
     }
 }
 

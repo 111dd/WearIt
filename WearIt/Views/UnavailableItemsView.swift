@@ -31,11 +31,19 @@ struct UnavailableItemsView: View {
     @EnvironmentObject private var auth: AuthManager
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
-    @Query(sort: \WearEvent.date, order: .reverse) private var wearEvents: [WearEvent]
+    @Query private var wearEvents: [WearEvent]
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
 
     @State private var currentDate: Date = Date()
     @State private var selectedSegment: AvailabilitySegment = .unavailable
+
+    init() {
+        var wears = FetchDescriptor<WearEvent>(
+            sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)]
+        )
+        wears.fetchLimit = 150
+        _wearEvents = Query(wears)
+    }
 
     // Compute once, reuse for counts + list
     private var allAvailabilityItems: [AvailabilityService.AvailabilityItem] {
@@ -69,11 +77,7 @@ struct UnavailableItemsView: View {
     }
 
     private var activeProfile: UserProfile? {
-        if let userIdentifier = auth.userIdentifier,
-           let profile = profiles.first(where: { $0.userIdentifier == userIdentifier }) {
-            return profile
-        }
-        return profiles.first(where: { $0.userIdentifier == nil }) ?? profiles.first
+        CurrentUser.activeProfile(from: profiles, userIdentifier: auth.userIdentifier)
     }
 
     private func count(for segment: AvailabilitySegment) -> Int {

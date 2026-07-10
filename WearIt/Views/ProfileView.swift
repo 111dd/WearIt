@@ -22,7 +22,13 @@ struct ProfileView: View {
     @State private var showSignInSheet = false
     @State private var showSignOutDialog = false
     @State private var showResetLearningDialog = false
+    @State private var showBackdropPicker = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
+    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
+    @AppStorage(AppBackdropKeys.customImagePath) private var backdropCustomPath: String = ""
+    @AppStorage(AppBackdropKeys.blurAmount) private var backdropBlurAmount: Double = AppBackdropBlur.defaultAmount
+    @AppStorage(CalendarContextKeys.hebrewEnabled) private var hebrewCalendarEnabled = true
+    @AppStorage(CalendarContextKeys.deviceCalendarEnabled) private var deviceCalendarEnabled = false
 
     @State private var currentDate: Date = Date()
     @State private var prefsSaveDebouncer = Debouncer(interval: 3.0)
@@ -31,35 +37,36 @@ struct ProfileView: View {
     init() { _users = Query(FetchDescriptor<UserProfile>()) }
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(spacing: DS.Spacing.lg) {
-                    heroProfileCard
-                    accountCard
-                    tasteLearningSection
-                    notificationsSection
-                    dataManagementSection
-                    languageSection
+        ScrollView {
+            VStack(spacing: DS.Spacing.lg) {
+                heroProfileCard
+                accountCard
+                appearanceSection
+                tasteLearningSection
+                calendarContextSection
+                notificationsSection
+                dataManagementSection
+                languageSection
 
-                    #if DEBUG
-                    debugSection
-                    #endif
-                    
-                    Button {
-                        DS.haptic(0.6)
-                        saveProfile()
-                    } label: {
-                        Label(String(localized: "profile_save_changes"), systemImage: "checkmark.circle.fill")
-                    }
-                    .dsPrimaryButton()
+                #if DEBUG
+                debugSection
+                #endif
+                
+                Button {
+                    DS.haptic(0.6)
+                    saveProfile()
+                } label: {
+                    Label(String(localized: "profile_save_changes"), systemImage: "checkmark.circle.fill")
                 }
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.top, DS.Spacing.sm)
-                .padding(.bottom, DS.Spacing.lg)
+                .dsPrimaryButton()
             }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.lg)
         }
+        .scrollContentBackground(.hidden)
         .navigationTitle(String(localized: "nav_profile"))
-        .navigationBarTitleDisplayMode(.inline)
+        .minimalCollapsingNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -95,6 +102,16 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+        }
+        .sheet(isPresented: $showBackdropPicker) {
+            // Full-frame photo (no square crop) — backdrop is always blurred full-screen.
+            PHPickerWrapper { image in
+                if let path = AppBackdropStore.saveCustomImage(image) {
+                    backdropCustomPath = path
+                    backdropPresetRaw = AppBackdropPreset.photo.rawValue
+                    DS.haptic(0.45)
+                }
+            }
         }
         .confirmationDialog(
             String(localized: "profile_signout_title"),
@@ -340,6 +357,46 @@ struct ProfileView: View {
         .dsCard()
     }
 
+    private var calendarContextSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "calendar_context_section_title"), icon: "calendar")
+
+            Text(String(localized: "calendar_context_section_subtext"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle(String(localized: "calendar_context_hebrew_toggle"), isOn: $hebrewCalendarEnabled)
+                .tint(.accentColor)
+
+            Text(String(localized: "calendar_context_hebrew_help"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle(String(localized: "calendar_context_device_toggle"), isOn: $deviceCalendarEnabled)
+                .tint(.accentColor)
+                .onChange(of: deviceCalendarEnabled) { _, enabled in
+                    guard enabled else {
+                        CalendarContextService.shared.invalidateCache()
+                        return
+                    }
+                    Task {
+                        _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
+                        CalendarContextService.shared.invalidateCache()
+                    }
+                }
+
+            Text(String(localized: "calendar_context_device_help"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .dsCard()
+        .onChange(of: hebrewCalendarEnabled) { _, _ in
+            CalendarContextService.shared.invalidateCache()
+        }
+    }
+
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             DSSectionHeader(String(localized: "notifications_section_title"), icon: "bell.badge")
@@ -405,6 +462,151 @@ struct ProfileView: View {
         .onChange(of: prefs.morningMinute) { _, _ in scheduleNotificationsDebounced() }
         .onChange(of: prefs.confirmHour) { _, _ in scheduleNotificationsDebounced() }
         .onChange(of: prefs.confirmMinute) { _, _ in scheduleNotificationsDebounced() }
+    }
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "backdrop_section_title"), icon: "photo.on.rectangle.angled")
+
+            Text(String(localized: "backdrop_section_subtitle"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.sm) {
+                    ForEach(AppBackdropPreset.allCases.filter { $0 != .photo }) { preset in
+                        backdropPresetChip(preset)
+                    }
+                    customPhotoChip
+                }
+                .padding(.vertical, 2)
+            }
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack {
+                    Text(String(localized: "backdrop_blur_label"))
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(backdropBlurLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(value: $backdropBlurAmount, in: 0...1, step: 0.05)
+                    .tint(.accentColor)
+                    .accessibilityLabel(String(localized: "backdrop_blur_label"))
+
+                Text(String(localized: "backdrop_blur_hint"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, DS.Spacing.xxs)
+        }
+        .dsCard()
+    }
+
+    private var backdropBlurLabel: String {
+        let percent = Int((backdropBlurAmount * 100).rounded())
+        return String(format: NSLocalizedString("backdrop_blur_percent_format", comment: ""), percent)
+    }
+
+    private func backdropPresetChip(_ preset: AppBackdropPreset) -> some View {
+        let selected = backdropPresetRaw == preset.rawValue
+        return Button {
+            DS.haptic(0.35)
+            backdropPresetRaw = preset.rawValue
+        } label: {
+            VStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: preset.previewColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 72, height: 96)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(
+                                selected ? Color.accentColor : Color.primary.opacity(0.08),
+                                lineWidth: selected ? 2.5 : 1
+                            )
+                    }
+                    .overlay(alignment: .bottom) {
+                        // Mini glass card to preview the floating effect
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 28)
+                            .padding(.bottom, 10)
+                    }
+
+                Text(String(localized: preset.titleKey))
+                    .font(.caption2.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: preset.titleKey))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var customPhotoChip: some View {
+        let selected = backdropPresetRaw == AppBackdropPreset.photo.rawValue
+        return Button {
+            DS.haptic(0.35)
+            showBackdropPicker = true
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    if selected,
+                       !backdropCustomPath.isEmpty,
+                       let image = ImageStore.loadImage(path: backdropCustomPath) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 72, height: 96)
+                            .clipped()
+                            .overlay(Color.black.opacity(0.12))
+                    } else {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.systemGray5))
+                    }
+
+                    Image(systemName: "photo.badge.plus")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary.opacity(0.75))
+                }
+                .frame(width: 72, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            selected ? Color.accentColor : Color.primary.opacity(0.08),
+                            lineWidth: selected ? 2.5 : 1
+                        )
+                }
+
+                Text(String(localized: AppBackdropPreset.photo.titleKey))
+                    .font(.caption2.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if selected, !backdropCustomPath.isEmpty {
+                Button(role: .destructive) {
+                    AppBackdropStore.clearCustomImage()
+                    backdropCustomPath = ""
+                    backdropPresetRaw = AppBackdropPreset.softSky.rawValue
+                } label: {
+                    Label(String(localized: "backdrop_remove_photo"), systemImage: "trash")
+                }
+            }
+        }
+        .accessibilityLabel(String(localized: AppBackdropPreset.photo.titleKey))
     }
 
     private var languageSection: some View {
@@ -514,11 +716,7 @@ struct ProfileView: View {
     }
 
     private var activeProfileID: UUID? {
-        if let userIdentifier = auth.userIdentifier,
-           let profile = users.first(where: { $0.userIdentifier == userIdentifier }) {
-            return profile.id
-        }
-        return users.first(where: { $0.userIdentifier == nil })?.id ?? users.first?.id
+        CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)?.id
     }
 
     private var activeRecoState: RecoState? {

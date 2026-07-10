@@ -85,10 +85,11 @@ final class Garment {
     @Transient
     var safeColorTags: [ColorTag] {
         get {
-            if let tags = colorTags, !tags.isEmpty {
+            // Once colorTags has been written (even as empty), it is authoritative.
+            if let tags = colorTags {
                 return tags
             }
-            // Try to convert legacy colors
+            // Legacy-only records: convert string colors once for display/scoring.
             if let legacy = legacyColors {
                 return legacy.compactMap { colorString in
                     ColorTag.allCases.first { $0.title.lowercased() == colorString.lowercased() }
@@ -98,6 +99,8 @@ final class Garment {
         }
         set {
             colorTags = newValue
+            // Prevent cleared colors from resurrecting via legacy fallback.
+            legacyColors = nil
         }
     }
     

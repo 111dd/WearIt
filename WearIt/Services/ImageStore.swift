@@ -117,6 +117,11 @@ enum ImageStore {
         return image
     }
 
+    /// Memory-only lookup — safe to call on the main thread during scroll.
+    static func cachedThumbnail(cacheKey: String) -> UIImage? {
+        thumbnailCache.object(forKey: NSString(string: "thumb|\(cacheKey)"))
+    }
+
     /// Load a downsampled thumbnail to avoid decoding full-res images
     static func loadThumbnail(path: String, maxPixelSize: CGFloat) -> UIImage? {
         let key = NSString(string: "\(path)|thumb|\(Int(maxPixelSize))")

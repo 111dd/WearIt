@@ -18,7 +18,6 @@ struct WearItTests {
 
         let worn = Garment()
         worn.category = .top
-        worn.isWorn = true
 
         let unavailable = Garment()
         unavailable.category = .top
@@ -32,7 +31,7 @@ struct WearItTests {
             garments: [worn, unavailable, available],
             date: date,
             ctx: ctx,
-            latestWearMap: [:]
+            latestWearMap: [worn.id: date]
         )
 
         #expect(items.contains(where: { $0.id == available.id }))
@@ -47,7 +46,6 @@ struct WearItTests {
 
         let worn = Garment()
         worn.category = .top
-        worn.isWorn = true
 
         let unavailable = Garment()
         unavailable.category = .top
@@ -60,6 +58,7 @@ struct WearItTests {
         available.category = .top
 
         let latestWearMap = [
+            worn.id: date,
             cooldown.id: calendar.date(byAdding: .day, value: -1, to: date) ?? date
         ]
 
@@ -76,6 +75,132 @@ struct WearItTests {
         #expect(statusById[unavailable.id] == .unavailable)
         #expect(statusById[cooldown.id] == .cooldown(daysRemaining: 1))
         #expect(statusById[available.id] == .available)
+    }
+
+    @Test
+    func legacyIsWornFlagDoesNotAffectAvailability() {
+        let date = Date()
+        let ctx = RecoContext(desiredFormality: 3, temperatureC: 20, isRaining: false, now: date)
+
+        let garment = Garment()
+        garment.category = .top
+        garment.isWorn = true
+
+        let status = AvailabilityService.availabilityStatus(
+            for: garment,
+            on: date,
+            ctx: ctx,
+            latestWearMap: [:]
+        )
+        #expect(status == .available)
+    }
+
+    @Test
+    func tasteAffinityBoostsPreferredColorAndBrand() {
+        let lovedNavy = Garment()
+        lovedNavy.category = .top
+        lovedNavy.colorTags = [.navy]
+        lovedNavy.brand = "Acne"
+        lovedNavy.loveScore = 95
+        lovedNavy.timesWorn = 8
+        lovedNavy.isFavorite = true
+
+        let other = Garment()
+        other.category = .top
+        other.colorTags = [.orange]
+        other.brand = "Unknown Co"
+        other.loveScore = 20
+
+        let taste = TasteAffinityBuilder.build(from: [lovedNavy, other])
+        #expect((taste.colorAffinity[.navy] ?? 0) > (taste.colorAffinity[.orange] ?? 0))
+        #expect(
+            (taste.brandAffinity[BrandStore.normalizeBrandKey("Acne")] ?? 0) >
+            (taste.brandAffinity[BrandStore.normalizeBrandKey("Unknown Co")] ?? 0)
+        )
+
+        let candidateNavy = Garment()
+        candidateNavy.category = .bottom
+        candidateNavy.colorTags = [.navy]
+        candidateNavy.brand = "Acne"
+
+        let candidateOrange = Garment()
+        candidateOrange.category = .bottom
+        candidateOrange.colorTags = [.orange]
+
+        #expect(taste.colorScore(for: candidateNavy) > taste.colorScore(for: candidateOrange))
+        #expect(taste.brandScore(for: candidateNavy) > taste.brandScore(for: candidateOrange))
+    }
+
+    @Test
+    func tasteStatsSharesPreferCommonColorsOverRareHighLove() {
+        // Many black items with solid love should outrank one yellow item at 98.
+        var wardrobe: [Garment] = []
+        for _ in 0..<8 {
+            let black = Garment()
+            black.category = .top
+            black.colorTags = [.black]
+            black.loveScore = 80
+            black.timesWorn = 3
+            wardrobe.append(black)
+        }
+
+        let yellow = Garment()
+        yellow.category = .top
+        yellow.colorTags = [.yellow]
+        yellow.loveScore = 98
+        yellow.timesWorn = 1
+        yellow.isFavorite = true
+        wardrobe.append(yellow)
+
+        let taste = TasteAffinityBuilder.build(from: wardrobe)
+        let shares = taste.colorShares(limit: 5)
+        #expect(shares.first?.tag == .black)
+        #expect((shares.first?.share ?? 0) > (taste.colorShares(limit: 10).first(where: { $0.tag == .yellow })?.share ?? 0))
+        // Shares are fractions of total mass — not near-100% averages.
+        #expect((shares.first?.share ?? 1) < 0.95)
+    }
+
+    @Test
+    @MainActor
+    func learningWithShownAlternativesUpdatesWeights() throws {
+        let schema = Schema([RecoState.self])
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: schema, configurations: configuration)
+        let context = ModelContext(container)
+        let profileID = UUID()
+
+        let selected = Garment()
+        selected.category = .top
+        selected.colorTags = [.black]
+        selected.loveScore = 80
+
+        let shown = Garment()
+        shown.category = .top
+        shown.colorTags = [.yellow]
+        shown.loveScore = 40
+
+        let taste = TasteAffinityBuilder.build(from: [selected, shown])
+        let recoContext = RecoContext(
+            desiredFormality: 3,
+            temperatureC: 18,
+            isRaining: false,
+            now: Date(),
+            profileID: profileID,
+            taste: taste
+        )
+
+        AIRecommender.shared.learn(
+            from: [selected],
+            shown: [selected, shown],
+            ctx: recoContext,
+            reward: 0.9,
+            modelContext: context
+        )
+
+        let state = AIRecommender.shared.ensureState(context: context, profileID: profileID)
+        #expect(state.interactionCount == 1)
+        #expect(state.weights.count == FeatureSpace.total)
+        #expect(state.version == 3)
     }
 
     @Test
@@ -280,12 +405,90 @@ struct WearItTests {
 
     @Test
     @MainActor
-    func rainReadyGarmentsReceiveContextBoost() throws {
-        let schema = Schema([RecoState.self])
+    func currentUserPrefersSignedInProfileOverOthers() throws {
+        let schema = Schema([UserProfile.self])
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: configuration)
         let context = ModelContext(container)
 
+        let local = UserProfile()
+        local.userIdentifier = nil
+        local.displayName = "Local"
+        context.insert(local)
+
+        let apple = UserProfile()
+        apple.userIdentifier = "apple.user.1"
+        apple.displayName = "Apple"
+        context.insert(apple)
+
+        let other = UserProfile()
+        other.userIdentifier = "apple.user.2"
+        other.displayName = "Other"
+        context.insert(other)
+        try context.save()
+
+        let profiles = [local, apple, other]
+        let signedIn = CurrentUser.activeProfile(from: profiles, userIdentifier: "apple.user.1")
+        #expect(signedIn?.id == apple.id)
+
+        let skipped = CurrentUser.activeProfile(from: profiles, userIdentifier: nil)
+        #expect(skipped?.id == local.id)
+
+        let unknownSignedIn = CurrentUser.activeProfile(from: profiles, userIdentifier: "missing")
+        #expect(unknownSignedIn == nil)
+    }
+
+    @Test
+    func combinationAffinityRewardsCoWornAndPenalizesDismissedPairs() {
+        let top = UUID()
+        let bottom = UUID()
+        let shoes = UUID()
+
+        let worn = WearEvent(
+            date: Date(),
+            garmentIDs: [top, bottom],
+            source: .planner
+        )
+        let dismissed = DismissedOutfit(
+            key: [top, shoes]
+                .map { $0.uuidString.lowercased() }
+                .sorted()
+                .joined(separator: "|")
+        )
+
+        let affinity = CombinationAffinityBuilder.build(
+            wearEvents: [worn],
+            dismissed: [dismissed]
+        )
+
+        #expect(affinity.score(between: top, and: bottom) > 0)
+        #expect(affinity.score(between: top, and: shoes) < 0)
+        #expect(affinity.topPositivePairs(limit: 3).contains(where: {
+            $0.key == CombinationAffinity.pairKey(top, bottom)
+        }))
+    }
+
+    @Test
+    func autoFillMapperMapsClothingCategoriesAndColors() {
+        let jeans = AutoFillMapper.mapClothingCategory(.jeans)
+        #expect(jeans.category == .bottom)
+        #expect(jeans.itemType == .jeans)
+
+        let jacket = AutoFillMapper.mapClassifierLabel("denim_jacket")
+        #expect(jacket.category == .outer)
+
+        let colors = AutoFillMapper.colorTags(from: [
+            DominantColor(hex: "#000000", name: "black", ratio: 0.6),
+            DominantColor(hex: "#FFFFFF", name: "white", ratio: 0.3),
+            DominantColor(hex: "#808080", name: "gray", ratio: 0.1)
+        ])
+        #expect(colors == [.black, .white, .gray])
+        #expect(AutoFillMapper.colorTag(fromDominantName: "navy") == .navy)
+        #expect(AutoFillMapper.colorTag(fromDominantName: "teal") == .blue)
+    }
+
+    @Test
+    func rainReadyGarmentsReceiveContextBoost() {
         let rainReady = Garment()
         rainReady.category = .outer
         rainReady.weatherTags = [.waterproof]
@@ -301,18 +504,11 @@ struct WearItTests {
             rainTolerance: 5
         )
 
-        let rainReadyScore = AIRecommender.shared.score(
-            rainReady,
-            ctx: recommendationContext,
-            modelContext: context
-        )
-        let untaggedScore = AIRecommender.shared.score(
-            untagged,
-            ctx: recommendationContext,
-            modelContext: context
-        )
+        let rainReadyFeatures = AIRecommender.shared.features(for: rainReady, ctx: recommendationContext)
+        let untaggedFeatures = AIRecommender.shared.features(for: untagged, ctx: recommendationContext)
 
-        #expect(rainReadyScore > untaggedScore)
+        #expect(rainReadyFeatures[FeatureSpace.iRainTaste] > untaggedFeatures[FeatureSpace.iRainTaste])
+        #expect(untaggedFeatures[FeatureSpace.iRainTaste] == 0)
     }
 
 }

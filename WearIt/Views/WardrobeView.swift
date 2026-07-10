@@ -8,6 +8,7 @@ struct WardrobeView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
+    @Query private var wearEvents: [WearEvent]
 
     enum WardrobeSort: String, CaseIterable, Identifiable {
         case newest
@@ -15,6 +16,7 @@ struct WardrobeView: View {
         case name
         case brand
         case category
+        case lastWorn
 
         var id: String { rawValue }
 
@@ -25,6 +27,7 @@ struct WardrobeView: View {
             case .name: return String(localized: "wardrobe_sort_name")
             case .brand: return String(localized: "wardrobe_sort_brand")
             case .category: return String(localized: "wardrobe_sort_category")
+            case .lastWorn: return String(localized: "wardrobe_sort_last_worn")
             }
         }
     }
@@ -39,6 +42,8 @@ struct WardrobeView: View {
     @State private var selectedSeasons: Set<SeasonSuitability> = []
     @State private var seasonScope: SeasonScope = .current
     @State private var showTempSuitable: Bool = false
+    @State private var showUnwornOnly: Bool = false
+    @State private var showForgottenOnly: Bool = false
     @State private var showFilters: Bool = false
 
     @State private var selectedSort: WardrobeSort = .newest
@@ -49,6 +54,14 @@ struct WardrobeView: View {
     @State private var selectedGarmentForEdit: Garment?
     @State private var currentDate: Date = Date()
     @State private var rebuildDebouncer = Debouncer(interval: 0.2)
+
+    private var latestWearMap: [UUID: Date] {
+        WearHistoryService.latestWearMap(events: wearEvents)
+    }
+
+    private var forgottenCutoff: Date {
+        Calendar.current.date(byAdding: .day, value: -21, to: currentDate) ?? currentDate
+    }
 
     // Filtered results
     private var filtered: [Garment] {
@@ -68,8 +81,27 @@ struct WardrobeView: View {
             }
         }
         
-        if showTempSuitable, let currentTemp = weather.currentTempC {
-            result = result.filter { $0.isSuitableFor(temperature: currentTemp) }
+        if showTempSuitable {
+            let temp = weather.currentTempC
+                ?? weather.forecasts.first.map { DayTemperatureProfile(from: $0).effectiveTemp }
+            if let temp {
+                result = result.filter { $0.isSuitableFor(temperature: temp) }
+            }
+        }
+
+        if showUnwornOnly {
+            result = result.filter { garment in
+                AvailabilityService.lastWearDate(for: garment, latestWearMap: latestWearMap) == nil
+            }
+        }
+
+        if showForgottenOnly {
+            result = result.filter { garment in
+                guard !garment.isCurrentlyUnavailable else { return false }
+                let last = AvailabilityService.lastWearDate(for: garment, latestWearMap: latestWearMap)
+                if let last { return last < forgottenCutoff }
+                return garment.loveScore >= 40 || garment.isFavorite
+            }
         }
         
         return result
@@ -94,6 +126,12 @@ struct WardrobeView: View {
             result.sort {
                 $0.category.title.localizedCaseInsensitiveCompare($1.category.title) == .orderedAscending
             }
+        case .lastWorn:
+            result.sort {
+                let left = AvailabilityService.lastWearDate(for: $0, latestWearMap: latestWearMap) ?? .distantPast
+                let right = AvailabilityService.lastWearDate(for: $1, latestWearMap: latestWearMap) ?? .distantPast
+                return left < right
+            }
         }
         visibleGarments = result
     }
@@ -109,156 +147,192 @@ struct WardrobeView: View {
         if selectedCategory != nil { count += 1 }
         if !selectedSeasons.isEmpty { count += selectedSeasons.count }
         if showTempSuitable { count += 1 }
+        if showUnwornOnly { count += 1 }
+        if showForgottenOnly { count += 1 }
         return count
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                VStack(spacing: 0) {
-                    // Compact category filter
-                    categoryFilter
-
-                    seasonScopeFilter
-                    
-                    // Collapsible advanced filters
-                    if showFilters {
-                        advancedFilters
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+            wardrobeScrollContent
+                .scrollContentBackground(.hidden)
+                .refreshable {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .withLocalAppBackdrop()
+                .navigationTitle(String(localized: "nav_wardrobe"))
+                .minimalCollapsingNavBar()
+                .toolbar {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        NavigationLink {
+                            UnavailableItemsView()
+                        } label: {
+                            Image(systemName: "exclamationmark.triangle")
+                        }
+                        sortMenu
+                        filterButton
                     }
+                }
+                .alert("Delete item?", isPresented: $showDeleteAlert) {
+                    Button("Cancel", role: .cancel) { pendingDelete = nil }
+                    Button("Delete", role: .destructive) {
+                        if let g = pendingDelete {
+                            context.delete(g)
+                            try? context.save()
+                            pendingDelete = nil
+                            rebuildVisibleGarments()
+                        }
+                    }
+                } message: {
+                    Text("This action cannot be undone.")
+                }
+                .sheet(item: $selectedGarmentForEdit) { garment in
+                    NavigationStack {
+                        EditGarmentView(garment: garment)
+                    }
+                }
+                .onAppear {
+                    rebuildVisibleGarments()
+                    refreshCurrentDate()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .wardrobeRebuildVisible)) { _ in
+                    rebuildVisibleGarments()
+                }
+                .modifier(WardrobeRebuildTriggers(
+                    filterSignature: wardrobeFilterSignature,
+                    onRebuild: scheduleRebuildVisibleGarments,
+                    onForeground: {
+                        refreshCurrentDate()
+                        scheduleRebuildVisibleGarments()
+                    }
+                ))
+        }
+    }
 
-                    // Main content
-                    if visibleGarments.isEmpty {
-                        DSEmptyState(
-                            icon: "tshirt",
-                            title: String(localized: "wardrobe_empty_title"),
-                            message: String(localized: "wardrobe_empty_message")
-                        )
-                        .padding(DS.Spacing.lg)
-                        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .frame(maxHeight: .infinity)
-                    } else {
-                        ScrollView {
-                            LazyVGrid(
-                                columns: wardrobeColumns,
-                                spacing: DS.Grid.rowSpacing
-                            ) {
-                                ForEach(visibleGarments) { garment in
-                                    NavigationLink {
-                                        EditGarmentView(garment: garment)
-                                    } label: {
-                                        wardrobeTile(garment)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button {
-                                            selectedGarmentForEdit = garment
-                                        } label: {
-                                            Label(String(localized: "planner_go_to_item"), systemImage: "info.circle")
-                                        }
-                                        
-                                        Button {
-                                            replaceInPlanner(with: garment)
-                                        } label: {
-                                            Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
-                                        }
+    private var wardrobeFilterSignature: String {
+        [
+            String(allGarments.count),
+            String(wearEvents.count),
+            selectedCategory?.rawValue ?? "-",
+            selectedSeasons.map(\.rawValue).sorted().joined(separator: ","),
+            seasonScope == .current ? "current" : "all",
+            showTempSuitable ? "1" : "0",
+            showUnwornOnly ? "1" : "0",
+            showForgottenOnly ? "1" : "0",
+            selectedSort.rawValue,
+            weather.currentTempC.map { String(Int($0)) } ?? "-"
+        ].joined(separator: "|")
+    }
 
-                                        if garment.isCurrentlyUnavailable {
-                                            Button {
-                                                garment.markAvailable()
-                                                try? context.save()
-                                                rebuildVisibleGarments()
-                                            } label: {
-                                                Label(String(localized: "planner_mark_available_now"), systemImage: "checkmark.circle")
-                                            }
-                                        } else {
-                                            Button {
-                                                garment.markUnavailable()
-                                                try? context.save()
-                                                rebuildVisibleGarments()
-                                            } label: {
-                                                Label(String(localized: "planner_mark_unavailable_now"), systemImage: "xmark.circle")
-                                            }
-                                        }
+    private var wardrobeScrollContent: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                categoryFilter
+                seasonScopeFilter
+                smartFilterChips
 
-                                        Button {} label: {
-                                            Label(lastWornText(for: garment), systemImage: "clock")
-                                        }
-                                        .disabled(true)
+                if showFilters {
+                    advancedFilters
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
-                                        Button(role: .destructive) {
-                                            pendingDelete = garment
-                                            showDeleteAlert = true
-                                        } label: {
-                                            Label(String(localized: "action_delete"), systemImage: "trash")
-                                        }
-                                    }
-                                }
+                if visibleGarments.isEmpty {
+                    DSEmptyState(
+                        icon: "tshirt",
+                        title: String(localized: "wardrobe_empty_title"),
+                        message: String(localized: "wardrobe_empty_message")
+                    )
+                    .padding(DS.Spacing.lg)
+                    .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.lg)
+                    .padding(.bottom, 100)
+                } else {
+                    LazyVGrid(
+                        columns: wardrobeColumns,
+                        spacing: DS.Grid.rowSpacing
+                    ) {
+                        ForEach(visibleGarments) { garment in
+                            NavigationLink {
+                                EditGarmentView(garment: garment)
+                            } label: {
+                                wardrobeTile(garment)
                             }
-                            .padding(.horizontal, DS.Spacing.md)
-                            .padding(.top, DS.Spacing.xs)
-                            .padding(.bottom, 100)
-                        }
-                        .refreshable {
-                            try? await Task.sleep(nanoseconds: 300_000_000)
+                            .buttonStyle(.plain)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .contextMenu { wardrobeContextMenu(for: garment) }
                         }
                     }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.xs)
+                    .padding(.bottom, 100)
                 }
             }
-            .navigationTitle("Wardrobe")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    NavigationLink {
-                        UnavailableItemsView()
-                    } label: {
-                        Image(systemName: "exclamationmark.triangle")
-                    }
-                    sortMenu
-                    filterButton
-                }
-            }
-            .alert("Delete item?", isPresented: $showDeleteAlert) {
-                Button("Cancel", role: .cancel) { pendingDelete = nil }
-                Button("Delete", role: .destructive) {
-                    if let g = pendingDelete {
-                        context.delete(g)
-                        try? context.save()
-                        pendingDelete = nil
-                                                rebuildVisibleGarments()
-                    }
-                }
-            } message: {
-                Text("This action cannot be undone.")
-            }
-            .sheet(item: $selectedGarmentForEdit) { garment in
-                NavigationStack {
-                    EditGarmentView(garment: garment)
-                }
-            }
-            .onAppear {
+        }
+    }
+
+    @ViewBuilder
+    private func wardrobeContextMenu(for garment: Garment) -> some View {
+        Button {
+            selectedGarmentForEdit = garment
+        } label: {
+            Label(String(localized: "planner_go_to_item"), systemImage: "info.circle")
+        }
+
+        Button {
+            replaceInPlanner(with: garment)
+        } label: {
+            Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
+        }
+
+        if garment.isCurrentlyUnavailable {
+            Button {
+                garment.markAvailable()
+                try? context.save()
                 rebuildVisibleGarments()
-                refreshCurrentDate()
+            } label: {
+                Label(String(localized: "planner_mark_available_now"), systemImage: "checkmark.circle")
             }
-            .onReceive(NotificationCenter.default.publisher(for: .wardrobeRebuildVisible)) { _ in
-                rebuildVisibleGarments()
+        } else {
+            Menu {
+                Button(String(localized: "planner_unavailable_1d")) {
+                    snoozeGarment(garment, days: 1)
+                }
+                Button(String(localized: "planner_unavailable_2d")) {
+                    snoozeGarment(garment, days: 2)
+                }
+                Button(String(localized: "planner_unavailable_1w")) {
+                    snoozeGarment(garment, days: 7)
+                }
+                Button(String(localized: "wardrobe_snooze_2w")) {
+                    snoozeGarment(garment, days: 14)
+                }
+                Button(String(localized: "wardrobe_snooze_1m")) {
+                    snoozeGarment(garment, days: 30)
+                }
+                Divider()
+                Button(String(localized: "planner_mark_unavailable_now"), role: .destructive) {
+                    garment.markUnavailable()
+                    try? context.save()
+                    rebuildVisibleGarments()
+                }
+            } label: {
+                Label(String(localized: "wardrobe_snooze_menu"), systemImage: "moon.zzz")
             }
-            .onChange(of: allGarments.count) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: selectedCategory) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: selectedSeasons) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: seasonScope) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: showTempSuitable) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: selectedSort) { _, _ in scheduleRebuildVisibleGarments() }
-            .onChange(of: weather.currentTempC) { _, _ in scheduleRebuildVisibleGarments() }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-                refreshCurrentDate()
-                scheduleRebuildVisibleGarments()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
-                refreshCurrentDate()
-                scheduleRebuildVisibleGarments()
-            }
+        }
+
+        Button {} label: {
+            Label(lastWornText(for: garment), systemImage: "clock")
+        }
+        .disabled(true)
+
+        Button(role: .destructive) {
+            pendingDelete = garment
+            showDeleteAlert = true
+        } label: {
+            Label(String(localized: "action_delete"), systemImage: "trash")
         }
     }
     
@@ -303,7 +377,7 @@ struct WardrobeView: View {
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
         }
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color.accentColor.opacity(0.02))
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color.accentColor.opacity(0.02), castsShadow: false)
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.sm)
     }
@@ -361,15 +435,31 @@ struct WardrobeView: View {
             }
             
             // Temperature toggle
-            if let temp = weather.currentTempC {
+            if let temp = weather.currentTempC
+                ?? weather.forecasts.first.map({ DayTemperatureProfile(from: $0).effectiveTemp }) {
                 HStack {
                     Toggle(isOn: $showTempSuitable) {
-                        Label("Suitable for \(Int(temp))°", systemImage: "thermometer.medium")
-                            .font(.subheadline)
+                        Label(
+                            String(format: NSLocalizedString("wardrobe_filter_temp_format", comment: ""), Int(temp)),
+                            systemImage: "thermometer.medium"
+                        )
+                        .font(.subheadline)
                     }
                     .tint(.accentColor)
                 }
             }
+
+            Toggle(isOn: $showUnwornOnly) {
+                Label(String(localized: "wardrobe_filter_unworn"), systemImage: "sparkles")
+                    .font(.subheadline)
+            }
+            .tint(.accentColor)
+
+            Toggle(isOn: $showForgottenOnly) {
+                Label(String(localized: "wardrobe_filter_forgotten"), systemImage: "clock.arrow.circlepath")
+                    .font(.subheadline)
+            }
+            .tint(.accentColor)
             
             // Clear button
             if activeFilterCount > 0 {
@@ -377,7 +467,7 @@ struct WardrobeView: View {
                     DS.haptic(0.3)
                     clearAllFilters()
                 } label: {
-                    Label("Clear Filters", systemImage: "xmark.circle")
+                    Label(String(localized: "wardrobe_clear_filters"), systemImage: "xmark.circle")
                         .font(.caption.weight(.semibold))
                 }
                 .dsSecondaryButton()
@@ -408,7 +498,45 @@ struct WardrobeView: View {
             selectedSeasons.removeAll()
             seasonScope = .current
             showTempSuitable = false
+            showUnwornOnly = false
+            showForgottenOnly = false
         }
+    }
+
+    private var smartFilterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                DSChip(
+                    String(localized: "wardrobe_filter_weather_chip"),
+                    icon: "thermometer.medium",
+                    isSelected: showTempSuitable
+                ) {
+                    showTempSuitable.toggle()
+                    scheduleRebuildVisibleGarments()
+                }
+                DSChip(
+                    String(localized: "wardrobe_filter_unworn_chip"),
+                    icon: "sparkles",
+                    isSelected: showUnwornOnly
+                ) {
+                    showUnwornOnly.toggle()
+                    if showUnwornOnly { showForgottenOnly = false }
+                    scheduleRebuildVisibleGarments()
+                }
+                DSChip(
+                    String(localized: "wardrobe_filter_forgotten_chip"),
+                    icon: "clock.arrow.circlepath",
+                    isSelected: showForgottenOnly
+                ) {
+                    showForgottenOnly.toggle()
+                    if showForgottenOnly { showUnwornOnly = false }
+                    scheduleRebuildVisibleGarments()
+                }
+            }
+            .padding(.horizontal, DS.Spacing.md)
+        }
+        .padding(.top, DS.Spacing.xs)
+        .padding(.bottom, DS.Spacing.xxs)
     }
 
     private var currentSeason: SeasonSuitability {
@@ -431,10 +559,11 @@ struct WardrobeView: View {
     }
 
     private var wardrobeColumns: [GridItem] {
-        let count = 3
-        return Array(
-            repeating: GridItem(.flexible(minimum: 120, maximum: DS.Grid.maxColumnWidth), spacing: DS.Grid.columnSpacing, alignment: .top),
-            count: count
+        // Flexible with no large minimum — 3 columns must fit phone width
+        // without forcing tiles past the screen edge.
+        Array(
+            repeating: GridItem(.flexible(minimum: 0), spacing: DS.Grid.columnSpacing, alignment: .top),
+            count: 3
         )
     }
 
@@ -529,6 +658,7 @@ struct WardrobeView: View {
             imagePath: garment.imagePath
         )
         return WardrobeTileView(model: model)
+            .equatable()
     }
 
     private func wardrobeMetaLine(for garment: Garment) -> String {
@@ -537,6 +667,14 @@ struct WardrobeView: View {
         if let fit = garment.fitTag?.title { parts.append(fit) }
         if let size = garment.sizeOption?.title { parts.append(size) }
         return parts.isEmpty ? String(localized: "garment_meta_default") : parts.joined(separator: " · ")
+    }
+
+    private func snoozeGarment(_ garment: Garment, days: Int) {
+        let until = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
+        garment.markUnavailable(until: until)
+        try? context.save()
+        rebuildVisibleGarments()
+        DS.haptic(0.4)
     }
 }
 
@@ -551,71 +689,81 @@ private struct WardrobeTileModel: Equatable {
 
 private struct WardrobeTileView: View, Equatable {
     let model: WardrobeTileModel
+    @State private var image: UIImage?
 
     static func == (lhs: WardrobeTileView, rhs: WardrobeTileView) -> Bool {
         lhs.model == rhs.model
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                .fill(Color(.secondarySystemBackground).opacity(0.35))
+        Color.clear
+            .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
+            .overlay {
+                ZStack(alignment: .bottomLeading) {
+                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                        .fill(Color(.secondarySystemBackground).opacity(0.35))
 
-            GeometryReader { proxy in
-                let size = proxy.size
-                if let image = wardrobeTileImage(maxPixel: max(size.width, size.height) * UIScreen.main.scale) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: size.width, height: size.height)
-                        .clipped()
-                } else {
-                    Image(systemName: model.categoryIcon)
-                        .font(.system(size: DS.IconSize.xl))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: size.width, height: size.height)
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                            .clipped()
+                    } else {
+                        Image(systemName: model.categoryIcon)
+                            .font(.system(size: DS.IconSize.xl))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
+                        startPoint: .bottom,
+                        endPoint: .top
+                    )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.displayTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(model.metaLine)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    .padding(DS.Spacing.xs)
                 }
             }
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
-                startPoint: .bottom,
-                endPoint: .top
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
+                    .blendMode(.plusLighter)
             )
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+            .task(id: "\(model.id.uuidString)|\(model.thumbnailPath ?? "")|\(model.imagePath ?? "")") {
+                let cacheKey = model.id.uuidString
+                if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
+                    image = cached
+                    return
+                }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.displayTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(model.metaLine)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(1)
-            }
-            .padding(DS.Spacing.xs)
-        }
-        .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                .blendMode(.plusLighter)
-        )
-        .clipped()
-    }
+                let thumbPath = model.thumbnailPath
+                let imagePath = model.imagePath
+                let maxPixel: CGFloat = 360
 
-    private func wardrobeTileImage(maxPixel: CGFloat) -> UIImage? {
-        if let thumbPath = model.thumbnailPath {
-            let cacheKey = model.id.uuidString
-            if let image = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                return image
+                let loaded: UIImage? = await Task.detached(priority: .utility) {
+                    if let thumbPath,
+                       let thumb = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
+                        return thumb
+                    }
+                    if let imagePath {
+                        return ImageStore.loadThumbnail(path: imagePath, maxPixelSize: maxPixel)
+                    }
+                    return nil as UIImage?
+                }.value
+                image = loaded
             }
-        }
-        if let path = model.imagePath {
-            return ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
-        }
-        return nil
     }
 }
 
@@ -638,6 +786,23 @@ extension SeasonSuitability {
         case .transitional: return .green
         case .allSeason: return .purple
         }
+    }
+}
+
+private struct WardrobeRebuildTriggers: ViewModifier {
+    let filterSignature: String
+    let onRebuild: () -> Void
+    let onForeground: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: filterSignature) { _, _ in onRebuild() }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                onForeground()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                onForeground()
+            }
     }
 }
 

@@ -1,301 +1,43 @@
-//
-//  EditGarmentView.swift
-//  WearIt
-//
-//  Unified structured editing flow with auto-generated titles.
-//  Same experience as AddGarmentView for consistency.
-
 import SwiftUI
 import SwiftData
 import UIKit
 
+/// Item editor aligned with the redesigned AddGarment flow.
 struct EditGarmentView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
 
     @Bindable var garment: Garment
-    
     @Query(sort: \Brand.name, order: .forward) private var brands: [Brand]
 
-    // MARK: - Image Editing
-    @StateObject private var imageService = ImageEditingService()
-    
-    // MARK: - Local State (for editing)
     @State private var isEditingTitle = false
     @State private var showAdvancedOptions = false
     @State private var showDeleteAlert = false
     @State private var errorMessage: String?
     @State private var hasUnsavedChanges = false
-    @State private var brandText: String = ""
+    @State private var brandText = ""
     @State private var showGalleryViewer = false
     @State private var galleryStartIndex = 0
-    
+    @State private var heroImage: UIImage?
+    @State private var isLoadingHero = false
+
+    @State private var showCamera = false
+    @State private var showPhotoPicker = false
+    @State private var showCropper = false
+    @State private var pendingCropImage: UIImage?
+    @State private var originalPickedImage: UIImage?
+    @State private var cropMode: CropMode = .replaceMain
+
+    private enum CropMode {
+        case replaceMain
+        case addGallery
+    }
+
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
 
-    // MARK: - Body
-
-    var body: some View {
-        ZStack {
-            DS.Surface.bg
-                .ignoresSafeArea()
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    imageSection
-
-                    contentArea
-                }
-            }
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .navigationTitle("Edit Item")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(DS.Surface.bg, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .imageEditing(service: imageService)
-        .fullScreenCover(isPresented: $showGalleryViewer) {
-            GalleryViewer(
-                imagePaths: galleryImagePaths,
-                startIndex: galleryStartIndex
-            )
-        }
-        .onAppear {
-            brandText = garment.brand ?? ""
-            BrandStore.syncFromGarments(context: context)
-        }
-        .alert("Delete Item?", isPresented: $showDeleteAlert) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { deleteItem() }
-        } message: {
-            Text("This action cannot be undone.")
-        }
-        .alert("Error", isPresented: .init(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK") {}
-        } message: {
-            Text(errorMessage ?? "Something went wrong.")
-        }
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    feedback.impactOccurred()
-                    saveChanges()
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(DS.Text.inverted)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(DS.Surface.inverted, in: Capsule())
-                .overlay(
-                    Capsule()
-                        .strokeBorder(DS.Border.subtle, lineWidth: 0.6)
-                )
-            }
-        }
-    }
-
-    // MARK: - Sections
-
-    private var imageSection: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 0, style: .continuous)
-                .fill(DS.Surface.card)
-
-            if let image = garment.resolvedImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .overlay(
-                        LinearGradient(
-                            colors: [Color.black.opacity(0.0), Color.black.opacity(0.35)],
-                            startPoint: .center,
-                            endPoint: .bottom
-                        )
-                    )
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: garment.category.icon)
-                        .font(.system(size: 48, weight: .light))
-                        .foregroundStyle(DS.Text.tertiary)
-                    Text(String(localized: "garment_no_image"))
-                        .font(.caption)
-                        .foregroundStyle(DS.Text.secondary)
-                }
-            }
-
-            if imageService.isProcessing {
-                Color.black.opacity(0.3)
-                ProgressView()
-                    .tint(DS.Text.inverted)
-            }
-        }
-        .frame(height: 260)
-        .frame(maxWidth: .infinity)
-        .clipped()
-        .overlay(
-            Rectangle()
-                .fill(LinearGradient(
-                    colors: [Color.black.opacity(0.0), Color.black.opacity(0.18)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-        )
-        .overlay(
-            Rectangle()
-                .strokeBorder(DS.Border.subtle, lineWidth: 1)
-        )
-    }
-
-    private var contentArea: some View {
-        VStack(spacing: DS.Spacing.xl) {
-            coreDetailsCard
-            seasonCard
-            attributesCard
-            advancedCard
-            actionsCard
-            Spacer(minLength: 40)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
-        .padding(.bottom, 24)
-    }
-
-    private var coreDetailsCard: some View {
-        card {
-            imageActionsSection
-            titleSection
-            categorySection
-            itemTypeSection
-            if shouldShowFit || shouldShowSize {
-                fitSizeSection
-            }
-            colorSection
-            brandSection
-        }
-    }
-
-    private var seasonCard: some View {
-        card { seasonSection }
-    }
-
-    private var attributesCard: some View {
-        card { attributesSection }
-    }
-
-    private var advancedCard: some View {
-        card { advancedSection }
-    }
-
-    private var actionsCard: some View {
-        card { actionsSection }
-    }
-
-    private var imageActionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !galleryImagePaths.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(Array(galleryImagePaths.enumerated()), id: \.offset) { index, path in
-                            if let image = ImageStore.loadImage(path: path) {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 64, height: 64)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .onTapGesture {
-                                        galleryStartIndex = index
-                                        showGalleryViewer = true
-                                    }
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            removeGalleryImage(at: index)
-                                        } label: {
-                                            Label(String(localized: "action_remove_photo"), systemImage: "trash")
-                                        }
-                                    }
-                            }
-                        }
-                    }
-                }
-            }
-
-            HStack(spacing: 12) {
-                Menu {
-                    Button {
-                        feedback.impactOccurred()
-                        imageService.selectFromCamera { result in
-                            applyImageResult(result)
-                        }
-                    } label: {
-                        Label(String(localized: "garment_take_photo"), systemImage: "camera")
-                    }
-
-                    Button {
-                        feedback.impactOccurred()
-                        imageService.selectFromLibrary { result in
-                            applyImageResult(result)
-                        }
-                    } label: {
-                        Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
-                    }
-                } label: {
-                    Label(String(localized: "garment_change_image"), systemImage: "photo.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                Menu {
-                    Button {
-                        feedback.impactOccurred()
-                        imageService.selectFromCamera { result in
-                            addGalleryImage(result)
-                        }
-                    } label: {
-                        Label(String(localized: "garment_take_photo"), systemImage: "camera")
-                    }
-
-                    Button {
-                        feedback.impactOccurred()
-                        imageService.selectFromLibrary { result in
-                            addGalleryImage(result)
-                        }
-                    } label: {
-                        Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
-                    }
-                } label: {
-                    Label(String(localized: "garment_add_photo"), systemImage: "plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-
-                if garment.imagePath != nil || garment.imageData != nil {
-                    Button(role: .destructive) {
-                        feedback.impactOccurred(intensity: 0.5)
-                        clearImage()
-                    } label: {
-                        Label(String(localized: "action_remove_photo"), systemImage: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                }
-            }
-        }
-    }
-
-    private func card<Content: View>(
-        cornerRadius: CGFloat = 16,
-        @ViewBuilder _ content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            content()
-        }
-        .padding(16)
-        .sectionSurface(cornerRadius: cornerRadius)
+    private var categoryColumns: [GridItem] {
+        Array(repeating: GridItem(.flexible(minimum: 0), spacing: DS.Spacing.xs), count: 3)
     }
 
     private var galleryImagePaths: [String] {
@@ -313,115 +55,6 @@ struct EditGarmentView: View {
         guard !text.isEmpty else { return false }
         return !brands.contains(where: { $0.name.lowercased() == text.lowercased() })
     }
-    
-    private var titleSection: some View {
-        VStack(spacing: 8) {
-            if isEditingTitle {
-                TextField("Custom title", text: Binding(
-                    get: { garment.userTitleOverride ?? garment.autoGeneratedTitle },
-                    set: { 
-                        garment.userTitleOverride = $0
-                        hasUnsavedChanges = true
-                    }
-                ))
-                .textFieldStyle(.plain)
-                .dsFieldStyle()
-                .foregroundStyle(DS.Text.primary)
-                .multilineTextAlignment(.center)
-                .onSubmit { isEditingTitle = false }
-                
-                Button("Use Auto Title") {
-                    garment.userTitleOverride = nil
-                    isEditingTitle = false
-                    hasUnsavedChanges = true
-                }
-                .font(.caption)
-                .foregroundStyle(DS.Text.secondary)
-            } else {
-                Text(garment.displayTitle)
-                    .font(.title3.bold())
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(DS.Text.primary)
-                
-                Button {
-                    isEditingTitle = true
-                } label: {
-                    Label("Edit Title", systemImage: "pencil")
-                        .font(.caption)
-                }
-                .foregroundStyle(DS.Text.secondary)
-            }
-        }
-    }
-    
-    private var categorySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "garment_category"))
-                .font(.headline)
-            
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 10) {
-                ForEach(Category.allCases) { cat in
-                    Button {
-                        feedback.impactOccurred(intensity: 0.5)
-                        let previousCategory = garment.category
-                        garment.category = cat
-                        hasUnsavedChanges = true
-                        
-                        // Reset item type if it doesn't belong to new category
-                        if previousCategory != cat, let current = garment.itemType, !cat.itemTypes.contains(current) {
-                            garment.itemType = nil
-                        }
-                        if cat != .top && cat != .bottom {
-                            garment.fitTag = nil
-                        }
-                        if cat != .top && cat != .bottom && cat != .shoes {
-                            garment.sizeOption = nil
-                        } else if let current = garment.sizeOption, !SizeOption.options(for: cat).contains(current) {
-                            garment.sizeOption = nil
-                        }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: cat.icon)
-                                .font(.title2)
-                            Text(cat.title)
-                                .font(.caption2.bold())
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            garment.category == cat ? DS.Accent.primary.opacity(0.15) : DS.Surface.card,
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                        .foregroundStyle(garment.category == cat ? DS.Accent.primary : DS.Text.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(garment.category == cat ? DS.Accent.primary : DS.Border.subtle, lineWidth: garment.category == cat ? 2 : 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-    
-    private var itemTypeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "garment_item_type"))
-                .font(.headline)
-            
-            ItemTypeSelector(
-                category: garment.category,
-                selectedType: Binding(
-                    get: { garment.itemType },
-                    set: { 
-                        garment.itemType = $0
-                        hasUnsavedChanges = true
-                    }
-                )
-            )
-        }
-    }
 
     private var shouldShowFit: Bool {
         garment.category == .top || garment.category == .bottom
@@ -435,83 +68,411 @@ struct EditGarmentView: View {
         SizeOption.options(for: garment.category)
     }
 
-    private var fitSizeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "fit_size_title"))
-                .font(.headline)
+    var body: some View {
+        ScrollView {
+            VStack(spacing: DS.Spacing.md) {
+                heroCard
+                essentialsCard
+                if shouldShowFit || shouldShowSize {
+                    fitSizeCard
+                }
+                colorCard
+                brandCard
+                seasonCard
+                attributesCard
+                advancedCard
+                dangerCard
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.xxl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .withLocalAppBackdrop()
+        .navigationTitle(String(localized: "nav_edit_item"))
+        .navigationBarTitleDisplayMode(.inline)
+        .minimalCollapsingNavBar()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            stickySaveBar
+        }
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(String(localized: "action_save")) {
+                    feedback.impactOccurred()
+                    saveChanges()
+                }
+            }
+        }
+        .onAppear {
+            brandText = garment.brand ?? ""
+            BrandStore.syncFromGarments(context: context)
+            loadHeroImage()
+        }
+        .onChange(of: garment.imagePath) { _, _ in
+            loadHeroImage()
+        }
+        .alert(String(localized: "edit_delete_title"), isPresented: $showDeleteAlert) {
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+            Button(String(localized: "action_delete"), role: .destructive) { deleteItem() }
+        } message: {
+            Text(String(localized: "edit_delete_message"))
+        }
+        .alert(String(localized: "error_title"), isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button(String(localized: "action_confirm"), role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? String(localized: "error_generic"))
+        }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoLibraryPickerWrapper { image in
+                beginCrop(with: image)
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraPickerWrapper { image in
+                beginCrop(with: image)
+            }
+        }
+        .fullScreenCover(isPresented: $showCropper) {
+            if let pendingCropImage {
+                ImageCropperView(
+                    image: pendingCropImage,
+                    initialAspect: .portrait34,
+                    onCancel: {
+                        showCropper = false
+                        self.pendingCropImage = nil
+                    },
+                    onDone: { cropped in
+                        showCropper = false
+                        self.pendingCropImage = nil
+                        applyCroppedImage(cropped, original: originalPickedImage ?? cropped)
+                    }
+                )
+            }
+        }
+        .fullScreenCover(isPresented: $showGalleryViewer) {
+            GalleryViewer(imagePaths: galleryImagePaths, startIndex: galleryStartIndex)
+        }
+    }
 
+    // MARK: - Sticky save
+
+    private var stickySaveBar: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.35)
+            Button {
+                feedback.impactOccurred(intensity: 1.0)
+                saveChanges()
+            } label: {
+                Text(String(localized: "action_save_changes"))
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .dsPrimaryButton()
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.md)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    // MARK: - Cards
+
+    private var heroCard: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            ZStack {
+                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .fill(Color(.secondarySystemBackground).opacity(0.45))
+
+                if let heroImage {
+                    Image(uiImage: heroImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .clipped()
+                } else if isLoadingHero {
+                    ProgressView()
+                } else {
+                    VStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: garment.category.icon)
+                            .font(.system(size: 44, weight: .light))
+                            .foregroundStyle(.tertiary)
+                        Text(String(localized: "garment_no_image"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .frame(maxHeight: 280)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
+            )
+
+            if !galleryImagePaths.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        ForEach(Array(galleryImagePaths.enumerated()), id: \.offset) { index, path in
+                            AsyncGalleryThumb(path: path)
+                                .onTapGesture {
+                                    galleryStartIndex = index
+                                    showGalleryViewer = true
+                                }
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        removeGalleryImage(at: index)
+                                    } label: {
+                                        Label(String(localized: "action_remove_photo"), systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: DS.Spacing.sm) {
+                Button {
+                    cropMode = .replaceMain
+                    reopenCropperForExisting()
+                } label: {
+                    Label(String(localized: "add_garment_edit_photo"), systemImage: "crop")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .disabled(heroImage == nil && garment.originalImagePath == nil)
+
+                Menu {
+                    Button {
+                        cropMode = .replaceMain
+                        showCamera = true
+                    } label: {
+                        Label(String(localized: "garment_take_photo"), systemImage: "camera")
+                    }
+                    Button {
+                        cropMode = .replaceMain
+                        showPhotoPicker = true
+                    } label: {
+                        Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    Label(String(localized: "garment_change_image"), systemImage: "photo")
+                        .font(.caption.weight(.semibold))
+                }
+
+                Menu {
+                    Button {
+                        cropMode = .addGallery
+                        showCamera = true
+                    } label: {
+                        Label(String(localized: "garment_take_photo"), systemImage: "camera")
+                    }
+                    Button {
+                        cropMode = .addGallery
+                        showPhotoPicker = true
+                    } label: {
+                        Label(String(localized: "garment_choose_library"), systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    Label(String(localized: "garment_add_photo"), systemImage: "plus")
+                        .font(.caption.weight(.semibold))
+                }
+
+                Spacer(minLength: 0)
+
+                if garment.imagePath != nil || garment.imageData != nil {
+                    Button(role: .destructive) {
+                        clearImage()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .foregroundStyle(.secondary)
+
+            titleEditor
+        }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+    }
+
+    private var titleEditor: some View {
+        VStack(spacing: DS.Spacing.xs) {
+            if isEditingTitle {
+                TextField(String(localized: "garment_edit_title"), text: Binding(
+                    get: { garment.userTitleOverride ?? garment.autoGeneratedTitle },
+                    set: {
+                        garment.userTitleOverride = $0
+                        hasUnsavedChanges = true
+                    }
+                ))
+                .textFieldStyle(.plain)
+                .dsFieldStyle()
+                .multilineTextAlignment(.center)
+                .onSubmit { isEditingTitle = false }
+
+                Button(String(localized: "add_garment_use_auto_title")) {
+                    garment.userTitleOverride = nil
+                    isEditingTitle = false
+                    hasUnsavedChanges = true
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+                Text(garment.displayTitle)
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    isEditingTitle = true
+                } label: {
+                    Label(String(localized: "add_garment_edit_title"), systemImage: "pencil")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, DS.Spacing.xxs)
+    }
+
+    private var essentialsCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "garment_category"), icon: "square.grid.2x2")
+
+            LazyVGrid(columns: categoryColumns, spacing: DS.Spacing.xs) {
+                ForEach(Category.allCases) { cat in
+                    Button {
+                        feedback.impactOccurred(intensity: 0.5)
+                        selectCategory(cat)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: cat.icon)
+                                .font(.title3)
+                            Text(cat.title)
+                                .font(.caption2.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DS.Spacing.sm)
+                        .foregroundStyle(garment.category == cat ? Color.accentColor : .primary)
+                        .background(
+                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                .fill(garment.category == cat ? Color.accentColor.opacity(0.14) : Color(.secondarySystemBackground).opacity(0.35))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                .strokeBorder(garment.category == cat ? Color.accentColor.opacity(0.55) : Color.clear, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text(String(localized: "garment_item_type"))
+                .font(.subheadline.weight(.semibold))
+                .padding(.top, DS.Spacing.xxs)
+            ItemTypeSelector(
+                category: garment.category,
+                selectedType: Binding(
+                    get: { garment.itemType },
+                    set: {
+                        garment.itemType = $0
+                        hasUnsavedChanges = true
+                    }
+                )
+            )
+        }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+    }
+
+    private var fitSizeCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "fit_size_title"), icon: "ruler")
             if shouldShowFit {
                 SingleTagPicker(
                     title: String(localized: "fit_label"),
                     allTags: FitTag.allCases,
                     selectedTag: Binding(
                         get: { garment.fitTag },
-                        set: {
-                            garment.fitTag = $0
-                            hasUnsavedChanges = true
-                        }
+                        set: { garment.fitTag = $0; hasUnsavedChanges = true }
                     ),
                     titleForTag: { $0.title }
                 )
             }
-
             if shouldShowSize {
                 SingleTagPicker(
                     title: String(localized: "size_label"),
                     allTags: sizeOptions,
                     selectedTag: Binding(
                         get: { garment.sizeOption },
-                        set: {
-                            garment.sizeOption = $0
-                            hasUnsavedChanges = true
-                        }
+                        set: { garment.sizeOption = $0; hasUnsavedChanges = true }
                     ),
                     titleForTag: { $0.title }
                 )
             }
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
-    
-    private var colorSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+
+    private var colorCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.xs) {
+                Image(systemName: "paintpalette")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DS.Text.secondary)
                 Text(String(localized: "garment_colors"))
-                    .font(.headline)
-                Spacer()
-                if !garment.safeColorTags.isEmpty {
-                    Text("\(garment.safeColorTags.count) selected")
-                        .font(.caption)
-                        .foregroundStyle(DS.Text.secondary)
-                } else {
-                    Text(String(localized: "garment_colors_recommended"))
-                        .font(.caption)
-                        .foregroundStyle(DS.Text.secondary)
-                }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(DS.Text.secondary)
+                Spacer(minLength: 0)
+                Text(
+                    garment.safeColorTags.isEmpty
+                        ? String(localized: "garment_colors_recommended")
+                        : String(format: NSLocalizedString("add_garment_colors_selected_format", comment: ""), garment.safeColorTags.count)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            
+
             ColorTagSelector(selectedColors: Binding(
                 get: { garment.safeColorTags },
-                set: { 
+                set: {
                     garment.safeColorTags = $0
                     hasUnsavedChanges = true
                 }
             ))
-            
+
             Text(String(localized: "tag_bilingual_hint"))
                 .font(.caption2)
-                .foregroundStyle(DS.Text.secondary)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
-    
-    private var brandSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "garment_brand"))
-                .font(.headline)
-            
+
+    private var brandCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "garment_brand"), icon: "tag")
             TextField(String(localized: "garment_brand_placeholder"), text: $brandText)
                 .textFieldStyle(.plain)
                 .dsFieldStyle()
-                .foregroundStyle(DS.Text.primary)
                 .onChange(of: brandText) { _, newValue in
                     garment.brand = newValue.isEmpty ? nil : newValue
                     hasUnsavedChanges = true
@@ -525,41 +486,33 @@ struct EditGarmentView: View {
                             garment.brand = suggestion.name
                             hasUnsavedChanges = true
                         } label: {
-                            Text(suggestion.name)
-                                .font(.caption)
-                                .foregroundStyle(DS.Text.primary)
+                            Text(suggestion.name).font(.caption)
                         }
                         .buttonStyle(.plain)
                     }
-
                     if shouldShowAddBrand {
-                        Button {
-                            // Keep the typed brand
-                        } label: {
-                            Text(String(format: NSLocalizedString("brand_add_suggestion", comment: ""), brandText))
-                                .font(.caption)
-                                .foregroundStyle(DS.Text.secondary)
-                        }
-                        .buttonStyle(.plain)
+                        Text(String(format: NSLocalizedString("brand_add_suggestion", comment: ""), brandText))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
-    
-    private var seasonSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(String(localized: "garment_season"))
-                .font(.headline)
-            
+
+    private var seasonCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "garment_season"), icon: "leaf")
             SeasonSelector(selectedSeason: Binding(
                 get: { garment.seasonSuitability },
-                set: { 
+                set: {
                     garment.seasonSuitability = $0
                     hasUnsavedChanges = true
                 }
             ))
-            
             if garment.seasonSuitability != nil {
                 DisclosureGroup(String(localized: "garment_temperature_range")) {
                     TemperatureRangeSlider(
@@ -577,27 +530,16 @@ struct EditGarmentView: View {
                 .font(.subheadline)
             }
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
-    
-    private var attributesSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(String(localized: "garment_attributes"))
-                .font(.headline)
-            
-            // Warmth
-            HStack {
-                Image(systemName: "thermometer.medium")
-                    .foregroundStyle(.secondary)
-                Text(String(localized: "garment_warmth"))
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                HStack(spacing: 4) {
-                    ForEach(1...5, id: \.self) { i in
-                        Circle()
-                            .fill(i <= garment.warmth ? DS.Accent.warmth : DS.Border.subtle.opacity(0.6))
-                            .frame(width: 8, height: 8)
-                    }
-                }
+
+    private var attributesCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            DSSectionHeader(String(localized: "garment_attributes"), icon: "slider.horizontal.3")
+
+            attributeRow(icon: "thermometer.medium", title: String(localized: "garment_warmth"), value: garment.warmth, tint: .orange) {
                 Stepper("", value: Binding(
                     get: { garment.warmth },
                     set: { garment.warmth = $0; hasUnsavedChanges = true }
@@ -605,21 +547,8 @@ struct EditGarmentView: View {
                 .labelsHidden()
                 .controlSize(.small)
             }
-            
-            // Formality
-            HStack {
-                Image(systemName: "briefcase")
-                    .foregroundStyle(.secondary)
-                Text(String(localized: "garment_formality"))
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                HStack(spacing: 4) {
-                    ForEach(1...5, id: \.self) { i in
-                        Circle()
-                            .fill(i <= garment.formality ? DS.Accent.primary : DS.Border.subtle.opacity(0.6))
-                            .frame(width: 8, height: 8)
-                    }
-                }
+
+            attributeRow(icon: "briefcase", title: String(localized: "garment_formality"), value: garment.formality, tint: .accentColor) {
                 Stepper("", value: Binding(
                     get: { garment.formality },
                     set: { garment.formality = $0; hasUnsavedChanges = true }
@@ -627,79 +556,69 @@ struct EditGarmentView: View {
                 .labelsHidden()
                 .controlSize(.small)
             }
-            
-            // Love
-            VStack(alignment: .leading, spacing: 8) {
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
                 HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(DS.Accent.love)
-                    Text(String(localized: "garment_love"))
-                        .font(.subheadline.weight(.medium))
+                    Image(systemName: "heart.fill").foregroundStyle(.pink)
+                    Text(String(localized: "garment_love")).font(.subheadline.weight(.medium))
                     Spacer()
                     Text("\(garment.loveScore)%")
                         .font(.caption.bold())
-                        .foregroundStyle(DS.Accent.love)
+                        .foregroundStyle(.pink)
                 }
                 Slider(value: Binding(
                     get: { Double(garment.loveScore) },
                     set: { garment.loveScore = Int($0); hasUnsavedChanges = true }
                 ), in: 0...100)
-                .tint(DS.Accent.love)
+                .tint(.pink)
             }
-            
-            // Favorite
+
             Toggle(isOn: Binding(
                 get: { garment.isFavorite },
                 set: { garment.isFavorite = $0; hasUnsavedChanges = true }
             )) {
-                Label("Favorite", systemImage: "star.fill")
+                Label(String(localized: "edit_favorite"), systemImage: "star.fill")
                     .font(.subheadline.weight(.medium))
             }
             .tint(.yellow)
-            
-            // Last Worn
+
             HStack {
-                Image(systemName: "calendar")
-                    .foregroundStyle(.secondary)
-                Text("Last Worn")
-                    .font(.subheadline.weight(.medium))
+                Image(systemName: "calendar").foregroundStyle(.secondary)
+                Text(String(localized: "edit_last_worn")).font(.subheadline.weight(.medium))
                 Spacer()
                 if let lastWorn = garment.lastWorn {
                     Text(lastWorn.formatted(date: .abbreviated, time: .omitted))
                         .font(.subheadline)
-                        .foregroundStyle(DS.Text.secondary)
-                    
-                    Button("Reset") {
+                        .foregroundStyle(.secondary)
+                    Button(String(localized: "crop_reset")) {
                         garment.lastWorn = nil
                         hasUnsavedChanges = true
                     }
                     .font(.caption)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 } else {
-                    Text("Never")
+                    Text(String(localized: "edit_never_worn"))
                         .font(.subheadline)
-                        .foregroundStyle(DS.Text.tertiary)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            
-            // Times Worn
+
             HStack {
-                Image(systemName: "number")
-                    .foregroundStyle(.secondary)
-                Text("Times Worn")
-                    .font(.subheadline.weight(.medium))
+                Image(systemName: "number").foregroundStyle(.secondary)
+                Text(String(localized: "edit_times_worn")).font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(garment.timesWorn)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
-    
-    private var advancedSection: some View {
+
+    private var advancedCard: some View {
         DisclosureGroup(String(localized: "garment_more_options"), isExpanded: $showAdvancedOptions) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 SingleTagPicker(
                     title: String(localized: "garment_pattern"),
                     allTags: PatternTag.allCases,
@@ -709,55 +628,40 @@ struct EditGarmentView: View {
                     ),
                     titleForTag: { $0.title }
                 )
-                
-                // Notes
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Notes")
-                        .font(.caption.bold())
-                        .foregroundStyle(DS.Text.secondary)
-                        .textCase(.uppercase)
-                    
-                    TextField("Add notes...", text: Binding(
+
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    Text(String(localized: "edit_notes"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(String(localized: "edit_notes_placeholder"), text: Binding(
                         get: { garment.notes ?? "" },
                         set: { garment.notes = $0.isEmpty ? nil : $0; hasUnsavedChanges = true }
                     ), axis: .vertical)
                     .lineLimit(3...6)
                     .textFieldStyle(.plain)
                     .dsFieldStyle()
-                    .foregroundStyle(DS.Text.primary)
                 }
             }
-            .padding(.top, 12)
+            .padding(.top, DS.Spacing.sm)
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
-    private var actionsSection: some View {
-        VStack(spacing: 12) {
-            Button {
-                feedback.impactOccurred(intensity: 1.0)
-                saveChanges()
-            } label: {
-                Text(String(localized: "action_save_changes"))
-                    .font(.headline)
-                    .foregroundStyle(DS.Text.inverted)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(DS.Surface.inverted)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-
+    private var dangerCard: some View {
+        VStack(spacing: DS.Spacing.sm) {
             Button {
                 if let url = URL(string: "wearit://planner") {
                     openURL(url)
                 }
             } label: {
-                Label("Open Today's Plan", systemImage: "sparkles")
+                Label(String(localized: "edit_open_planner"), systemImage: "sparkles")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
             }
-            .buttonStyle(.bordered)
-            
+            .dsSecondaryButton()
+
             Button(role: .destructive) {
                 feedback.impactOccurred(intensity: 0.5)
                 showDeleteAlert = true
@@ -765,34 +669,140 @@ struct EditGarmentView: View {
                 Text(String(localized: "action_delete_item"))
                     .font(.subheadline.weight(.medium))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
             }
             .buttonStyle(.bordered)
             .tint(.red)
         }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
-    // MARK: - Actions
-
-    private func applyImageResult(_ result: ImageEditingResult) {
-        garment.imagePath = result.imagePath
-        garment.thumbnailPath = result.thumbnailPath
-        garment.imageData = result.jpegData
-
-        if let path = garment.imagePath {
-            CloudKitImageSyncService.shared.enqueueUpload(garmentID: garment.id, imagePath: path)
+    private func attributeRow<Trailing: View>(
+        icon: String,
+        title: String,
+        value: Int,
+        tint: Color,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: icon).foregroundStyle(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            HStack(spacing: 4) {
+                ForEach(1...5, id: \.self) { i in
+                    Circle()
+                        .fill(i <= value ? tint : Color.secondary.opacity(0.2))
+                        .frame(width: 8, height: 8)
+                }
+            }
+            trailing()
         }
-        
-        if let originalPath = result.originalPath {
+    }
+
+    // MARK: - Image helpers
+
+    private func loadHeroImage() {
+        let path = garment.imagePath
+        let data = garment.imageData
+        isLoadingHero = true
+        Task(priority: .userInitiated) {
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                if let path, let img = ImageStore.loadThumbnail(path: path, maxPixelSize: 900)
+                    ?? ImageStore.loadImage(path: path) {
+                    return img
+                }
+                if let data { return UIImage(data: data) }
+                return nil
+            }.value
+            await MainActor.run {
+                heroImage = loaded
+                isLoadingHero = false
+            }
+        }
+    }
+
+    private func selectCategory(_ cat: Category) {
+        let previous = garment.category
+        garment.category = cat
+        hasUnsavedChanges = true
+        if previous != cat, let current = garment.itemType, !cat.itemTypes.contains(current) {
+            garment.itemType = nil
+        }
+        if cat != .top && cat != .bottom {
+            garment.fitTag = nil
+        }
+        if cat != .top && cat != .bottom && cat != .shoes {
+            garment.sizeOption = nil
+        } else if let current = garment.sizeOption, !SizeOption.options(for: cat).contains(current) {
+            garment.sizeOption = nil
+        }
+    }
+
+    private func beginCrop(with image: UIImage) {
+        originalPickedImage = image
+        pendingCropImage = image
+        showCropper = true
+    }
+
+    private func reopenCropperForExisting() {
+        Task {
+            let path = garment.originalImagePath ?? garment.imagePath
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                if let path { return ImageStore.loadImage(path: path) }
+                return nil
+            }.value
+            await MainActor.run {
+                guard let loaded else { return }
+                cropMode = .replaceMain
+                originalPickedImage = loaded
+                pendingCropImage = loaded
+                showCropper = true
+            }
+        }
+    }
+
+    private func applyCroppedImage(_ cropped: UIImage, original: UIImage) {
+        switch cropMode {
+        case .replaceMain:
+            persistMainImage(cropped, original: original)
+        case .addGallery:
+            persistGalleryImage(cropped)
+        }
+    }
+
+    private func persistMainImage(_ display: UIImage, original: UIImage) {
+        guard let jpeg = display.jpegData(compressionQuality: 0.9),
+              let imagePath = try? ImageStore.save(data: jpeg, preferredExt: "jpg") else {
+            errorMessage = String(localized: "edit_image_save_failed")
+            return
+        }
+        let thumb = ImageStore.generateAndSaveThumbnail(
+            for: imagePath,
+            maxPixelSize: ImageStore.thumbnailMaxPixelSize
+        )
+        var originalPath: String?
+        if let data = original.jpegData(compressionQuality: 0.85) {
+            originalPath = try? ImageStore.save(data: data, preferredExt: "jpg")
+        }
+
+        garment.imagePath = imagePath
+        garment.thumbnailPath = thumb
+        garment.imageData = nil
+        if let originalPath {
             garment.originalImagePath = originalPath
         }
-        
+        heroImage = display
+        CloudKitImageSyncService.shared.enqueueUpload(garmentID: garment.id, imagePath: imagePath)
         hasUnsavedChanges = true
-        saveChanges()
+        saveChanges(dismissAfter: false)
     }
 
-    private func addGalleryImage(_ result: ImageEditingResult) {
-        guard let path = result.imagePath else { return }
+    private func persistGalleryImage(_ image: UIImage) {
+        guard let jpeg = image.jpegData(compressionQuality: 0.9),
+              let path = try? ImageStore.save(data: jpeg, preferredExt: "jpg") else { return }
         var paths = garment.additionalImagePaths ?? []
         paths.append(path)
         garment.additionalImagePaths = paths
@@ -802,25 +812,22 @@ struct EditGarmentView: View {
 
     private func removeGalleryImage(at index: Int) {
         guard var paths = garment.additionalImagePaths, paths.indices.contains(index) else { return }
-        let removedPath = paths.remove(at: index)
+        let removed = paths.remove(at: index)
         garment.additionalImagePaths = paths.isEmpty ? nil : paths
-        ImageStore.delete(path: removedPath)
+        ImageStore.delete(path: removed)
         hasUnsavedChanges = true
         saveChanges(dismissAfter: false)
     }
-    
+
     private func clearImage() {
         garment.imagePath = nil
         garment.thumbnailPath = nil
         garment.imageData = nil
+        heroImage = nil
         hasUnsavedChanges = true
     }
 
     private func saveChanges(dismissAfter: Bool = true) {
-        // Validate
-        // Colors are optional for legacy garments
-        // Don't block save if no colors selected
-        
         do {
             try context.save()
             if let trimmed = garment.brand, !trimmed.isEmpty {
@@ -832,31 +839,57 @@ struct EditGarmentView: View {
                 dismiss()
             }
         } catch {
-            errorMessage = "Failed to save: \(error.localizedDescription)"
+            errorMessage = String(
+                format: NSLocalizedString("add_garment_save_failed_format", comment: ""),
+                error.localizedDescription
+            )
         }
     }
 
     private func deleteItem() {
-        if let path = garment.imagePath {
-            ImageStore.delete(path: path)
-        }
-        if let originalPath = garment.originalImagePath {
-            ImageStore.delete(path: originalPath)
-        }
+        if let path = garment.imagePath { ImageStore.delete(path: path) }
+        if let originalPath = garment.originalImagePath { ImageStore.delete(path: originalPath) }
         if let additional = garment.additionalImagePaths {
-            for path in additional {
-                ImageStore.delete(path: path)
-            }
+            for path in additional { ImageStore.delete(path: path) }
         }
-        
         context.delete(garment)
-        
         do {
             try context.save()
             NotificationCenter.default.post(name: .garmentDeleted, object: garment.id)
             dismiss()
         } catch {
-            errorMessage = "Failed to delete: \(error.localizedDescription)"
+            errorMessage = String(
+                format: NSLocalizedString("add_garment_save_failed_format", comment: ""),
+                error.localizedDescription
+            )
+        }
+    }
+}
+
+// MARK: - Lightweight gallery thumb (async decode)
+
+private struct AsyncGalleryThumb: View {
+    let path: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground).opacity(0.5))
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .task(id: path) {
+            image = await Task.detached(priority: .utility) {
+                ImageStore.loadThumbnail(path: path, maxPixelSize: 180)
+                    ?? ImageStore.loadImage(path: path)
+            }.value
         }
     }
 }
@@ -880,16 +913,9 @@ private struct GalleryViewer: View {
 
             TabView(selection: $selection) {
                 ForEach(Array(imagePaths.enumerated()), id: \.offset) { index, path in
-                    if let image = ImageStore.loadImage(path: path) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .tag(index)
-                            .padding()
-                    } else {
-                        Color.black
-                            .tag(index)
-                    }
+                    GalleryFullImage(path: path)
+                        .tag(index)
+                        .padding()
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .automatic))
@@ -906,14 +932,25 @@ private struct GalleryViewer: View {
     }
 }
 
-private extension View {
-    func sectionSurface(cornerRadius: CGFloat = 16) -> some View {
-        self
-            .background(DS.Surface.card, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(DS.Border.subtle, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+private struct GalleryFullImage: View {
+    let path: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ProgressView().tint(.white)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: path) {
+            image = await Task.detached(priority: .utility) {
+                ImageStore.loadImage(path: path)
+            }.value
+        }
     }
 }

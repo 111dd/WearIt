@@ -3,7 +3,7 @@ import PhotosUI
 
 // MARK: - Camera Picker with Built-in Editing
 
-/// Camera picker using UIImagePickerController with Apple's built-in crop/edit UI.
+/// Camera picker. Cropping is handled by `ImageCropperView` after capture.
 struct CameraPickerWrapper: UIViewControllerRepresentable {
     var onImagePicked: (UIImage) -> Void
     @Environment(\.dismiss) var dismiss
@@ -11,7 +11,7 @@ struct CameraPickerWrapper: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera
-        picker.allowsEditing = true  // Enable Apple's built-in crop UI
+        picker.allowsEditing = false
         picker.delegate = context.coordinator
         return picker
     }
@@ -31,8 +31,7 @@ struct CameraPickerWrapper: UIViewControllerRepresentable {
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             parent.dismiss()
-            // Prefer edited image (cropped), fallback to original
-            let image = (info[.editedImage] as? UIImage) ?? (info[.originalImage] as? UIImage)
+            let image = (info[.originalImage] as? UIImage) ?? (info[.editedImage] as? UIImage)
             if let image {
                 parent.onImagePicked(image)
             }
@@ -46,9 +45,7 @@ struct CameraPickerWrapper: UIViewControllerRepresentable {
 
 // MARK: - Photo Library Picker with Built-in Editing
 
-/// Photo library picker using UIImagePickerController with Apple's built-in crop/edit UI.
-/// Note: We use UIImagePickerController instead of PHPickerViewController because
-/// PHPicker doesn't support built-in editing. For MVP stability, native editing wins.
+/// Photo library picker. Cropping is handled by `ImageCropperView` after selection.
 struct PhotoLibraryPickerWrapper: UIViewControllerRepresentable {
     var onImagePicked: (UIImage) -> Void
     @Environment(\.dismiss) var dismiss
@@ -56,7 +53,7 @@ struct PhotoLibraryPickerWrapper: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .photoLibrary
-        picker.allowsEditing = true  // Enable Apple's built-in crop UI
+        picker.allowsEditing = false
         picker.delegate = context.coordinator
         return picker
     }
@@ -76,8 +73,7 @@ struct PhotoLibraryPickerWrapper: UIViewControllerRepresentable {
 
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             parent.dismiss()
-            // Prefer edited image (cropped), fallback to original
-            let image = (info[.editedImage] as? UIImage) ?? (info[.originalImage] as? UIImage)
+            let image = (info[.originalImage] as? UIImage) ?? (info[.editedImage] as? UIImage)
             if let image {
                 parent.onImagePicked(image)
             }

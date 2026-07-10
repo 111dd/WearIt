@@ -347,7 +347,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             garmentIDs: ids,
             source: .planner,
             context: context,
-            outfitID: plan.id,
+            outfitID: nil,
             incrementTimesWorn: true,
             loveScoreDelta: 1
         )

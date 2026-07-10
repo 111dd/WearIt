@@ -31,15 +31,31 @@ struct ImageCropperView: View {
     }
 
     let image: UIImage
+    var initialAspect: Aspect = .portrait34
     let onCancel: () -> Void
     let onDone: (UIImage) -> Void
 
+    /// Upright pixels — display and crop share the same coordinate space.
+    @State private var source: UIImage
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
-    @State private var aspect: Aspect = .square
+    @State private var aspect: Aspect = .portrait34
     @State private var isAutoFitting = false
+
+    init(
+        image: UIImage,
+        initialAspect: Aspect = .portrait34,
+        onCancel: @escaping () -> Void,
+        onDone: @escaping (UIImage) -> Void
+    ) {
+        self.image = image
+        self.initialAspect = initialAspect
+        self.onCancel = onCancel
+        self.onDone = onDone
+        _source = State(initialValue: image.fixOrientation())
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -58,20 +74,26 @@ struct ImageCropperView: View {
                 .padding(.horizontal, 16)
             }
         }
+        // Image pan/crop math is absolute; don't mirror under Hebrew RTL.
+        .environment(\.layoutDirection, .leftToRight)
+        .onAppear {
+            aspect = initialAspect
+            source = image.fixOrientation()
+        }
     }
 
     private func topBar(in container: CGSize) -> some View {
         HStack {
-            Button("Cancel", action: onCancel)
+            Button(String(localized: "crop_cancel"), action: onCancel)
                 .foregroundStyle(.white)
             Spacer()
-            Button(isAutoFitting ? "Auto…" : "Auto") {
+            Button(isAutoFitting ? String(localized: "crop_auto_busy") : String(localized: "crop_auto")) {
                 Task { await autoFit(in: container) }
             }
             .foregroundStyle(.white.opacity(0.9))
             .disabled(isAutoFitting)
             Spacer()
-            Button("Done") {
+            Button(String(localized: "crop_done")) {
                 if let cropped = crop(in: container) {
                     onDone(cropped)
                 } else {
@@ -88,7 +110,7 @@ struct ImageCropperView: View {
         HStack(spacing: 8) {
             ForEach(Aspect.allCases) { a in
                 Button {
-                    withAnimation(.spring(duration: 0.25)) {
+                    withAnimation(DS.Animation.fast) {
                         aspect = a
                     }
                 } label: {
@@ -105,7 +127,7 @@ struct ImageCropperView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button("Reset") { reset() }
+            Button(String(localized: "crop_reset")) { reset() }
                 .foregroundStyle(.white.opacity(0.85))
                 .padding(.leading, 6)
         }
@@ -114,30 +136,32 @@ struct ImageCropperView: View {
     }
 
     private func imageView(in container: CGSize) -> some View {
-        Image(uiImage: image)
+        Image(uiImage: source)
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: container.width, height: container.height)
             .scaleEffect(scale)
             .offset(offset)
             .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        offset = CGSize(width: lastOffset.width + value.translation.width,
-                                        height: lastOffset.height + value.translation.height)
-                    }
-                    .onEnded { _ in
-                        lastOffset = offset
-                    }
-            )
-            .gesture(
-                MagnificationGesture()
-                    .onChanged { value in
-                        scale = min(max(0.8, lastScale * value), 4.0)
-                    }
-                    .onEnded { _ in
-                        lastScale = scale
-                    }
+                SimultaneousGesture(
+                    DragGesture()
+                        .onChanged { value in
+                            offset = CGSize(
+                                width: lastOffset.width + value.translation.width,
+                                height: lastOffset.height + value.translation.height
+                            )
+                        }
+                        .onEnded { _ in
+                            lastOffset = offset
+                        },
+                    MagnificationGesture()
+                        .onChanged { value in
+                            scale = min(max(0.8, lastScale * value), 4.0)
+                        }
+                        .onEnded { _ in
+                            lastScale = scale
+                        }
+                )
             )
     }
 
@@ -166,13 +190,12 @@ struct ImageCropperView: View {
 
     private func cropRect(in container: CGSize) -> CGRect {
         let padding: CGFloat = 0.12
-        let availableWidth = container.width * (1 - padding*2)
-        let availableHeight = container.height * (1 - padding*2)
+        let availableWidth = container.width * (1 - padding * 2)
+        let availableHeight = container.height * (1 - padding * 2)
 
         let ratio = aspect.ratio()
         let size: CGSize
         if let ratio {
-            // Fit within available while keeping aspect
             let w1 = availableWidth
             let h1 = w1 * ratio.height / ratio.width
             if h1 <= availableHeight {
@@ -186,43 +209,62 @@ struct ImageCropperView: View {
             size = CGSize(width: availableWidth, height: availableHeight)
         }
 
-        let origin = CGPoint(x: (container.width - size.width)/2,
-                             y: (container.height - size.height)/2)
+        let origin = CGPoint(
+            x: (container.width - size.width) / 2,
+            y: (container.height - size.height) / 2
+        )
         return CGRect(origin: origin, size: size)
+    }
+
+    /// Display scale of the image inside the container (aspect-fit × user zoom).
+    private func displayScale(in container: CGSize) -> CGFloat {
+        let fit = min(container.width / source.size.width, container.height / source.size.height)
+        return fit * scale
+    }
+
+    /// Top-left of the scaled image in container coordinates.
+    private func imageOrigin(in container: CGSize) -> CGPoint {
+        let ds = displayScale(in: container)
+        let displayed = CGSize(
+            width: source.size.width * ds,
+            height: source.size.height * ds
+        )
+        return CGPoint(
+            x: (container.width - displayed.width) / 2 + offset.width,
+            y: (container.height - displayed.height) / 2 + offset.height
+        )
     }
 
     private func crop(in container: CGSize) -> UIImage? {
         let cropRectScreen = cropRect(in: container)
+        let ds = displayScale(in: container)
+        guard ds > 0 else { return source }
 
-        let imageScale: CGFloat = {
-            let imgSize = image.size
-            let scaleW = container.width / imgSize.width
-            let scaleH = container.height / imgSize.height
-            return min(scaleW, scaleH) * scale
-        }()
+        let origin = imageOrigin(in: container)
+        let rectInImage = CGRect(
+            x: (cropRectScreen.minX - origin.x) / ds,
+            y: (cropRectScreen.minY - origin.y) / ds,
+            width: cropRectScreen.width / ds,
+            height: cropRectScreen.height / ds
+        )
 
-        let imgCenter = CGPoint(x: container.width / 2 + offset.width,
-                                y: container.height / 2 + offset.height)
-
-        let originX = (cropRectScreen.minX - (imgCenter.x - (image.size.width * imageScale) / 2)) / imageScale
-        let originY = (cropRectScreen.minY - (imgCenter.y - (image.size.height * imageScale) / 2)) / imageScale
-        let cropRectImage = CGRect(
-            x: originX,
-            y: originY,
-            width: cropRectScreen.width / imageScale,
-            height: cropRectScreen.height / imageScale
-        ).integral
-
-        guard let cg = image.cgImage,
-              let cropped = cg.cropping(to: cropRectImage.intersection(CGRect(origin: .zero, size: image.size))) else {
-            // אם החיתוך נכשל – מחזירים את המקור כדי לא לאבד תמונה
-            return image
+        let bounds = CGRect(origin: .zero, size: source.size)
+        let clipped = rectInImage.intersection(bounds)
+        guard !clipped.isNull, clipped.width > 1, clipped.height > 1 else {
+            return source
         }
-        return UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = source.scale
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: clipped.size, format: format)
+        return renderer.image { _ in
+            source.draw(at: CGPoint(x: -clipped.origin.x, y: -clipped.origin.y))
+        }
     }
 
     private func reset() {
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+        withAnimation(DS.Animation.standard) {
             scale = 1.0
             lastScale = 1.0
             offset = .zero
@@ -236,7 +278,7 @@ struct ImageCropperView: View {
         isAutoFitting = true
         defer { isAutoFitting = false }
 
-        guard let cgImage = image.cgImage else { return }
+        guard let cgImage = source.cgImage else { return }
         let request = VNDetectRectanglesRequest()
         request.minimumAspectRatio = 0.2
         request.maximumAspectRatio = 1.0
@@ -245,8 +287,7 @@ struct ImageCropperView: View {
         try? handler.perform([request])
         guard let rect = request.results?.first?.boundingBox else { return }
 
-        // Vision rect is normalized; convert to image space
-        let imgSize = image.size
+        let imgSize = source.size
         let detected = CGRect(
             x: rect.minX * imgSize.width,
             y: (1 - rect.maxY) * imgSize.height,
@@ -254,36 +295,35 @@ struct ImageCropperView: View {
             height: rect.height * imgSize.height
         )
 
-        // Fit detected rect into current crop frame by adjusting offset/scale
         let cropRectScreen = cropRect(in: container)
-        let scaleNeededW = cropRectScreen.width / detected.width
-        let scaleNeededH = cropRectScreen.height / detected.height
-        let targetScale = min(scaleNeededW, scaleNeededH)
+        let fitBase = min(container.width / imgSize.width, container.height / imgSize.height)
+        let scaleNeeded = min(
+            cropRectScreen.width / max(detected.width, 1),
+            cropRectScreen.height / max(detected.height, 1)
+        )
+        // scaleNeeded is in screen-px per image-px relative to unzoomed fit;
+        // convert to the user `scale` multiplier on top of aspect-fit.
+        let appliedScale = max(0.8, min(4.0, scaleNeeded / fitBase))
 
-        let imgScaleBase: CGFloat = {
-            let scaleW = container.width / imgSize.width
-            let scaleH = container.height / imgSize.height
-            return min(scaleW, scaleH)
-        }()
-
-        let appliedScale = max(0.8, min(4.0, targetScale * imgScaleBase))
-
-        // Target center of detected box in screen coords
-        let imgCenterScreen = CGPoint(x: container.width/2 + offset.width,
-                                      y: container.height/2 + offset.height)
-        let detectedCenterImage = CGPoint(x: detected.midX, y: detected.midY)
-        let targetCenterScreen = CGPoint(
-            x: container.width/2 - (detectedCenterImage.x - imgSize.width/2) * imgScaleBase,
-            y: container.height/2 - (detectedCenterImage.y - imgSize.height/2) * imgScaleBase
+        // Place detected center under crop-frame center.
+        let detectedCenter = CGPoint(x: detected.midX, y: detected.midY)
+        let imageCenter = CGPoint(x: imgSize.width / 2, y: imgSize.height / 2)
+        let deltaImage = CGPoint(
+            x: detectedCenter.x - imageCenter.x,
+            y: detectedCenter.y - imageCenter.y
+        )
+        // After zoom, 1 image point = fitBase * appliedScale screen points.
+        let screenPerImage = fitBase * appliedScale
+        let targetOffset = CGSize(
+            width: -deltaImage.x * screenPerImage,
+            height: -deltaImage.y * screenPerImage
         )
 
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+        withAnimation(DS.Animation.standard) {
             scale = appliedScale
             lastScale = appliedScale
-            let dx = targetCenterScreen.x - imgCenterScreen.x
-            let dy = targetCenterScreen.y - imgCenterScreen.y
-            offset = CGSize(width: offset.width + dx, height: offset.height + dy)
-            lastOffset = offset
+            offset = targetOffset
+            lastOffset = targetOffset
         }
     }
 }

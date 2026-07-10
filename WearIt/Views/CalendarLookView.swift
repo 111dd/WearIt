@@ -17,9 +17,23 @@ struct CalendarLookView: View {
     @State private var currentDate: Date = Date()
     @State private var showFullHistory: Bool = false
 
-    @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
-    @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
+    @Query private var dailyLooks: [DailyLook]
+    @Query private var dayPlans: [DayPlan]
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
+
+    init() {
+        var looks = FetchDescriptor<DailyLook>(
+            sortBy: [SortDescriptor(\DailyLook.date, order: .reverse)]
+        )
+        looks.fetchLimit = 90
+        _dailyLooks = Query(looks)
+
+        var plans = FetchDescriptor<DayPlan>(
+            sortBy: [SortDescriptor(\DayPlan.date, order: .reverse)]
+        )
+        plans.fetchLimit = 90
+        _dayPlans = Query(plans)
+    }
 
     private var looksForSelectedDay: DailyLook? {
         let day = Calendar.current.startOfDay(for: selectedDate)
@@ -56,34 +70,33 @@ struct CalendarLookView: View {
     }
 
     var body: some View {
-        ZStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                    // Date Picker
-                    DatePicker(
-                        String(localized: "calendar_title"),
-                        selection: $selectedDate,
-                        displayedComponents: [.date]
-                    )
-                    .datePickerStyle(.graphical)
-                    .dsCard(padding: DS.Spacing.sm)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
+                // Date Picker
+                DatePicker(
+                    String(localized: "calendar_title"),
+                    selection: $selectedDate,
+                    displayedComponents: [.date]
+                )
+                .datePickerStyle(.graphical)
+                .dsCard(padding: DS.Spacing.sm)
 
-                    selectedDaySummary
-                    plannedOutfitSection
+                selectedDaySummary
+                plannedOutfitSection
 
-                    if !isSelectedDateFuture {
-                        dayPhotosSection
-                    }
-
-                    historySection
+                if !isSelectedDateFuture {
+                    dayPhotosSection
                 }
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.top, DS.Spacing.sm)
-                .padding(.bottom, 100)
+
+                historySection
             }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, 100)
         }
+        .scrollContentBackground(.hidden)
         .navigationTitle(String(localized: "nav_calendar"))
-        .navigationBarTitleDisplayMode(.inline)
+        .minimalCollapsingNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -562,7 +575,7 @@ struct CalendarLookView: View {
             garmentIDs: plannedGarments.map(\.id),
             source: .calendar,
             context: context,
-            outfitID: plan.id,
+            outfitID: nil,
             incrementTimesWorn: true,
             loveScoreDelta: 1
         )
@@ -580,9 +593,11 @@ struct CalendarLookView: View {
     }
 
     private func currentUserProfile() -> UserProfile? {
-        guard let uid = auth.userIdentifier else { return nil }
-        let desc = FetchDescriptor<UserProfile>()
-        return (try? context.fetch(desc))?.first(where: { $0.userIdentifier == uid })
+        CurrentUser.activeProfile(
+            in: context,
+            userIdentifier: auth.userIdentifier,
+            createIfNeeded: false
+        )
     }
 
     // MARK: - Helpers
@@ -655,11 +670,26 @@ private struct HistoryRow: View {
 // MARK: - Look Detail View
 
 private struct LookDetailView: View {
-    @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
-    @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
+    @Query private var dailyLooks: [DailyLook]
+    @Query private var dayPlans: [DayPlan]
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
 
     let date: Date
+
+    init(date: Date) {
+        self.date = date
+        var looks = FetchDescriptor<DailyLook>(
+            sortBy: [SortDescriptor(\DailyLook.date, order: .reverse)]
+        )
+        looks.fetchLimit = 90
+        _dailyLooks = Query(looks)
+
+        var plans = FetchDescriptor<DayPlan>(
+            sortBy: [SortDescriptor(\DayPlan.date, order: .reverse)]
+        )
+        plans.fetchLimit = 90
+        _dayPlans = Query(plans)
+    }
 
     private var normalizedDate: Date {
         Calendar.current.startOfDay(for: date)

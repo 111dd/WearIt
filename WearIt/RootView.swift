@@ -12,55 +12,43 @@ struct RootView: View {
     @State private var appIntentRouter = WearItAppIntentRouter.shared
     @State private var showSignInSheet = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
-    enum AppTab: Hashable { case planner, calendar, wardrobe, add, stats, profile }
+    enum AppTab: Hashable { case planner, calendar, wardrobe, add }
 
     var body: some View {
-        ZStack {
-            TabView(selection: $selected) {
-                Tab(LocalizedStringKey("tab_outfits"), systemImage: "sparkles", value: AppTab.planner) {
-                    OutfitPlannerView()
-                }
+        // Backdrop via `.background` (not ZStack) so wallpaper never expands layout width.
+        TabView(selection: $selected) {
+            Tab(LocalizedStringKey("tab_outfits"), systemImage: "sparkles", value: AppTab.planner) {
+                OutfitPlannerView()
+            }
 
-                Tab(LocalizedStringKey("tab_calendar"), systemImage: "calendar", value: AppTab.calendar) {
-                    NavigationStack {
-                        CalendarLookView()
-                            .navigationTitle(String(localized: "nav_calendar"))
-                    }
-                }
-
-                Tab(LocalizedStringKey("tab_wardrobe"), systemImage: "square.grid.2x2", value: AppTab.wardrobe) {
-                    WardrobeView()
-                }
-
-                Tab(LocalizedStringKey("tab_add"), systemImage: "plus.circle", value: AppTab.add) {
-                    NavigationStack {
-                        AddGarmentView()
-                            .navigationTitle(String(localized: "nav_add_item"))
-                    }
-                }
-
-                Tab(LocalizedStringKey("tab_stats"), systemImage: "chart.bar", value: AppTab.stats) {
-                    NavigationStack {
-                        StatsView()
-                            .navigationTitle(String(localized: "nav_stats"))
-                    }
-                }
-
-                Tab(LocalizedStringKey("tab_profile"), systemImage: "person", value: AppTab.profile) {
-                    NavigationStack {
-                        ProfileView()
-                            .navigationTitle(String(localized: "nav_profile"))
-                    }
+            Tab(LocalizedStringKey("tab_calendar"), systemImage: "calendar", value: AppTab.calendar) {
+                NavigationStack {
+                    CalendarLookView()
+                        .withLocalAppBackdrop()
                 }
             }
-            .tint(.accentColor)
 
+            Tab(LocalizedStringKey("tab_wardrobe"), systemImage: "square.grid.2x2", value: AppTab.wardrobe) {
+                WardrobeView()
+            }
+
+            Tab(LocalizedStringKey("tab_add"), systemImage: "plus.circle", value: AppTab.add) {
+                AddGarmentView()
+            }
+        }
+        .tint(.accentColor)
+        .withLocalAppBackdrop()
+        .background {
+            LiquidGlassBackdrop()
+                .ignoresSafeArea()
+        }
+        .animation(DS.Animation.transition, value: selected)
+        .overlay(alignment: .top) {
             if shouldShowSignInCTA {
                 signInBanner
             }
         }
         .onAppear {
-            UIView.appearance(whenContainedInInstancesOf: [UITabBarController.self]).backgroundColor = .clear
             handleIncomingSystemAction()
         }
         .onChange(of: scenePhase) { _, newPhase in

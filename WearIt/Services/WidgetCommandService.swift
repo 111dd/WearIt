@@ -52,7 +52,7 @@ enum WidgetCommandService {
             garmentIDs: garmentIDs,
             source: .planner,
             context: context,
-            outfitID: plan.id,
+            outfitID: nil,
             incrementTimesWorn: true,
             loveScoreDelta: 1
         )

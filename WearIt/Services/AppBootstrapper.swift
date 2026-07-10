@@ -36,6 +36,7 @@ final class AppBootstrapper: ObservableObject {
             RecommendationEvent.self,
             DismissedOutfit.self,
             UserProfile.self,
+            TasteProfile.self,
             DailyLook.self,
             OutfitFeedback.self,
             DayPlan.self,

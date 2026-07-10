@@ -41,28 +41,48 @@ struct WelcomeView: View {
     }
 
     private var ambientOrbs: some View {
+        // Soft radial washes — no live `.blur` (kills ProMotion scroll FPS).
         ZStack {
             Circle()
-                .fill(Color.blue.opacity(0.35))
-                .frame(width: 280, height: 280)
-                .blur(radius: 90)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.blue.opacity(0.45), Color.blue.opacity(0.0)],
+                        center: .center,
+                        startRadius: 10,
+                        endRadius: 150
+                    )
+                )
+                .frame(width: 300, height: 300)
                 .offset(x: -140, y: -180)
-                .opacity(0.7)
+                .opacity(0.85)
 
             Circle()
-                .fill(Color.indigo.opacity(0.30))
-                .frame(width: 240, height: 240)
-                .blur(radius: 90)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.indigo.opacity(0.40), Color.indigo.opacity(0.0)],
+                        center: .center,
+                        startRadius: 10,
+                        endRadius: 130
+                    )
+                )
+                .frame(width: 260, height: 260)
                 .offset(x: 140, y: 120)
-                .opacity(0.6)
+                .opacity(0.75)
 
             Circle()
-                .fill(Color.purple.opacity(0.25))
-                .frame(width: 180, height: 180)
-                .blur(radius: 90)
+                .fill(
+                    RadialGradient(
+                        colors: [Color.purple.opacity(0.35), Color.purple.opacity(0.0)],
+                        center: .center,
+                        startRadius: 8,
+                        endRadius: 110
+                    )
+                )
+                .frame(width: 220, height: 220)
                 .offset(x: -40, y: 140)
-                .opacity(0.5)
+                .opacity(0.65)
         }
+        .allowsHitTesting(false)
         .ignoresSafeArea()
     }
 
@@ -266,7 +286,7 @@ private struct PrimaryGradientButtonStyle: ButtonStyle {
             .shadow(color: Color.blue.opacity(0.35), radius: 18, x: 0, y: 10)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .opacity(configuration.isPressed ? 0.9 : 1.0)
-            .animation(DS.Animation.fast, value: configuration.isPressed)
+            .animation(DS.Animation.interactive, value: configuration.isPressed)
     }
 }
 

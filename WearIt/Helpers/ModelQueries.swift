@@ -1,17 +1,6 @@
 import Foundation
 import SwiftData
 
-extension UserProfile {
-    static func current(in context: ModelContext) -> UserProfile {
-        if let existing = try? context.fetch(FetchDescriptor<UserProfile>()).first {
-            return existing
-        }
-        let profile = UserProfile()
-        context.insert(profile)
-        return profile
-    }
-}
-
 enum ModelQueries {
     static func fetchGarments(ids: [UUID], context: ModelContext) -> [Garment] {
         guard !ids.isEmpty else { return [] }

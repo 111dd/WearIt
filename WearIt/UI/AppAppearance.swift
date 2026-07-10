@@ -10,20 +10,33 @@ import SwiftUI
 
 enum AppAppearance {
     static func install() {
-        // On iOS 26 the system owns the Liquid Glass appearance and its scroll
-        // transitions. UIKit blur overrides flatten that effect, so only install
-        // the material fallback on earlier systems.
-        if #available(iOS 26.0, *) {
-            return
-        }
+        // Unlock + tune ProMotion (120Hz) — see ProMotionSupport / Apple docs.
+        ProMotionSupport.install()
 
-        // UINavigationBar fallback
+        // Keep container chrome translucent so LiquidGlassBackdrop
+        // is visible behind every tab — including iOS 26 Liquid Glass.
+        clearContainerBackgrounds()
+        installTransparentBarAppearances()
+    }
+
+    private static func clearContainerBackgrounds() {
+        UITabBar.appearance().isTranslucent = true
+        UITabBar.appearance().backgroundColor = .clear
+        UINavigationBar.appearance().isTranslucent = true
+        UITableView.appearance().backgroundColor = .clear
+        UICollectionView.appearance().backgroundColor = .clear
+        UIScrollView.appearance().backgroundColor = .clear
+    }
+
+    private static func installTransparentBarAppearances() {
+        // Fully clear chrome so the app wallpaper continues under
+        // status / nav / tab regions (no black material strips).
         let nav = UINavigationBarAppearance()
         nav.configureWithTransparentBackground()
-        nav.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         nav.backgroundColor = .clear
+        nav.backgroundEffect = nil
         nav.shadowColor = .clear
-        
+
         nav.titleTextAttributes = [
             .foregroundColor: UIColor.label,
             .font: UIFont.systemFont(ofSize: 17, weight: .semibold)
@@ -37,14 +50,14 @@ enum AppAppearance {
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
         UINavigationBar.appearance().compactScrollEdgeAppearance = nav
+        UINavigationBar.appearance().isTranslucent = true
 
-        // UITabBar fallback
         let tab = UITabBarAppearance()
         tab.configureWithTransparentBackground()
-        tab.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         tab.backgroundColor = .clear
+        tab.backgroundEffect = nil
         tab.shadowColor = .clear
-        
+
         tab.stackedLayoutAppearance.normal.iconColor = .secondaryLabel
         tab.stackedLayoutAppearance.normal.titleTextAttributes = [
             .foregroundColor: UIColor.secondaryLabel,
@@ -58,5 +71,7 @@ enum AppAppearance {
 
         UITabBar.appearance().standardAppearance = tab
         UITabBar.appearance().scrollEdgeAppearance = tab
+        UITabBar.appearance().isTranslucent = true
+        UITabBar.appearance().backgroundColor = .clear
     }
 }

@@ -17,14 +17,17 @@ struct OutfitPlannerView: View {
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
-    @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
-    @Query(sort: \WearEvent.date, order: .reverse) private var wearEvents: [WearEvent]
+    @Query private var dayPlans: [DayPlan]
+    @Query private var wearEvents: [WearEvent]
+    @Query private var dismissedOutfits: [DismissedOutfit]
+    @Query(sort: \RecommendationEvent.createdAt, order: .reverse) private var recommendationEvents: [RecommendationEvent]
     
     @State private var boardState = PlannerBoardState()
     @State private var showFeedbackAlert = false
     @State private var alertMessage = ""
     @State private var activeSheet: PlannerSheet?
-    @State private var targetedSlots: Set<SlotTarget> = []
+    /// Single hover target — cheaper than a Set that churns on every drag frame.
+    @State private var targetedSlot: SlotTarget?
     @State private var lastForecastSignature: String = ""
     @State private var expandedDayDetails: Set<Int> = []
     @State private var selectedDayIndex: Int = 0
@@ -35,6 +38,31 @@ struct OutfitPlannerView: View {
     @State private var dirtyDayIndices: Set<Int> = []
     @State private var plannerSaveDebouncer = Debouncer(interval: 15.0)
     @State private var appIntentRouter = WearItAppIntentRouter.shared
+    @State private var cachedTaste = TasteAffinityBuilder.Profile.empty
+    @State private var cachedCombination = CombinationAffinity.empty
+    @State private var cachedLatestWearByGarmentID: [UUID: Date] = [:]
+    @State private var affinityCacheSignature: String = ""
+    /// Days whose "What do you think?" panel is expanded.
+    @State private var expandedFeedbackDays: Set<Int> = []
+    @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
+
+    init() {
+        var plans = FetchDescriptor<DayPlan>(
+            sortBy: [SortDescriptor(\DayPlan.date, order: .reverse)]
+        )
+        plans.fetchLimit = 21
+        _dayPlans = Query(plans)
+
+        var wears = FetchDescriptor<WearEvent>(
+            sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)]
+        )
+        wears.fetchLimit = 150
+        _wearEvents = Query(wears)
+
+        var dismissed = FetchDescriptor<DismissedOutfit>()
+        dismissed.fetchLimit = 100
+        _dismissedOutfits = Query(dismissed)
+    }
 
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
     private static let dayNameFormatter: DateFormatter = {
@@ -79,7 +107,7 @@ struct OutfitPlannerView: View {
     }
 
     private var latestWearByGarmentID: [UUID: Date] {
-        WearHistoryService.latestWearMap(events: wearEvents)
+        cachedLatestWearByGarmentID
     }
     
     // MARK: - Body
@@ -87,15 +115,44 @@ struct OutfitPlannerView: View {
     var body: some View {
         NavigationStack {
             plannerContent
+                .navigationTitle(String(localized: "planner_board_title"))
+                .minimalCollapsingNavBar()
+                .toolbar {
+                    // RTL: leading = visual right → profile. Trailing = visual left → stats.
+                    ToolbarItem(placement: .topBarLeading) {
+                        NavigationLink {
+                            ProfileView()
+                                .withLocalAppBackdrop()
+                        } label: {
+                            plannerProfileAvatar
+                        }
+                        .accessibilityLabel(String(localized: "nav_profile"))
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            StatsView()
+                                .withLocalAppBackdrop()
+                        } label: {
+                            Image(systemName: "chart.bar.fill")
+                                .font(.body.weight(.semibold))
+                        }
+                        .accessibilityLabel(String(localized: "nav_stats"))
+                    }
+                }
         }
-        .navigationTitle(String(localized: "planner_board_title"))
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: handleAppear)
         .onChange(of: weather.forecasts) { _, newValue in
             handleForecastChange(newValue)
         }
         .onChange(of: allGarments.count) { _, newValue in
             handleGarmentChange(newValue)
+            refreshAffinityCaches()
+        }
+        .onChange(of: wearEvents.count) { _, _ in
+            refreshAffinityCaches()
+        }
+        .onChange(of: dismissedOutfits.count) { _, _ in
+            refreshAffinityCaches()
         }
         .alert(String(localized: "error_title"), isPresented: $boardState.showUnavailableAlert) {
             Button(String(localized: "action_confirm"), role: .cancel) { }
@@ -137,30 +194,60 @@ struct OutfitPlannerView: View {
     }
 
     private var plannerContent: some View {
-        ZStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: DS.Spacing.xl) {
-                    plannerHeader
-                        .padding(.horizontal, DS.Spacing.md)
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxl) {
+                plannerSubtitle
+                    .padding(.horizontal, DS.Spacing.md)
 
+                if let nudge = unwornNudge {
+                    unwornNudgeCard(nudge)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if allGarments.isEmpty {
+                    emptyWardrobeCard
+                        .padding(.horizontal, DS.Spacing.md)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else {
                     ForEach(0..<3, id: \.self) { dayIndex in
                         if dayIndex < boardState.days.count {
                             dayColumn(for: dayIndex)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, DS.Spacing.sm)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                    removal: .opacity
+                                ))
                         }
                     }
                 }
-                .padding(.top, DS.Spacing.sm)
-                .padding(.bottom, DS.Spacing.sm)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.xxl)
         }
+        .frame(maxWidth: .infinity)
+        .withLocalAppBackdrop()
+    }
+
+    private var emptyWardrobeCard: some View {
+        DSEmptyState(
+            icon: "tshirt",
+            title: String(localized: "planner_empty_wardrobe_title"),
+            message: String(localized: "planner_empty_wardrobe_message"),
+            actionTitle: String(localized: "planner_empty_wardrobe_action")
+        ) {
+            activeSheet = .addNewItem(dayIndex: 0, slot: .top, lookTime: .day)
+        }
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, padding: DS.Spacing.md, castsShadow: true)
     }
 
     private func handleAppear() {
         boardState.initializeDays()
         hydrateFromPlans()
         updateAvailableGarments()
+        refreshAffinityCaches()
         refreshCurrentDate()
         #if DEBUG
         if !didRunWearHistoryDebug {
@@ -175,6 +262,10 @@ struct OutfitPlannerView: View {
             await weather.refreshForecast(source: "OutfitPlannerView.handleAppear")
             boardState.updateForecasts(weather.forecasts)
             lastForecastSignature = forecastSignature(weather.forecasts)
+            if CalendarContextPreferences.deviceCalendarEnabled {
+                _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
+            }
+            refreshCalendarContextsAndApplyEvening()
             if appIntentRouter.pendingAction != nil {
                 performPendingIntentAction()
             } else {
@@ -370,24 +461,43 @@ struct OutfitPlannerView: View {
             isConfirmed: isConfirmed(dayIndex),
             forecastKey: forecastKey(for: state.forecast),
             assignedSignature: assignedGarmentSignature(for: dayIndex),
-            availableSignature: availableGarmentsSignature
+            availableSignature: availableGarmentsSignature,
+            feedbackExpanded: expandedFeedbackDays.contains(dayIndex)
         )
 
         return DayCardContainer(signature: signature) {
-            VStack(spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 dayTopBar(for: state, dayIndex: dayIndex)
 
-                outfitRow(for: dayIndex, lookTime: .day)
-                availabilityHintsView(for: dayIndex, lookTime: .day)
+                if state.assignedGarmentIDs.isEmpty {
+                    emptyDayOutfitPrompt(dayIndex: dayIndex)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                } else {
+                    outfitRow(for: dayIndex, lookTime: .day)
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    availabilityHintsView(for: dayIndex, lookTime: .day)
+                }
 
                 if state.useEveningLook {
                     eveningSection(for: dayIndex)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                let calendarHints = combinedHints(for: dayIndex)
+                if !calendarHints.isEmpty {
+                    smartHintsView(hints: calendarHints)
+                }
+
+                let changes = changeSuggestions(for: dayIndex, lookTime: .day)
+                if !changes.isEmpty {
+                    changeSuggestionsView(changes, dayIndex: dayIndex)
                 }
 
                 dayCardActions(for: dayIndex)
 
                 if !state.assignedGarmentIDs.isEmpty {
                     feedbackSection(for: dayIndex)
+                        .transition(.opacity)
                 }
 
                 if !isDetailsExpanded(dayIndex) {
@@ -396,31 +506,160 @@ struct OutfitPlannerView: View {
 
                 if isDetailsExpanded(dayIndex) {
                     dayDetailsSection(for: dayIndex)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .padding(DS.Spacing.sm)
+            .padding(DS.Spacing.md)
             .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         }
+        .equatable()
     }
 
-    // MARK: - Planner Header
-    
-    private var plannerHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(String(localized: "planner_board_title"))
-                .font(.largeTitle.weight(.bold))
-                .foregroundStyle(.primary)
-
-            HStack(spacing: 6) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.tint)
-                Text(headerLine)
-                    .font(.subheadline.weight(.medium))
+    private func emptyDayOutfitPrompt(dayIndex: Int) -> some View {
+        Button {
+            DS.haptic(0.35)
+            selectedDayIndex = dayIndex
+            refreshDay(dayIndex)
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "sparkles")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "planner_empty_day_title"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(String(localized: "planner_empty_day_subtitle"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.clockwise")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .lineLimit(2)
+            .padding(DS.Spacing.sm)
+            .liquidGlassSurface(
+                cornerRadius: DS.Radius.md,
+                interactive: true,
+                tint: Color.accentColor.opacity(0.08)
+            )
         }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Planner Subtitle (title lives in collapsing nav bar)
+    
+    private var plannerSubtitle: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+            Text(headerLine)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .lineLimit(2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, DS.Spacing.xxs)
+    }
+
+    private struct UnwornNudge: Equatable {
+        let count: Int
+        let sampleTitle: String
+    }
+
+    private var unwornNudge: UnwornNudge? {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -21, to: currentDate) ?? currentDate
+        let candidates = allGarments.filter { garment in
+            guard !garment.isCurrentlyUnavailable else { return false }
+            guard let last = latestWearByGarmentID[garment.id] ?? garment.lastWorn else {
+                return true // never worn
+            }
+            return last < cutoff
+        }
+        guard let first = candidates.first else { return nil }
+        return UnwornNudge(count: candidates.count, sampleTitle: first.displayTitle)
+    }
+
+    private func unwornNudgeCard(_ nudge: UnwornNudge) -> some View {
+        HStack(alignment: .center, spacing: DS.Spacing.sm) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "planner_unworn_nudge_title"))
+                    .font(.subheadline.weight(.semibold))
+                Text(
+                    String(
+                        format: NSLocalizedString("planner_unworn_nudge_message_format", comment: ""),
+                        nudge.count,
+                        nudge.sampleTitle
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
+            Button {
+                DS.haptic(0.4)
+                prioritizeUnwornInToday()
+            } label: {
+                Text(String(localized: "planner_unworn_nudge_action"))
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .buttonStyle(SoftPressButtonStyle())
+            .fixedSize()
+        }
+        .padding(DS.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.orange.opacity(0.08))
+    }
+
+    private func prioritizeUnwornInToday() {
+        // Prefer long-unworn pieces in unlocked day slots, then regenerate gaps.
+        let cutoff = Calendar.current.date(byAdding: .day, value: -21, to: currentDate) ?? currentDate
+        func isStale(_ garment: Garment) -> Bool {
+            guard !garment.isCurrentlyUnavailable else { return false }
+            let last = latestWearByGarmentID[garment.id] ?? garment.lastWorn
+            return last.map { $0 < cutoff } ?? true
+        }
+
+        var used = Set(boardState.days.enumerated().flatMap { index, day -> [UUID] in
+            if index == 0 { return [] }
+            return day.assignedGarmentIDs + day.eveningAssignedGarmentIDs
+        })
+
+        for slot in OutfitSlot.allCases {
+            guard !boardState.days[0].isLocked(slot) else {
+                if let id = boardState.days[0].garmentID(for: slot) { used.insert(id) }
+                continue
+            }
+            let candidates = allGarments
+                .filter { slot.allowedCategories.contains($0.category) && isStale($0) && !used.contains($0.id) }
+                .sorted { lhs, rhs in
+                    let l = latestWearByGarmentID[lhs.id] ?? lhs.lastWorn ?? .distantPast
+                    let r = latestWearByGarmentID[rhs.id] ?? rhs.lastWorn ?? .distantPast
+                    return l < r
+                }
+            if let pick = candidates.first {
+                _ = boardState.assignGarment(
+                    pick.id,
+                    toDay: 0,
+                    toSlot: slot,
+                    garments: allGarments,
+                    allowUnavailable: false
+                )
+                used.insert(pick.id)
+            }
+        }
+        boardState.days[0].regenVersion += 1
+        persistDayPlan(0)
     }
     
     // MARK: - Day Top Bar
@@ -473,9 +712,14 @@ struct OutfitPlannerView: View {
                 get: { boardState.days[dayIndex].useEveningLook },
                 set: { newValue in
                     boardState.days[dayIndex].useEveningLook = newValue
+                    let date = boardState.days[dayIndex].date
                     if newValue {
+                        CalendarContextPreferences.setEveningOptedOut(false, on: date)
                         generateEveningOutfit(for: dayIndex)
                     } else {
+                        if calendarContext(for: dayIndex).suggestEveningLook {
+                            CalendarContextPreferences.setEveningOptedOut(true, on: date)
+                        }
                         clearEveningOutfit(for: dayIndex)
                     }
                     persistDayPlan(dayIndex)
@@ -778,6 +1022,82 @@ struct OutfitPlannerView: View {
         }
     }
 
+    private func changeSuggestions(for dayIndex: Int, lookTime: LookTime) -> [OutfitChangeSuggestion] {
+        guard dayIndex < boardState.days.count else { return [] }
+        let day = boardState.days[dayIndex]
+        let filled = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
+        guard !filled.isEmpty else { return [] }
+
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        let pool = recommendedPool(referenceDate: day.date, ctx: ctx)
+        var excluded = Set<UUID>()
+        for (index, other) in boardState.days.enumerated() where index != dayIndex {
+            excluded.formUnion(other.assignedGarmentIDs)
+            excluded.formUnion(other.eveningAssignedGarmentIDs)
+        }
+        return OutfitChangeAdvisor.suggestions(
+            day: day,
+            lookTime: lookTime,
+            garments: allGarments,
+            pool: pool,
+            ctx: ctx,
+            modelContext: context,
+            excludedIDs: excluded
+        )
+    }
+
+    private func changeSuggestionsView(_ suggestions: [OutfitChangeSuggestion], dayIndex: Int) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text(String(localized: "planner_change_title"))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            ForEach(suggestions.prefix(3)) { suggestion in
+                Button {
+                    applyChangeSuggestion(suggestion, dayIndex: dayIndex)
+                } label: {
+                    HStack(spacing: DS.Spacing.sm) {
+                        Image(systemName: suggestion.slot == .shoes ? "shoe" : "arrow.triangle.2.circlepath")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(
+                                String(
+                                    format: NSLocalizedString("planner_change_slot_format", comment: ""),
+                                    suggestion.slot.title
+                                )
+                            )
+                            .font(.caption.weight(.semibold))
+                            Text(suggestion.reason)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        Text(String(localized: "planner_change_apply"))
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .padding(.vertical, DS.Spacing.xs)
+                    .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.08))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func applyChangeSuggestion(_ suggestion: OutfitChangeSuggestion, dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        if suggestion.lookTime == .evening {
+            boardState.days[dayIndex].setEveningGarment(suggestion.betterGarmentID, for: suggestion.slot)
+        } else {
+            boardState.days[dayIndex].setGarment(suggestion.betterGarmentID, for: suggestion.slot)
+        }
+        persistDayPlan(dayIndex)
+        DS.haptic(0.4)
+    }
+
     private func smartHintsView(hints: [PlannerHint]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LiquidGlassGroup(spacing: DS.Spacing.xs) {
@@ -811,6 +1131,7 @@ struct OutfitPlannerView: View {
         }
 
         hints.append(contentsOf: fitComfortHints(for: state, dayIndex: dayIndex))
+        hints.append(contentsOf: calendarContext(for: dayIndex).hints)
         return hints
     }
 
@@ -854,6 +1175,8 @@ struct OutfitPlannerView: View {
             return .orange
         case .rain:
             return .blue
+        case .calendar:
+            return .purple
         }
     }
 
@@ -906,7 +1229,7 @@ struct OutfitPlannerView: View {
         let rowItemCount = assignedSlots.count + (canAdd ? 1 : 0)
         let thumbnailSize: DSGarmentThumbnail.ThumbnailSize = rowItemCount >= 5 ? .small : .medium
 
-        return HStack(spacing: DS.Spacing.xs) {
+        return HStack(spacing: DS.Spacing.sm) {
             ForEach(assignedSlots, id: \.self) { slot in
                 let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
                 let id: UUID? = {
@@ -931,6 +1254,10 @@ struct OutfitPlannerView: View {
                             isLinked: isLinked,
                             thumbnailSize: thumbnailSize
                         )
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.92).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                     }
                 }
             }
@@ -943,6 +1270,7 @@ struct OutfitPlannerView: View {
                 )
             }
         }
+        .animation(DS.Animation.standard, value: assignedSlots)
     }
 
     private func addItemsButton(
@@ -1225,6 +1553,12 @@ struct OutfitPlannerView: View {
         Group {
             if !isLocked {
                 Button {
+                    replaceSlot(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+                } label: {
+                    Label(String(localized: "planner_suggest_better"), systemImage: "sparkles")
+                }
+
+                Button {
                     openAddPicker(dayIndex: dayIndex, lookTime: lookTime, preferredSlot: slot)
                 } label: {
                     Label(String(localized: "planner_replace_single_item"), systemImage: "arrow.triangle.2.circlepath")
@@ -1414,78 +1748,125 @@ struct OutfitPlannerView: View {
     }
     
     // MARK: - Feedback Section
-    
+
+    @ViewBuilder
     private func feedbackSection(for dayIndex: Int) -> some View {
         let state = boardState.days[dayIndex]
-        
-        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            HStack(spacing: DS.Spacing.xxs) {
-                Image(systemName: "sparkles")
-                    .font(.caption2)
-                    .foregroundStyle(.tint)
-                Text(String(localized: "planner_what_do_you_think"))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-            }
+        // Positive feedback already saved → keep the look card clean.
+        if state.feedback == .loved {
+            EmptyView()
+        } else {
+            let isExpanded = expandedFeedbackDays.contains(dayIndex)
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                Button {
+                    DS.haptic(0.3)
+                    withAnimation(DS.Animation.fast) {
+                        if isExpanded {
+                            expandedFeedbackDays.remove(dayIndex)
+                        } else {
+                            expandedFeedbackDays.insert(dayIndex)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: DS.Spacing.xs) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tint)
+                        Text(String(localized: "planner_what_do_you_think"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .padding(.vertical, DS.Spacing.xs)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(SoftPressButtonStyle())
+                .accessibilityHint(String(localized: "planner_feedback_toggle_hint"))
 
-            LiquidGlassGroup(spacing: DS.Spacing.xs) {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 96), spacing: DS.Spacing.xs)],
-                    alignment: .leading,
-                    spacing: DS.Spacing.xs
-                ) {
-                    FeedbackButton(
-                        label: String(localized: "planner_love_it"),
-                        icon: "heart.fill",
-                        color: .pink,
-                        isSelected: state.feedback == .loved
-                    ) {
-                        submitFeedback(for: dayIndex, rating: .loved)
+                if isExpanded {
+                    // Primary: love / not my style
+                    HStack(spacing: DS.Spacing.sm) {
+                        FeedbackButton(
+                            label: String(localized: "planner_love_it"),
+                            icon: "heart.fill",
+                            color: .pink,
+                            isSelected: state.feedback == .loved
+                        ) {
+                            withAnimation(DS.Animation.standard) {
+                                submitFeedback(for: dayIndex, rating: .loved)
+                                expandedFeedbackDays.remove(dayIndex)
+                            }
+                        }
+
+                        FeedbackButton(
+                            label: String(localized: "planner_not_my_style"),
+                            icon: "arrow.clockwise",
+                            color: .orange,
+                            isSelected: state.feedback == .rejected
+                        ) {
+                            withAnimation(DS.Animation.fast) {
+                                submitFeedback(for: dayIndex, rating: .rejected)
+                                expandedFeedbackDays.remove(dayIndex)
+                            }
+                        }
                     }
 
-                    FeedbackButton(
-                        label: String(localized: "planner_not_my_style"),
-                        icon: "arrow.clockwise",
-                        color: .orange,
-                        isSelected: state.feedback == .rejected
-                    ) {
-                        submitFeedback(for: dayIndex, rating: .rejected)
-                    }
+                    // Secondary tweaks — compact, optional
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: DS.Spacing.xs) {
+                            TempFeedbackButton(
+                                feedback: .tooWarm,
+                                isSelected: state.temperatureFeedback == .tooWarm
+                            ) {
+                                submitTemperatureFeedback(for: dayIndex, feedback: .tooWarm)
+                            }
 
-                    TempFeedbackButton(
-                        feedback: .tooWarm,
-                        isSelected: state.temperatureFeedback == .tooWarm
-                    ) {
-                        submitTemperatureFeedback(for: dayIndex, feedback: .tooWarm)
-                    }
+                            TempFeedbackButton(
+                                feedback: .tooCold,
+                                isSelected: state.temperatureFeedback == .tooCold
+                            ) {
+                                submitTemperatureFeedback(for: dayIndex, feedback: .tooCold)
+                            }
 
-                    TempFeedbackButton(
-                        feedback: .tooCold,
-                        isSelected: state.temperatureFeedback == .tooCold
-                    ) {
-                        submitTemperatureFeedback(for: dayIndex, feedback: .tooCold)
-                    }
+                            LearningFeedbackChip(
+                                label: String(localized: "planner_too_formal"),
+                                icon: "briefcase.fill",
+                                color: .purple
+                            ) {
+                                submitFormalityFeedback(for: dayIndex, direction: -1)
+                            }
 
-                    LearningFeedbackChip(
-                        label: String(localized: "planner_too_formal"),
-                        icon: "briefcase.fill",
-                        color: .purple
-                    ) {
-                        submitFormalityFeedback(for: dayIndex, direction: -1)
-                    }
-
-                    LearningFeedbackChip(
-                        label: String(localized: "planner_too_casual"),
-                        icon: "tshirt.fill",
-                        color: .blue
-                    ) {
-                        submitFormalityFeedback(for: dayIndex, direction: 1)
+                            LearningFeedbackChip(
+                                label: String(localized: "planner_too_casual"),
+                                icon: "tshirt.fill",
+                                color: .blue
+                            ) {
+                                submitFormalityFeedback(for: dayIndex, direction: 1)
+                            }
+                        }
                     }
                 }
             }
+            .padding(DS.Spacing.sm)
+            .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.025))
+            .animation(DS.Animation.fast, value: isExpanded)
         }
-        .padding(DS.Spacing.sm)
-        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.025))
+    }
+
+    private var plannerProfileAvatar: some View {
+        let emoji = activeProfile?.avatarEmoji ?? "🧑🏻"
+        return ZStack {
+            Circle()
+                .fill(Color.accentColor.opacity(0.14))
+                .frame(width: 30, height: 30)
+            Text(emoji)
+                .font(.system(size: 16))
+        }
+        .accessibilityElement(children: .ignore)
     }
     
     // MARK: - Drag & Drop
@@ -1883,13 +2264,24 @@ struct OutfitPlannerView: View {
         let referenceDate = boardState.days[dayIndex].date
         let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         let candidates = slotCandidates(slot, dayIndex: dayIndex, lookTime: lookTime)
-        return AvailabilityService.recommendedItemsForSlot(
+        let base = AvailabilityService.recommendedItemsForSlot(
             slot,
             garments: candidates,
             date: referenceDate,
             ctx: ctx,
             latestWearMap: latestWearByGarmentID
         )
+        let day = boardState.days[dayIndex]
+        let pairedIDs = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
+        let paired = pairedIDs.compactMap { id in allGarments.first { $0.id == id } }
+        let ranked = AIRecommender.shared.suggest(
+            from: base,
+            k: min(12, max(base.count, 1)),
+            ctx: ctx,
+            modelContext: context,
+            pairedWith: paired
+        )
+        return ranked.isEmpty ? base : ranked
     }
 
     private func allItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [AvailabilityService.AvailabilityItem] {
@@ -1932,11 +2324,7 @@ struct OutfitPlannerView: View {
     }
 
     private var activeProfile: UserProfile? {
-        if let userIdentifier = auth.userIdentifier,
-           let profile = profiles.first(where: { $0.userIdentifier == userIdentifier }) {
-            return profile
-        }
-        return profiles.first(where: { $0.userIdentifier == nil }) ?? profiles.first
+        CurrentUser.activeProfile(from: profiles, userIdentifier: auth.userIdentifier)
     }
 
     private func cooldownDays(for category: Category, ctx: RecoContext) -> Int {
@@ -2057,13 +2445,14 @@ struct OutfitPlannerView: View {
         let state = boardState.days[dayIndex]
         let profile = activeProfile
         let baseFormality = state.overrides.desiredFormality ?? preferredFormality
-        let desiredFormality = isEvening ? min(baseFormality + 1, 5) : baseFormality
+        let calendar = calendarContext(for: dayIndex)
+        let desiredFormality = min(5, max(1, baseFormality + calendar.formalityBump(isEvening: isEvening)))
 
         let temperatureC: Double
         if isEvening, let forecast = state.forecast {
-            temperatureC = DayTemperatureProfile(from: forecast).eveningTemp
+            temperatureC = DayTemperatureProfile(from: forecast).eveningTemp + calendar.temperatureBiasC
         } else {
-            temperatureC = state.effectiveTemperature
+            temperatureC = state.effectiveTemperature + calendar.temperatureBiasC
         }
 
         return RecoContext(
@@ -2074,8 +2463,55 @@ struct OutfitPlannerView: View {
             profileID: profile?.id,
             warmthSensitivity: profile?.warmthSensitivity ?? 3,
             rainTolerance: profile?.rainTolerance ?? 3,
-            lookTime: isEvening ? .evening : .day
+            lookTime: isEvening ? .evening : .day,
+            taste: cachedTaste,
+            combination: cachedCombination,
+            occasionKind: calendar.occasionKind
         )
+    }
+
+    private func calendarContext(for dayIndex: Int) -> DayCalendarContext {
+        if let cached = cachedCalendarContexts[dayIndex] {
+            return cached
+        }
+        guard dayIndex < boardState.days.count else { return .empty }
+        return CalendarContextService.shared.context(for: boardState.days[dayIndex].date)
+    }
+
+    private func refreshCalendarContextsAndApplyEvening() {
+        CalendarContextService.shared.invalidateCache()
+        var next: [Int: DayCalendarContext] = [:]
+        for index in boardState.days.indices {
+            let date = boardState.days[index].date
+            let context = CalendarContextService.shared.context(for: date)
+            next[index] = context
+
+            guard context.suggestEveningLook else { continue }
+            guard !CalendarContextPreferences.isEveningOptedOut(on: date) else { continue }
+            guard !boardState.days[index].useEveningLook else { continue }
+
+            boardState.days[index].useEveningLook = true
+            persistDayPlan(index)
+        }
+        cachedCalendarContexts = next
+    }
+
+    private func refreshAffinityCaches() {
+        let signature = "\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
+        guard signature != affinityCacheSignature else { return }
+        affinityCacheSignature = signature
+        cachedTaste = TasteAffinityBuilder.build(from: allGarments)
+        let recentRejections = recommendationEvents
+            .filter { $0.kind == .notMyStyle }
+            .prefix(40)
+            .map { $0 }
+        cachedCombination = CombinationAffinityBuilder.build(
+            wearEvents: wearEvents,
+            dismissed: dismissedOutfits,
+            rejectedEvents: Array(recentRejections)
+        )
+        cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
+        TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
     }
 
     @discardableResult
@@ -2270,12 +2706,22 @@ struct OutfitPlannerView: View {
 
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
             .filter { slot.allowedCategories.contains($0.category) }
+        let pairedWith: [Garment] = {
+            let ids = lookTime == .evening
+                ? state.eveningAssignedGarmentIDs
+                : state.assignedGarmentIDs
+            return ids.compactMap { id in
+                guard id != currentID else { return nil }
+                return allGarments.first { $0.id == id }
+            }
+        }()
         let suggestions = AIRecommender.shared.suggest(
             from: pool,
             k: 1,
             ctx: ctx,
             modelContext: context,
-            excludedIDs: excludedMerged
+            excludedIDs: excludedMerged,
+            pairedWith: pairedWith
         )
 
         if let replacement = suggestions.first {
@@ -2314,6 +2760,7 @@ struct OutfitPlannerView: View {
     }
     
     private func generateAllOutfits(fillMissingOnly: Bool) {
+        refreshCalendarContextsAndApplyEvening()
         for i in 0..<boardState.days.count {
             let state = boardState.days[i]
             let ctx = recoContext(for: i)
@@ -2697,10 +3144,27 @@ struct OutfitPlannerView: View {
         learnFromPlannerFeedback(dayIndex: dayIndex, kind: kind, reward: reward)
         persistDayPlan(dayIndex, immediate: true)
         try? context.save()
-        
+
         if rating == .rejected {
+            banCurrentOutfitCombination(dayIndex: dayIndex)
+            refreshAffinityCaches()
             refreshDay(dayIndex)
+        } else if rating == .loved || rating == .worn {
+            refreshAffinityCaches()
         }
+    }
+
+    private func banCurrentOutfitCombination(dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        let selected = boardState.days[dayIndex].assignedGarmentIDs.compactMap { id in
+            allGarments.first { $0.id == id }
+        }
+        guard selected.count >= 2 else { return }
+        let key = outfitKey(for: selected)
+        let existing = dismissedOutfits.contains { $0.key == key }
+        guard !existing else { return }
+        context.insert(DismissedOutfit(key: key))
+        try? context.save()
     }
 
     private func submitTemperatureFeedback(for dayIndex: Int, feedback: TemperatureFeedback) {
@@ -2725,7 +3189,12 @@ struct OutfitPlannerView: View {
     private func submitFormalityFeedback(for dayIndex: Int, direction: Int) {
         guard dayIndex < boardState.days.count else { return }
         let kind: RecommendationFeedbackKind = direction < 0 ? .tooFormal : .tooCasual
-        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+        let shownIDs = shownAlternatives(for: dayIndex).map(\.id)
+        guard recordLearningEvent(
+            dayIndex: dayIndex,
+            kind: kind,
+            shownGarmentIDs: shownIDs
+        ) else { return }
         DS.haptic(0.4)
         let current = boardState.days[dayIndex].overrides.desiredFormality ?? preferredFormality
         boardState.days[dayIndex].overrides.desiredFormality = min(max(current + direction, 1), 5)
@@ -2741,9 +3210,9 @@ struct OutfitPlannerView: View {
 
     private func loveScoreAdjustment(for rating: OutfitFeedbackRating?) -> Int {
         switch rating {
-        case .loved: return 5
-        case .worn: return 2
-        case .rejected: return -3
+        case .loved: return 8
+        case .worn: return 3
+        case .rejected: return -6
         case .neutral, nil: return 0
         }
     }
@@ -2759,20 +3228,58 @@ struct OutfitPlannerView: View {
             allGarments.first { $0.id == id }
         }
         guard !selected.isEmpty else { return }
-        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+
+        let shown = shownAlternatives(for: dayIndex)
+        guard recordLearningEvent(
+            dayIndex: dayIndex,
+            kind: kind,
+            shownGarmentIDs: shown.map(\.id)
+        ) else { return }
 
         let ctx = recoContext(for: dayIndex)
         AIRecommender.shared.learn(
             from: selected,
-            shown: nil,
+            shown: shown,
             ctx: ctx,
             reward: reward,
             modelContext: context
         )
     }
 
+    /// Top recommended alternatives per filled slot — used as negative samples for learning.
+    private func shownAlternatives(for dayIndex: Int) -> [Garment] {
+        guard dayIndex < boardState.days.count else { return [] }
+        let day = boardState.days[dayIndex]
+        var result: [Garment] = []
+        var seen = Set<UUID>()
+
+        func appendRecommended(for lookTime: LookTime, filledSlots: [OutfitSlot]) {
+            for slot in filledSlots {
+                for garment in recommendedItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime).prefix(5) {
+                    if seen.insert(garment.id).inserted {
+                        result.append(garment)
+                    }
+                }
+            }
+        }
+
+        let dayFilled = OutfitSlot.allCases.filter { day.garmentID(for: $0) != nil }
+        appendRecommended(for: .day, filledSlots: dayFilled)
+        if day.useEveningLook {
+            let eveningFilled = OutfitSlot.allCases.filter { day.eveningGarmentID(for: $0) != nil }
+            appendRecommended(for: .evening, filledSlots: eveningFilled)
+        }
+        return result
+    }
+
     private func applyDirectionalFeedback(dayIndex: Int, kind: RecommendationFeedbackKind) {
-        guard recordLearningEvent(dayIndex: dayIndex, kind: kind) else { return }
+        guard dayIndex < boardState.days.count else { return }
+        let shownIDs = shownAlternatives(for: dayIndex).map(\.id)
+        guard recordLearningEvent(
+            dayIndex: dayIndex,
+            kind: kind,
+            shownGarmentIDs: shownIDs
+        ) else { return }
         AIRecommender.shared.applyDirectionalFeedback(
             kind,
             ctx: recoContext(for: dayIndex),
@@ -2782,18 +3289,20 @@ struct OutfitPlannerView: View {
 
     private func recordLearningEvent(
         dayIndex: Int,
-        kind: RecommendationFeedbackKind
+        kind: RecommendationFeedbackKind,
+        shownGarmentIDs: [UUID]
     ) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
         let day = boardState.days[dayIndex]
         let garmentIDs = day.assignedGarmentIDs
         guard !garmentIDs.isEmpty else { return false }
         let plan = DayPlanService.shared.planFor(date: day.date, context: context)
+        let shownIDs = Array(Set(shownGarmentIDs + garmentIDs))
 
         return RecommendationEventStore.record(
             kind: kind,
             selectedGarmentIDs: garmentIDs,
-            shownGarmentIDs: garmentIDs,
+            shownGarmentIDs: shownIDs,
             dayPlanID: plan.id,
             context: recoContext(for: dayIndex),
             modelContext: context
@@ -2858,7 +3367,7 @@ struct OutfitPlannerView: View {
             garmentIDs: garmentIDs,
             source: .planner,
             context: context,
-            outfitID: plan.id,
+            outfitID: nil,
             incrementTimesWorn: true,
             loveScoreDelta: 1
         )
@@ -3306,9 +3815,11 @@ struct OutfitPlannerView: View {
         let isValid = isValidDropTarget(slot: slot, lookTime: lookTime)
 
         if isTargeted && isValid {
-            targetedSlots.insert(target)
-        } else {
-            targetedSlots.remove(target)
+            if targetedSlot != target {
+                targetedSlot = target
+            }
+        } else if targetedSlot == target {
+            targetedSlot = nil
         }
     }
 
@@ -3318,7 +3829,7 @@ struct OutfitPlannerView: View {
     }
 
     private func isTargetHighlighted(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime) -> Bool {
-        targetedSlots.contains(SlotTarget(dayIndex: dayIndex, slot: slot, lookTime: lookTime))
+        targetedSlot == SlotTarget(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
     }
 
     private func targetHighlightColor(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime) -> Color {
@@ -3331,7 +3842,7 @@ struct OutfitPlannerView: View {
 
     private func clearDragState() {
         boardState.draggedItem = nil
-        targetedSlots.removeAll()
+        targetedSlot = nil
     }
     
     private func dayName(for index: Int) -> String {
@@ -3424,6 +3935,7 @@ private struct DayCardSignature: Equatable {
     let forecastKey: String
     let assignedSignature: String
     let availableSignature: String
+    let feedbackExpanded: Bool
 }
 
 private struct DayCardContainer<Content: View>: View, Equatable {
@@ -3455,7 +3967,7 @@ struct FeedbackButton: View {
     
     var body: some View {
         Button {
-            DS.haptic(0.4)
+            DS.haptic(0.45)
             action()
         } label: {
             VStack(spacing: 4) {
@@ -3463,9 +3975,11 @@ struct FeedbackButton: View {
                     .font(.title3)
                 Text(label)
                     .font(.caption2.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, DS.Spacing.xs)
+            .padding(.vertical, DS.Spacing.sm)
             .foregroundStyle(isSelected ? color : .primary)
             .liquidGlassSurface(
                 cornerRadius: DS.Radius.sm,
@@ -3473,8 +3987,17 @@ struct FeedbackButton: View {
                 tint: isSelected ? color.opacity(0.18) : nil
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SoftPressButtonStyle())
         .animation(DS.Animation.fast, value: isSelected)
+    }
+}
+
+private struct SoftPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.88 : 1)
+            .animation(DS.Animation.interactive, value: configuration.isPressed)
     }
 }
 
@@ -3486,19 +4009,18 @@ private struct LearningFeedbackChip: View {
 
     var body: some View {
         Button {
-            DS.haptic(0.3)
+            DS.haptic(0.35)
             action()
         } label: {
             Label(label, systemImage: icon)
                 .font(.caption2.weight(.medium))
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.vertical, DS.Spacing.xs)
                 .foregroundStyle(color)
                 .liquidGlassPill(interactive: true, tint: color.opacity(0.10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SoftPressButtonStyle())
     }
 }
 
@@ -3511,7 +4033,7 @@ struct TempFeedbackButton: View {
     
     var body: some View {
         Button {
-            DS.haptic(0.3)
+            DS.haptic(0.35)
             action()
         } label: {
             HStack(spacing: 2) {
@@ -3521,13 +4043,13 @@ struct TempFeedbackButton: View {
                     .font(.caption2.weight(.medium))
             }
             .padding(.horizontal, DS.Spacing.sm)
-            .padding(.vertical, DS.Spacing.xxs)
+            .padding(.vertical, DS.Spacing.xs)
             .foregroundStyle(isSelected ? Color.accentColor : .secondary)
             .liquidGlassPill(
                 interactive: true,
                 tint: isSelected ? Color.accentColor.opacity(0.18) : nil
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SoftPressButtonStyle())
     }
 }
