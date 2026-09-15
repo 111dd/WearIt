@@ -4,6 +4,10 @@
 //
 //  Displays a garment image from local path/data, with optional remote URL support.
 //
+//  LEGACY: Not referenced by the live RootView navigation path. Prefer
+//  DSGarmentThumbnail / DSGarmentTile for new UI. Still uses synchronous
+//  `resolvedImage` in body — do not wire into scroll grids without migrating.
+//
 
 import SwiftUI
 

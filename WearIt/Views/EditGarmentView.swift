@@ -12,11 +12,16 @@ struct EditGarmentView: View {
     @Query(sort: \Brand.name, order: .forward) private var brands: [Brand]
 
     @State private var isEditingTitle = false
+    @State private var isSuggestingName = false
     @State private var showAdvancedOptions = false
+    @State private var showDetails = false
     @State private var showDeleteAlert = false
     @State private var errorMessage: String?
     @State private var hasUnsavedChanges = false
     @State private var brandText = ""
+    @State private var showLabelScanner = false
+    @State private var isScanningLabel = false
+    @State private var labelScanMessage: String?
     @State private var showGalleryViewer = false
     @State private var galleryStartIndex = 0
     @State private var heroImage: UIImage?
@@ -73,15 +78,33 @@ struct EditGarmentView: View {
             VStack(spacing: DS.Spacing.md) {
                 heroCard
                 essentialsCard
-                if shouldShowFit || shouldShowSize {
-                    fitSizeCard
+                ThermalProfileEditor(
+                    profile: garment.thermalProfile,
+                    warmthOverride: Binding(
+                        get: { garment.thermalWarmthOverride },
+                        set: { garment.thermalWarmthOverride = $0; hasUnsavedChanges = true }
+                    ),
+                    breathabilityOverride: Binding(
+                        get: { garment.thermalBreathabilityOverride },
+                        set: { garment.thermalBreathabilityOverride = $0; hasUnsavedChanges = true }
+                    )
+                )
+                DisclosureGroup(isExpanded: $showDetails) {
+                    VStack(spacing: DS.Spacing.md) {
+                        if shouldShowFit || shouldShowSize { fitSizeCard }
+                        colorCard
+                        brandCard
+                        seasonCard
+                        attributesCard
+                        advancedCard
+                        dangerCard
+                    }
+                    .padding(.top, DS.Spacing.sm)
+                } label: {
+                    Label("edit_details_and_options", systemImage: "slider.horizontal.3")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
                 }
-                colorCard
-                brandCard
-                seasonCard
-                attributesCard
-                advancedCard
-                dangerCard
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, DS.Spacing.md)
@@ -96,14 +119,6 @@ struct EditGarmentView: View {
         .minimalCollapsingNavBar()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             stickySaveBar
-        }
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button(String(localized: "action_save")) {
-                    feedback.impactOccurred()
-                    saveChanges()
-                }
-            }
         }
         .onAppear {
             brandText = garment.brand ?? ""
@@ -135,6 +150,11 @@ struct EditGarmentView: View {
         .sheet(isPresented: $showCamera) {
             CameraPickerWrapper { image in
                 beginCrop(with: image)
+            }
+        }
+        .sheet(isPresented: $showLabelScanner) {
+            CameraPickerWrapper { image in
+                handleLabelScan(image)
             }
         }
         .fullScreenCover(isPresented: $showCropper) {
@@ -334,16 +354,60 @@ struct EditGarmentView: View {
                     .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button {
-                    isEditingTitle = true
-                } label: {
-                    Label(String(localized: "add_garment_edit_title"), systemImage: "pencil")
-                        .font(.caption)
+                HStack(spacing: DS.Spacing.md) {
+                    Button {
+                        isEditingTitle = true
+                    } label: {
+                        Label(String(localized: "add_garment_edit_title"), systemImage: "pencil")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+
+                    if LookExplanationAvailability.isSupported {
+                        Button {
+                            suggestNameWithAI()
+                        } label: {
+                            if isSuggestingName {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Label(String(localized: "garment_ai_name_suggest"), systemImage: "sparkles")
+                                    .font(.caption)
+                            }
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .disabled(isSuggestingName)
+                        .accessibilityLabel(String(localized: "garment_ai_name_suggest"))
+                    }
                 }
-                .foregroundStyle(.secondary)
             }
         }
         .padding(.top, DS.Spacing.xxs)
+    }
+
+    private func suggestNameWithAI() {
+        guard #available(iOS 26.0, *) else { return }
+        guard !isSuggestingName else { return }
+        let request = GarmentNameRequest(
+            category: garment.category.rawValue,
+            itemType: garment.itemType?.rawValue,
+            colors: garment.safeColorTags.prefix(2).map(\.rawValue),
+            material: garment.materialTags?.first?.rawValue,
+            pattern: garment.patternTag?.rawValue,
+            fit: garment.fitTag?.rawValue,
+            brand: garment.brand,
+            languageCode: Locale.current.language.languageCode?.identifier ?? "en"
+        )
+        isSuggestingName = true
+        Task {
+            let name = await LookExplanationService.shared.suggestGarmentName(for: request)
+            isSuggestingName = false
+            if let name {
+                garment.userTitleOverride = name
+                hasUnsavedChanges = true
+                DS.haptic(0.4)
+            }
+        }
     }
 
     private var essentialsCard: some View {
@@ -469,7 +533,26 @@ struct EditGarmentView: View {
 
     private var brandCard: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "garment_brand"), icon: "tag")
+            HStack {
+                DSSectionHeader(String(localized: "garment_brand"), icon: "tag")
+                Spacer(minLength: 0)
+                Button {
+                    DS.haptic(0.4)
+                    showLabelScanner = true
+                } label: {
+                    if isScanningLabel {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Label(String(localized: "label_scan_button"), systemImage: "text.viewfinder")
+                            .font(.caption.weight(.semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .disabled(isScanningLabel)
+            }
+
             TextField(String(localized: "garment_brand_placeholder"), text: $brandText)
                 .textFieldStyle(.plain)
                 .dsFieldStyle()
@@ -477,6 +560,13 @@ struct EditGarmentView: View {
                     garment.brand = newValue.isEmpty ? nil : newValue
                     hasUnsavedChanges = true
                 }
+
+            if let labelScanMessage {
+                Label(labelScanMessage, systemImage: "text.viewfinder")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if !brandSuggestions.isEmpty || shouldShowAddBrand {
                 VStack(alignment: .leading, spacing: 6) {
@@ -503,6 +593,43 @@ struct EditGarmentView: View {
         .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
+    private func handleLabelScan(_ image: UIImage) {
+        isScanningLabel = true
+        labelScanMessage = nil
+        Task {
+            let result = await LabelScanService.scan(image: image)
+            isScanningLabel = false
+
+            var found: [String] = []
+            if let brand = result.brand, brandText.isEmpty {
+                brandText = brand
+                garment.brand = brand
+                found.append(brand)
+            }
+            if let size = result.size, garment.sizeOption == nil,
+               SizeOption.options(for: garment.category).contains(size) {
+                garment.sizeOption = size
+                found.append(size.title)
+            }
+            if !result.materials.isEmpty, (garment.materialTags ?? []).isEmpty {
+                garment.materialTags = result.materials
+                garment.markUserEdited(ItemTypeDefaults.FieldKey.materialTags)
+                found.append(result.materials.map(\.title).joined(separator: ", "))
+            }
+
+            if found.isEmpty {
+                labelScanMessage = String(localized: "label_scan_nothing")
+            } else {
+                hasUnsavedChanges = true
+                labelScanMessage = String(
+                    format: NSLocalizedString("label_scan_found_format", comment: ""),
+                    found.joined(separator: " · ")
+                )
+                DS.haptic(0.5)
+            }
+        }
+    }
+
     private var seasonCard: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             DSSectionHeader(String(localized: "garment_season"), icon: "leaf")
@@ -510,6 +637,7 @@ struct EditGarmentView: View {
                 get: { garment.seasonSuitability },
                 set: {
                     garment.seasonSuitability = $0
+                    garment.markUserEdited(ItemTypeDefaults.FieldKey.season)
                     hasUnsavedChanges = true
                 }
             ))
@@ -539,19 +667,14 @@ struct EditGarmentView: View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             DSSectionHeader(String(localized: "garment_attributes"), icon: "slider.horizontal.3")
 
-            attributeRow(icon: "thermometer.medium", title: String(localized: "garment_warmth"), value: garment.warmth, tint: .orange) {
-                Stepper("", value: Binding(
-                    get: { garment.warmth },
-                    set: { garment.warmth = $0; hasUnsavedChanges = true }
-                ), in: 1...5)
-                .labelsHidden()
-                .controlSize(.small)
-            }
-
             attributeRow(icon: "briefcase", title: String(localized: "garment_formality"), value: garment.formality, tint: .accentColor) {
-                Stepper("", value: Binding(
+                Stepper(String(localized: "garment_formality"), value: Binding(
                     get: { garment.formality },
-                    set: { garment.formality = $0; hasUnsavedChanges = true }
+                    set: {
+                        garment.formality = $0
+                        garment.markUserEdited(ItemTypeDefaults.FieldKey.formality)
+                        hasUnsavedChanges = true
+                    }
                 ), in: 1...5)
                 .labelsHidden()
                 .controlSize(.small)
@@ -570,6 +693,7 @@ struct EditGarmentView: View {
                     get: { Double(garment.loveScore) },
                     set: { garment.loveScore = Int($0); hasUnsavedChanges = true }
                 ), in: 0...100)
+                .accessibilityLabel(String(localized: "garment_love"))
                 .tint(.pink)
             }
 

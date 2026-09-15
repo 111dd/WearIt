@@ -2,69 +2,164 @@
 //  BarcodeScannerView.swift
 //  WearIt
 //
-//  Created by Dor David on 05/09/2025.
-//
 
 import SwiftUI
 import AVFoundation
 
+/// Full-screen barcode scanner with close button.
+struct BarcodeScannerScreen: View {
+    var onCode: (String) -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            BarcodeScannerView(onCode: onCode)
+                .ignoresSafeArea()
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(String(localized: "action_close"), action: onCancel)
+                        .font(.body.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.top, DS.Spacing.sm)
+
+                Spacer()
+
+                    Text(String(localized: "barcode_scan_hint"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.45), in: Capsule())
+                    .padding(.bottom, 48)
+            }
+        }
+        .statusBarHidden(true)
+    }
+}
+
 struct BarcodeScannerView: UIViewControllerRepresentable {
     var onCode: (String) -> Void
 
-    func makeUIViewController(context: Context) -> UIViewController {
-        let vc = UIViewController()
-        vc.view.backgroundColor = .black
+    func makeUIViewController(context: Context) -> ScannerViewController {
+        let vc = ScannerViewController()
+        vc.onCode = onCode
+        return vc
+    }
 
-        let session = AVCaptureSession()
+    func updateUIViewController(_ uiViewController: ScannerViewController, context: Context) {
+        uiViewController.onCode = onCode
+    }
+}
+
+final class ScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onCode: ((String) -> Void)?
+
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var didEmitCode = false
+    private let boxLayer = CAShapeLayer()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        configureSession()
+        configureFocusBox()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+        updateFocusBoxPath()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        didEmitCode = false
+        if !session.isRunning {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.session.startRunning()
+            }
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        if session.isRunning {
+            session.stopRunning()
+        }
+    }
+
+    private func configureSession() {
+        session.beginConfiguration()
         session.sessionPreset = .high
 
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device),
-              session.canAddInput(input) else { return vc }
+              session.canAddInput(input) else {
+            session.commitConfiguration()
+            return
+        }
         session.addInput(input)
 
         let output = AVCaptureMetadataOutput()
-        guard session.canAddOutput(output) else { return vc }
+        guard session.canAddOutput(output) else {
+            session.commitConfiguration()
+            return
+        }
         session.addOutput(output)
-
-        output.setMetadataObjectsDelegate(context.coordinator, queue: .main)
-        output.metadataObjectTypes = [.ean13, .ean8, .upce, .code128, .qr, .pdf417]
+        output.setMetadataObjectsDelegate(self, queue: .main)
+        // Product barcodes and QR codes (GTIN in URL or product-page link) are handled in lookup.
+        let supported: [AVMetadataObject.ObjectType] = [.ean13, .ean8, .upce, .code128, .qr]
+        output.metadataObjectTypes = supported.filter { output.availableMetadataObjectTypes.contains($0) }
+        session.commitConfiguration()
 
         let preview = AVCaptureVideoPreviewLayer(session: session)
         preview.videoGravity = .resizeAspectFill
-        preview.frame = UIScreen.main.bounds
-        vc.view.layer.addSublayer(preview)
-
-        // ריבוע פוקוס
-        let box = CAShapeLayer()
-        box.strokeColor = UIColor.white.cgColor
-        box.lineWidth = 2
-        box.fillColor = UIColor.clear.cgColor
-        let rect = CGRect(x: UIScreen.main.bounds.midX - 120, y: UIScreen.main.bounds.midY - 60, width: 240, height: 120)
-        box.path = UIBezierPath(roundedRect: rect, cornerRadius: 8).cgPath
-        vc.view.layer.addSublayer(box)
-
-        session.startRunning()
-        context.coordinator.session = session
-        context.coordinator.onCode = onCode
-        return vc
+        preview.frame = view.bounds
+        view.layer.insertSublayer(preview, at: 0)
+        previewLayer = preview
     }
 
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
+    private func configureFocusBox() {
+        boxLayer.strokeColor = UIColor.white.cgColor
+        boxLayer.lineWidth = 2
+        boxLayer.fillColor = UIColor.clear.cgColor
+        view.layer.addSublayer(boxLayer)
+        updateFocusBoxPath()
+    }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    private func updateFocusBoxPath() {
+        let width: CGFloat = min(view.bounds.width - 48, 280)
+        let height: CGFloat = 140
+        let rect = CGRect(
+            x: (view.bounds.width - width) / 2,
+            y: (view.bounds.height - height) / 2,
+            width: width,
+            height: height
+        )
+        boxLayer.path = UIBezierPath(roundedRect: rect, cornerRadius: 12).cgPath
+    }
 
-    final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate {
-        var session: AVCaptureSession?
-        var onCode: ((String) -> Void)?
+    func metadataOutput(
+        _ output: AVCaptureMetadataOutput,
+        didOutput metadataObjects: [AVMetadataObject],
+        from connection: AVCaptureConnection
+    ) {
+        guard !didEmitCode,
+              let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+              let code = obj.stringValue,
+              !code.isEmpty else { return }
 
-        func metadataOutput(_ output: AVCaptureMetadataOutput,
-                            didOutput metadataObjects: [AVMetadataObject],
-                            from connection: AVCaptureConnection) {
-            guard let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
-                  let code = obj.stringValue else { return }
-            onCode?(code)
-            session?.stopRunning()
-        }
+        didEmitCode = true
+        session.stopRunning()
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        onCode?(code)
     }
 }

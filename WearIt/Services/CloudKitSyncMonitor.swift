@@ -20,6 +20,15 @@ final class CloudKitSyncMonitor: ObservableObject {
 
     private let logger = Logger(subsystem: "WearIt", category: "CloudKit")
 
+    /// Avoid hammering `CKContainer.accountStatus` on every foreground / bootstrap tick.
+    private var lastAccountRefreshAt: Date = .distantPast
+    private let accountRefreshMinInterval: TimeInterval = 300
+
+    /// Coalesce rapid CloudKit event flips (syncing ↔ synced) into one UI publish.
+    private var pendingStatus: Status?
+    private var statusDebounceTask: Task<Void, Never>?
+    private let statusDebounceNanoseconds: UInt64 = 1_500_000_000
+
     private init() {
         NotificationCenter.default.addObserver(
             forName: NSPersistentCloudKitContainer.eventChangedNotification,
@@ -41,37 +50,43 @@ final class CloudKitSyncMonitor: ObservableObject {
             }
         }
 
-        Task { await refreshAccountStatus() }
+        Task { await refreshAccountStatus(force: true) }
     }
 
-    func refreshAccountStatus() async {
+    func refreshAccountStatus(force: Bool = false) async {
+        let now = Date()
+        if !force, now.timeIntervalSince(lastAccountRefreshAt) < accountRefreshMinInterval {
+            return
+        }
+        lastAccountRefreshAt = now
+
         do {
             let accountStatus = try await CKContainer.default().accountStatus()
             switch accountStatus {
             case .available:
                 updateIfChanged(&availabilityMessage, "")
                 if case .notAvailable = status {
-                    updateIfChanged(&status, .synced)
+                    publishStatus(.synced, immediate: true)
                 }
             case .noAccount:
                 updateIfChanged(&availabilityMessage, "No iCloud account is signed in.")
-                updateIfChanged(&status, .notAvailable)
+                publishStatus(.notAvailable, immediate: true)
             case .restricted:
                 updateIfChanged(&availabilityMessage, "iCloud access is restricted.")
-                updateIfChanged(&status, .notAvailable)
+                publishStatus(.notAvailable, immediate: true)
             case .couldNotDetermine:
                 updateIfChanged(&availabilityMessage, "iCloud status could not be determined.")
-                updateIfChanged(&status, .notAvailable)
+                publishStatus(.notAvailable, immediate: true)
             case .temporarilyUnavailable:
                 updateIfChanged(&availabilityMessage, "iCloud is temporarily unavailable.")
-                updateIfChanged(&status, .notAvailable)
+                publishStatus(.notAvailable, immediate: true)
             @unknown default:
                 updateIfChanged(&availabilityMessage, "iCloud status is unknown.")
-                updateIfChanged(&status, .notAvailable)
+                publishStatus(.notAvailable, immediate: true)
             }
         } catch {
             updateIfChanged(&availabilityMessage, "iCloud status error.")
-            updateIfChanged(&status, .error(error.localizedDescription))
+            publishStatus(.error(error.localizedDescription), immediate: true)
             debugLog("CloudKit account status error: \(error.localizedDescription)")
         }
     }
@@ -81,17 +96,36 @@ final class CloudKitSyncMonitor: ObservableObject {
                 as? NSPersistentCloudKitContainer.Event else { return }
 
         if event.endDate == nil {
-            updateIfChanged(&status, .syncing)
+            publishStatus(.syncing, immediate: false)
             debugLog("CloudKit sync started: \(String(describing: event.type))")
             return
         }
 
         if let error = event.error {
-            updateIfChanged(&status, .error(error.localizedDescription))
+            publishStatus(.error(error.localizedDescription), immediate: true)
             debugLog("CloudKit sync error: \(error.localizedDescription)")
         } else {
-            updateIfChanged(&status, .synced)
+            publishStatus(.synced, immediate: false)
             debugLog("CloudKit sync ended: \(String(describing: event.type))")
+        }
+    }
+
+    private func publishStatus(_ newValue: Status, immediate: Bool) {
+        if immediate {
+            statusDebounceTask?.cancel()
+            statusDebounceTask = nil
+            pendingStatus = nil
+            updateIfChanged(&status, newValue)
+            return
+        }
+
+        pendingStatus = newValue
+        statusDebounceTask?.cancel()
+        statusDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: statusDebounceNanoseconds)
+            guard !Task.isCancelled, let pending = pendingStatus else { return }
+            pendingStatus = nil
+            updateIfChanged(&status, pending)
         }
     }
 

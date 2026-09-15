@@ -13,6 +13,10 @@ final class UserProfile {
     var rainTolerance: Int = 3
     var email: String?
     var phone: String?
+    /// Short personal style tagline shown on the profile page.
+    var bio: String?
+    /// ImageStore-relative path for a photo avatar; falls back to `avatarEmoji`.
+    var avatarImagePath: String?
     var garmentIDs: [UUID] = []
     var outfitIDs: [UUID] = []
     var dayPlanIDs: [UUID] = []

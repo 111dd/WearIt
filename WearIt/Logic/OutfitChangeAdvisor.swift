@@ -101,8 +101,8 @@ enum OutfitChangeAdvisor {
         if better.formality < current.formality, ctx.desiredFormality <= 2 {
             return String(localized: "planner_change_reason_more_casual")
         }
-        if abs(Double(better.warmth) - (ctx.temperatureC < 15 ? 4 : ctx.temperatureC > 26 ? 2 : 3))
-            < abs(Double(current.warmth) - (ctx.temperatureC < 15 ? 4 : ctx.temperatureC > 26 ? 2 : 3)) {
+        if abs(Double(better.warmth) - targetWarmth(for: ctx))
+            < abs(Double(current.warmth) - targetWarmth(for: ctx)) {
             return String(localized: "planner_change_reason_weather")
         }
         if (better.lastWorn == nil && current.lastWorn != nil)
@@ -118,6 +118,13 @@ enum OutfitChangeAdvisor {
         return String(
             format: NSLocalizedString("planner_change_reason_slot_format", comment: ""),
             current.category.title
+        )
+    }
+
+    private static func targetWarmth(for ctx: RecoContext) -> Double {
+        TemperatureComfort.targetWarmth(
+            temperatureC: ctx.temperatureC,
+            warmthTaste: ctx.warmthTaste
         )
     }
 }

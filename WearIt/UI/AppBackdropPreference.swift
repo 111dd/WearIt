@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import CoreImage
 
 enum AppBackdropPreset: String, CaseIterable, Identifiable {
     case softSky
@@ -26,6 +27,17 @@ enum AppBackdropPreset: String, CaseIterable, Identifiable {
         case .duskRose: return "backdrop_dusk_rose"
         case .slate: return "backdrop_slate"
         case .photo: return "backdrop_photo"
+        }
+    }
+
+    /// Whether this backdrop is dark enough to require light (dark-mode) text.
+    var prefersDarkScheme: Bool {
+        switch self {
+        case .softSky, .warmSand, .mistForest, .duskRose, .slate:
+            return false
+        case .photo:
+            // Decided per-image; see AppBackdropStore/customImageIsDark.
+            return false
         }
     }
 
@@ -87,6 +99,8 @@ enum AppBackdropKeys {
     static let customImagePath = "appBackdropCustomImagePath"
     /// 0...1 — mapped to blur radius in `LiquidGlassBackdrop`.
     static let blurAmount = "appBackdropBlurAmount"
+    /// "true" when the user's custom wallpaper photo is dark (computed at save time).
+    static let customImageIsDark = "appBackdropCustomImageIsDark"
 }
 
 enum AppBackdropBlur {
@@ -115,6 +129,35 @@ enum AppBackdropBlur {
 }
 
 enum AppBackdropStore {
+    /// Threshold below which a wallpaper is considered dark.
+    static let darkLuminanceThreshold: Double = 0.5
+
+    /// Average relative luminance in 0...1. Returns nil if analysis fails.
+    static func averageLuminance(of image: UIImage) -> Double? {
+        guard let cg = image.cgImage else { return nil }
+        let ciImage = CIImage(cgImage: cg)
+        let extent = ciImage.extent
+        guard let filter = CIFilter(name: "CIAreaAverage") else { return nil }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgRect: extent), forKey: kCIInputExtentKey)
+        guard let output = filter.outputImage else { return nil }
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CIContext(options: [.workingColorSpace: NSNull()])
+        context.render(
+            output,
+            toBitmap: &pixel,
+            rowBytes: 4,
+            bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+            format: .RGBA8,
+            colorSpace: nil
+        )
+        let r = Double(pixel[0]) / 255.0
+        let g = Double(pixel[1]) / 255.0
+        let b = Double(pixel[2]) / 255.0
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
     static func saveCustomImage(_ image: UIImage) -> String? {
         let prepared = image.resized(toMaxDimension: 1600)
         guard let data = prepared.jpegData(compressionQuality: 0.82) else { return nil }
@@ -125,6 +168,8 @@ enum AppBackdropStore {
             let path = try ImageStore.save(data: data, preferredExt: "jpg")
             UserDefaults.standard.set(path, forKey: AppBackdropKeys.customImagePath)
             UserDefaults.standard.set(AppBackdropPreset.photo.rawValue, forKey: AppBackdropKeys.preset)
+            let isDark = (averageLuminance(of: prepared) ?? 1.0) < darkLuminanceThreshold
+            UserDefaults.standard.set(isDark, forKey: AppBackdropKeys.customImageIsDark)
             return path
         } catch {
             return nil
@@ -136,6 +181,7 @@ enum AppBackdropStore {
             ImageStore.delete(path: old)
         }
         UserDefaults.standard.removeObject(forKey: AppBackdropKeys.customImagePath)
+        UserDefaults.standard.removeObject(forKey: AppBackdropKeys.customImageIsDark)
     }
 
     static func loadCustomImage() -> UIImage? {

@@ -2,6 +2,10 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+// LEGACY: Not in the live RootView tab path (planner uses OutfitPlannerView).
+// LockTile / OutfitGrid still call `resolvedImage` synchronously — leave alone
+// unless this view is reintroduced into navigation.
+
 struct OutfitView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var weather: WeatherCenter

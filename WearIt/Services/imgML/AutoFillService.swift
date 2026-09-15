@@ -103,32 +103,10 @@ enum AutoFillMapper {
     }
 
     static func mapClassifierLabel(_ label: String) -> (category: Category?, itemType: ItemType?) {
-        let lower = label.lowercased()
-
-        if lower.contains("jean") { return (.bottom, .jeans) }
-        if lower.contains("short") { return (.bottom, .shorts) }
-        if lower.contains("skirt") { return (.bottom, .skirt) }
-        if lower.contains("trouser") || lower.contains("pant") || lower.contains("chino") {
-            return (.bottom, .trousers)
-        }
-        if lower.contains("hoodie") { return (.top, .hoodie) }
-        if lower.contains("sweater") || lower.contains("pullover") { return (.top, .sweater) }
-        if lower.contains("t-shirt") || lower.contains("tshirt") || lower.contains("tee") {
-            return (.top, .tshirt)
-        }
-        if lower.contains("shirt") || lower.contains("blouse") { return (.top, .shirt) }
-        if lower.contains("jacket") || lower.contains("coat") || lower.contains("blazer") || lower.contains("parka") {
-            return (.outer, .jacket)
-        }
-        if lower.contains("shoe") || lower.contains("sneaker") || lower.contains("boot") || lower.contains("loafer") {
-            return (.shoes, .sneakers)
-        }
-        if lower.contains("bag") || lower.contains("handbag") { return (.accessory, .bag) }
-        if lower.contains("hat") || lower.contains("cap") { return (.accessory, .hat) }
-        if lower.contains("scarf") { return (.accessory, .scarf) }
-        if lower.contains("dress") { return (.top, .blouse) }
-
-        return (nil, nil)
+        let path = label
+        let category = ProductFieldMapper.mapCategory(path: path, title: nil)
+        let itemType = ProductFieldMapper.mapItemType(path: path, title: nil, category: category)
+        return (category, itemType)
     }
 
     static func colorTags(from dominant: [DominantColor]) -> [ColorTag] {
@@ -151,26 +129,6 @@ enum AutoFillMapper {
     }
 
     static func colorTag(fromDominantName name: String) -> ColorTag? {
-        switch name.lowercased() {
-        case "black": return .black
-        case "white": return .white
-        case "gray", "grey": return .gray
-        case "navy": return .navy
-        case "blue", "teal": return .blue
-        case "lightblue", "light_blue", "light blue": return .lightBlue
-        case "red": return .red
-        case "pink": return .pink
-        case "orange": return .orange
-        case "yellow": return .yellow
-        case "green": return .green
-        case "olive": return .olive
-        case "brown": return .brown
-        case "beige": return .beige
-        case "cream": return .cream
-        case "burgundy": return .burgundy
-        case "purple": return .purple
-        case "denim": return .denim
-        default: return nil
-        }
+        ProductFieldMapper.matchColor(name)
     }
 }

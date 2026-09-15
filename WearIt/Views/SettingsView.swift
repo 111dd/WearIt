@@ -1,0 +1,867 @@
+import SwiftUI
+import SwiftData
+import UIKit
+
+//
+//  SettingsView.swift
+//  WearIt
+//
+//  App settings, split out of ProfileView so the profile page can stay an
+//  identity page. Everything here auto-saves: sliders and toggles write
+//  through to the model with a debounced context save.
+//
+
+struct SettingsView: View {
+    @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
+
+    @Query<UserProfile> private var users: [UserProfile]
+    @Query<NotificationPreferences> private var notificationPrefs: [NotificationPreferences]
+    @Query<RecoState> private var recoStates: [RecoState]
+
+    @State private var preferredFormality: Int = 3
+    @State private var warmthSensitivity: Int = 3
+    @State private var rainTolerance: Int = 3
+    @State private var didLoadTaste = false
+    @State private var showSignInSheet = false
+    @State private var showSignOutDialog = false
+    @State private var showResetLearningDialog = false
+    @State private var showBackdropPicker = false
+    /// Async-loaded preview for the custom backdrop chip — avoids decoding the
+    /// full-resolution photo on the main thread inside `body`.
+    @State private var backdropPreviewImage: UIImage?
+    @AppStorage("didSkipSignIn") private var didSkipSignIn = false
+    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
+    @AppStorage(AppBackdropKeys.customImagePath) private var backdropCustomPath: String = ""
+    @AppStorage(AppBackdropKeys.blurAmount) private var backdropBlurAmount: Double = AppBackdropBlur.defaultAmount
+    @AppStorage(CalendarContextKeys.hebrewEnabled) private var hebrewCalendarEnabled = true
+    @AppStorage(CalendarContextKeys.deviceCalendarEnabled) private var deviceCalendarEnabled = false
+    @AppStorage(LookExplanationKeys.enabled) private var aiLookExplanationsEnabled = true
+
+    @State private var currentDate: Date = Date()
+    @State private var prefsSaveDebouncer = Debouncer(interval: 3.0)
+    @State private var scheduleNotificationsDebouncer = Debouncer(interval: 5.0)
+
+    init() { _users = Query(FetchDescriptor<UserProfile>()) }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: DS.Spacing.lg) {
+                accountCard
+                appearanceSection
+                tasteLearningSection
+                aiFeaturesSection
+                calendarContextSection
+                notificationsSection
+                dataManagementSection
+                languageSection
+
+                #if DEBUG
+                debugSection
+                #endif
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.top, DS.Spacing.sm)
+            .padding(.bottom, DS.Spacing.lg)
+        }
+        .scrollContentBackground(.hidden)
+        .navigationTitle(String(localized: "settings_title"))
+        .minimalCollapsingNavBar()
+        .onAppear {
+            refreshCurrentDate()
+            loadTasteValues()
+        }
+        .onChange(of: auth.userIdentifier) { _, _ in loadTasteValues() }
+        .onChange(of: preferredFormality) { _, _ in saveTasteValues() }
+        .onChange(of: warmthSensitivity) { _, _ in saveTasteValues() }
+        .onChange(of: rainTolerance) { _, _ in saveTasteValues() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            refreshCurrentDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            refreshCurrentDate()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .profileFlushPrefsSave)) { _ in
+            try? context.save()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .profileScheduleNotifications)) { _ in
+            scheduleNotifications()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                prefsSaveDebouncer.flush()
+                try? context.save()
+            }
+        }
+        .onDisappear {
+            prefsSaveDebouncer.flush()
+            try? context.save()
+        }
+        .sheet(isPresented: $showSignInSheet) {
+            SignInView()
+        }
+        .sheet(isPresented: $showBackdropPicker) {
+            // Full-frame photo (no square crop) — backdrop is always blurred full-screen.
+            PHPickerWrapper { image in
+                if let path = AppBackdropStore.saveCustomImage(image) {
+                    backdropCustomPath = path
+                    backdropPresetRaw = AppBackdropPreset.photo.rawValue
+                    DS.haptic(0.45)
+                }
+            }
+        }
+        .confirmationDialog(
+            String(localized: "profile_signout_title"),
+            isPresented: $showSignOutDialog,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "profile_signout_stay_offline")) {
+                auth.signOut()
+                didSkipSignIn = true
+            }
+            Button(String(localized: "profile_signout_go_to_signin")) {
+                auth.signOut()
+                didSkipSignIn = false
+            }
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "profile_signout_message"))
+        }
+        .confirmationDialog(
+            String(localized: "profile_reset_learning_title"),
+            isPresented: $showResetLearningDialog,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "profile_reset_learning_confirm"), role: .destructive) {
+                AIRecommender.shared.resetLearning(profileID: activeProfileID, modelContext: context)
+                RecommendationEventStore.removeAll(profileID: activeProfileID, modelContext: context)
+            }
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "profile_reset_learning_message"))
+        }
+    }
+
+    // MARK: - Account
+
+    private var accountCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "profile_account"), icon: "person.circle.fill")
+
+            HStack(alignment: .center, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_signed_in_with_apple"))
+                        .font(.subheadline.weight(.medium))
+                    Text(auth.isSignedIn ? String(localized: "profile_signed_in") : String(localized: "profile_signed_out"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if auth.isSignedIn, let currentEmail = auth.email, !currentEmail.isEmpty {
+                        Text(currentEmail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if auth.isSignedIn {
+                    Button(role: .destructive) {
+                        showSignOutDialog = true
+                    } label: {
+                        Label(String(localized: "profile_sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, DS.Spacing.sm)
+                            .padding(.vertical, 6)
+                            .liquidGlassPill(interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        showSignInSheet = true
+                    } label: {
+                        Label(String(localized: "profile_sign_in"), systemImage: "person.crop.circle.badge.plus")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, DS.Spacing.sm)
+                            .padding(.vertical, 6)
+                            .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.10))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "icloud.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_cloud_sync"))
+                        .font(.subheadline.weight(.medium))
+                    Text(cloudStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            Text(cloudExplanationText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Button {
+                openAppSettings()
+            } label: {
+                HStack {
+                    Text(String(localized: "profile_manage_icloud_settings"))
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            Text(String(localized: "profile_account_sync_caption"))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .dsCard()
+    }
+
+    // MARK: - Taste
+
+    private var tasteLearningSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "profile_taste_title"), icon: "sparkles")
+
+            Text(String(localized: "profile_taste_intro"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            PreferenceRow(
+                label: String(localized: "profile_formality"),
+                icon: "briefcase",
+                value: $preferredFormality,
+                range: 1...5,
+                labels: [String(localized: "profile_casual"), String(localized: "profile_elegant")]
+            )
+
+            PreferenceRow(
+                label: String(localized: "profile_warmth_sensitivity"),
+                icon: "thermometer.medium",
+                value: $warmthSensitivity,
+                range: 1...5,
+                labels: [String(localized: "profile_resistant"), String(localized: "profile_sensitive")]
+            )
+
+            PreferenceRow(
+                label: String(localized: "profile_rain_tolerance"),
+                icon: "umbrella",
+                value: $rainTolerance,
+                range: 1...5,
+                labels: [String(localized: "profile_dont_care"), String(localized: "profile_prefer_dry")]
+            )
+
+            Divider()
+
+            HStack(alignment: .center, spacing: DS.Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "profile_learning_status_title"))
+                        .font(.subheadline.weight(.medium))
+                    Text(learningStatusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    showResetLearningDialog = true
+                } label: {
+                    Label(String(localized: "profile_reset_learning"), systemImage: "arrow.counterclockwise")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.vertical, 6)
+                .liquidGlassPill(interactive: true)
+            }
+        }
+        .dsCard()
+    }
+
+    // MARK: - AI Features (Foundation Models)
+
+    private var aiFeaturesSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "settings_ai_section_title"), icon: "wand.and.stars")
+
+            Toggle(String(localized: "settings_ai_look_explanations_toggle"), isOn: $aiLookExplanationsEnabled)
+                .tint(.accentColor)
+                .disabled(!aiExplanationsSupported)
+
+            // Kept visible (disabled) on unsupported devices so the capability
+            // is discoverable rather than silently missing.
+            Text(aiExplanationsSupported
+                ? String(localized: "settings_ai_look_explanations_help")
+                : String(localized: "settings_ai_look_explanations_unavailable"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .dsCard()
+    }
+
+    private var aiExplanationsSupported: Bool {
+        LookExplanationAvailability.isSupported
+    }
+
+    // MARK: - Calendar Context
+
+    private var calendarContextSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "calendar_context_section_title"), icon: "calendar")
+
+            Text(String(localized: "calendar_context_section_subtext"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle(String(localized: "calendar_context_hebrew_toggle"), isOn: $hebrewCalendarEnabled)
+                .tint(.accentColor)
+
+            Text(String(localized: "calendar_context_hebrew_help"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle(String(localized: "calendar_context_device_toggle"), isOn: $deviceCalendarEnabled)
+                .tint(.accentColor)
+                .onChange(of: deviceCalendarEnabled) { _, enabled in
+                    guard enabled else {
+                        CalendarContextService.shared.invalidateCache()
+                        return
+                    }
+                    Task {
+                        _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
+                        CalendarContextService.shared.invalidateCache()
+                    }
+                }
+
+            Text(String(localized: "calendar_context_device_help"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .dsCard()
+        .onChange(of: hebrewCalendarEnabled) { _, _ in
+            CalendarContextService.shared.invalidateCache()
+        }
+    }
+
+    // MARK: - Notifications
+
+    private var notificationsSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "notifications_section_title"), icon: "bell.badge")
+
+            Text(String(localized: "notifications_section_subtext"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                Toggle(String(localized: "notifications_morning_title"), isOn: morningEnabledBinding)
+                    .tint(.accentColor)
+
+                DatePicker(
+                    String(localized: "notifications_time_label"),
+                    selection: morningTimeBinding,
+                    displayedComponents: [.hourAndMinute]
+                )
+                .disabled(!prefs.morningEnabled)
+
+                Text(String(localized: "notifications_morning_help"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                Toggle(String(localized: "notifications_weather_title"), isOn: weatherEnabledBinding)
+                    .tint(.accentColor)
+
+                Text(String(localized: "notifications_weather_help"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                Toggle(String(localized: "notifications_confirm_title"), isOn: confirmEnabledBinding)
+                    .tint(.accentColor)
+
+                DatePicker(
+                    String(localized: "notifications_time_label"),
+                    selection: confirmTimeBinding,
+                    displayedComponents: [.hourAndMinute]
+                )
+                .disabled(!prefs.confirmEnabled)
+
+                Text(String(localized: "notifications_confirm_help"))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(String(localized: "notifications_learn_more"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .dsCard()
+        .onChange(of: prefs.morningEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.weatherEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmEnabled) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.morningHour) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.morningMinute) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmHour) { _, _ in scheduleNotificationsDebounced() }
+        .onChange(of: prefs.confirmMinute) { _, _ in scheduleNotificationsDebounced() }
+    }
+
+    // MARK: - Appearance (Backdrop)
+
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "backdrop_section_title"), icon: "photo.on.rectangle.angled")
+
+            Text(String(localized: "backdrop_section_subtitle"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.sm) {
+                    ForEach(AppBackdropPreset.allCases.filter { $0 != .photo }) { preset in
+                        backdropPresetChip(preset)
+                    }
+                    customPhotoChip
+                }
+                .padding(.vertical, 2)
+            }
+
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                HStack {
+                    Text(String(localized: "backdrop_blur_label"))
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(backdropBlurLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(value: $backdropBlurAmount, in: 0...1, step: 0.05)
+                    .tint(.accentColor)
+                    .accessibilityLabel(String(localized: "backdrop_blur_label"))
+
+                Text(String(localized: "backdrop_blur_hint"))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.top, DS.Spacing.xxs)
+        }
+        .dsCard()
+    }
+
+    private var backdropBlurLabel: String {
+        let percent = Int((backdropBlurAmount * 100).rounded())
+        return String(format: NSLocalizedString("backdrop_blur_percent_format", comment: ""), percent)
+    }
+
+    private func backdropPresetChip(_ preset: AppBackdropPreset) -> some View {
+        let selected = backdropPresetRaw == preset.rawValue
+        return Button {
+            DS.haptic(0.35)
+            backdropPresetRaw = preset.rawValue
+        } label: {
+            VStack(spacing: 6) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: preset.previewColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 72, height: 96)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(
+                                selected ? Color.accentColor : Color.primary.opacity(0.08),
+                                lineWidth: selected ? 2.5 : 1
+                            )
+                    }
+                    .overlay(alignment: .bottom) {
+                        // Mini glass card to preview the floating effect
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 44, height: 28)
+                            .padding(.bottom, 10)
+                    }
+
+                Text(String(localized: preset.titleKey))
+                    .font(.caption2.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(String(localized: preset.titleKey))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var customPhotoChip: some View {
+        let selected = backdropPresetRaw == AppBackdropPreset.photo.rawValue
+        return Button {
+            DS.haptic(0.35)
+            showBackdropPicker = true
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    if selected,
+                       !backdropCustomPath.isEmpty,
+                       let image = backdropPreviewImage {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 72, height: 96)
+                            .clipped()
+                            .overlay(Color.black.opacity(0.12))
+                    } else {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.systemGray5))
+                    }
+
+                    Image(systemName: "photo.badge.plus")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary.opacity(0.75))
+                }
+                .frame(width: 72, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(
+                            selected ? Color.accentColor : Color.primary.opacity(0.08),
+                            lineWidth: selected ? 2.5 : 1
+                        )
+                }
+
+                Text(String(localized: AppBackdropPreset.photo.titleKey))
+                    .font(.caption2.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.accentColor : .secondary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .task(id: backdropCustomPath) {
+            guard !backdropCustomPath.isEmpty else {
+                backdropPreviewImage = nil
+                return
+            }
+            let path = backdropCustomPath
+            let maxPixel = 96 * UIScreen.main.scale
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
+            }.value
+            guard !Task.isCancelled else { return }
+            backdropPreviewImage = loaded
+        }
+        .contextMenu {
+            if selected, !backdropCustomPath.isEmpty {
+                Button(role: .destructive) {
+                    AppBackdropStore.clearCustomImage()
+                    backdropCustomPath = ""
+                    backdropPresetRaw = AppBackdropPreset.softSky.rawValue
+                } label: {
+                    Label(String(localized: "backdrop_remove_photo"), systemImage: "trash")
+                }
+            }
+        }
+        .accessibilityLabel(String(localized: AppBackdropPreset.photo.titleKey))
+    }
+
+    // MARK: - Language / Data / Debug
+
+    private var languageSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSSectionHeader(String(localized: "language_section_title"), icon: "globe")
+
+            HStack {
+                Text(String(localized: "language_system_label"))
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text(currentLanguageName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(String(localized: "language_system_note"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .dsCard()
+    }
+
+    private var dataManagementSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "profile_data_management"), icon: "tray.full")
+
+            NavigationLink {
+                BrandManagementView()
+            } label: {
+                Label(String(localized: "brand_management_title"), systemImage: "tag")
+                    .font(.subheadline.weight(.medium))
+            }
+            .dsSecondaryButton()
+        }
+        .dsCard()
+    }
+
+    #if DEBUG
+    private var debugSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSSectionHeader("Debug", icon: "ladybug")
+            Button("Re-run Diagnostics") {
+                DebugOutfitDiagnostics.runDiagnostics(context: context, limit: 8)
+            }
+            .dsSecondaryButton()
+            let lines = DebugOutfitDiagnostics.sampleLines(context: context, limit: 8)
+            if lines.isEmpty {
+                Text("OUTFIT_SAMPLE,empty=true")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(lines, id: \.self) { line in
+                    Text(line)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .dsCard(padding: DS.Spacing.sm)
+    }
+    #endif
+
+    // MARK: - Computed
+
+    private var cloudStatusText: String {
+        switch cloudKit.status {
+        case .notAvailable:
+            return String(localized: "profile_cloud_status_unavailable")
+        case .syncing:
+            return String(localized: "profile_cloud_status_syncing")
+        case .synced:
+            return String(localized: "profile_cloud_status_synced")
+        case .error:
+            return String(localized: "profile_cloud_status_error")
+        }
+    }
+
+    private var currentLanguageName: String {
+        let code = Locale.current.language.languageCode?.identifier ?? Locale.current.identifier
+        return Locale.current.localizedString(forLanguageCode: code) ?? code
+    }
+
+    private var cloudExplanationText: String {
+        if cloudKit.status == .notAvailable {
+            return cloudKit.availabilityMessage.isEmpty
+                ? String(localized: "profile_cloud_guidance")
+                : cloudKit.availabilityMessage
+        }
+        if case .error(let message) = cloudKit.status {
+            return message
+        }
+        return String(localized: "profile_icloud_signin_separate")
+    }
+
+    private var learningStatusText: String {
+        let count = activeRecoState?.interactionCount ?? 0
+        if count == 0 { return String(localized: "profile_learning_status_empty") }
+        return String(format: NSLocalizedString("profile_learning_status_count", comment: ""), count)
+    }
+
+    private var activeProfileID: UUID? {
+        CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)?.id
+    }
+
+    private var activeRecoState: RecoState? {
+        recoStates.first(where: { $0.profileID == activeProfileID })
+            ?? recoStates.first(where: { $0.profileID == nil && $0.id == "global" })
+    }
+
+    // MARK: - Notifications plumbing
+
+    private var prefs: NotificationPreferences {
+        if let existing = notificationPrefs.first { return existing }
+        let created = NotificationPreferences()
+        context.insert(created)
+        try? context.save()
+        return created
+    }
+
+    private var morningEnabledBinding: Binding<Bool> {
+        Binding(get: { prefs.morningEnabled }, set: { prefs.morningEnabled = $0; schedulePrefsSave() })
+    }
+
+    private var weatherEnabledBinding: Binding<Bool> {
+        Binding(get: { prefs.weatherEnabled }, set: { prefs.weatherEnabled = $0; schedulePrefsSave() })
+    }
+
+    private var confirmEnabledBinding: Binding<Bool> {
+        Binding(get: { prefs.confirmEnabled }, set: { prefs.confirmEnabled = $0; schedulePrefsSave() })
+    }
+
+    private var morningTimeBinding: Binding<Date> {
+        Binding(
+            get: { timeFrom(hour: prefs.morningHour, minute: prefs.morningMinute) },
+            set: {
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                prefs.morningHour = comps.hour ?? prefs.morningHour
+                prefs.morningMinute = comps.minute ?? prefs.morningMinute
+                schedulePrefsSave()
+            }
+        )
+    }
+
+    private var confirmTimeBinding: Binding<Date> {
+        Binding(
+            get: { timeFrom(hour: prefs.confirmHour, minute: prefs.confirmMinute) },
+            set: {
+                let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                prefs.confirmHour = comps.hour ?? prefs.confirmHour
+                prefs.confirmMinute = comps.minute ?? prefs.confirmMinute
+                schedulePrefsSave()
+            }
+        )
+    }
+
+    private func schedulePrefsSave() {
+        prefsSaveDebouncer.schedule {
+            NotificationCenter.default.post(name: .profileFlushPrefsSave, object: nil)
+        }
+    }
+
+    private func timeFrom(hour: Int, minute: Int) -> Date {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: currentDate)
+        comps.hour = hour
+        comps.minute = minute
+        return Calendar.current.date(from: comps) ?? currentDate
+    }
+
+    private func refreshCurrentDate() {
+        currentDate = Date()
+    }
+
+    private func scheduleNotifications() {
+        Task { await NotificationService.shared.scheduleDailyNotifications(context: context) }
+    }
+
+    private func scheduleNotificationsDebounced() {
+        scheduleNotificationsDebouncer.schedule {
+            NotificationCenter.default.post(name: .profileScheduleNotifications, object: nil)
+        }
+    }
+
+    // MARK: - Taste persistence (auto-save)
+
+    private func loadTasteValues() {
+        guard let me = CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier) else { return }
+        didLoadTaste = false
+        preferredFormality = me.preferredFormality
+        warmthSensitivity = me.warmthSensitivity
+        rainTolerance = me.rainTolerance
+        didLoadTaste = true
+    }
+
+    private func saveTasteValues() {
+        guard didLoadTaste,
+              let me = CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier) else { return }
+        me.preferredFormality = preferredFormality
+        me.warmthSensitivity = warmthSensitivity
+        me.rainTolerance = rainTolerance
+        schedulePrefsSave()
+    }
+
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+}
+
+// MARK: - Preference Row
+
+struct PreferenceRow: View {
+    let label: String
+    let icon: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let labels: [String]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack {
+                Label(label, systemImage: icon)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                
+                Spacer()
+
+                Text(scaleLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, DS.Spacing.xs)
+                    .padding(.vertical, 4)
+                    .liquidGlassPill()
+            }
+            
+            HStack {
+                Text(labels.first ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                
+                Slider(
+                    value: Binding(
+                        get: { Double(value) },
+                        set: { value = Int($0) }
+                    ),
+                    in: Double(range.lowerBound)...Double(range.upperBound),
+                    step: 1
+                )
+                .tint(.accentColor)
+                
+                Text(labels.last ?? "")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text(String(localized: "profile_pref_affects"))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, DS.Spacing.xxs)
+    }
+
+    private var scaleLabel: String {
+        let minValue = range.lowerBound
+        let maxValue = range.upperBound
+        if maxValue <= minValue { return String(localized: "profile_level_medium") }
+        let normalized = Double(value - minValue) / Double(maxValue - minValue)
+        if normalized < 0.34 {
+            return String(localized: "profile_level_low")
+        } else if normalized < 0.67 {
+            return String(localized: "profile_level_medium")
+        }
+        return String(localized: "profile_level_high")
+    }
+}

@@ -201,7 +201,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
 
     @MainActor
     private func shouldSendWeatherUpdate(plan: DayPlan, context: ModelContext) async -> Bool {
-        guard let forecast = await ForecastService.shared.forecast(for: 0) else { return false }
+        guard let forecast = ForecastService.shared.forecast(for: 0) else { return false }
         let profile = DayTemperatureProfile(from: forecast)
 
         let prevHigh = plan.contextTempHigh ?? profile.highTemp

@@ -18,7 +18,7 @@ struct OutfitRecommender {
         from garments: [Garment],
         desiredFormality: Int,
         weather: WeatherInput,
-        coldThreshold: Double = 16.0
+        coldThreshold: Double = RecoContext.outerLayerTempThresholdC
     ) -> [Garment] {
 
         let tops     = garments.filter { $0.category == .top && !$0.isBlocked }
@@ -26,14 +26,17 @@ struct OutfitRecommender {
         let shoes    = garments.filter { $0.category == .shoes && !$0.isBlocked }
         let outers   = garments.filter { $0.category == .outer && !$0.isBlocked }
 
-        let desiredWarmth = warmthTarget(for: weather.temperatureC)
+        let thermalContext = RecoContext(
+            desiredFormality: desiredFormality,
+            temperatureC: weather.temperatureC, isRaining: weather.isRaining, now: .now
+        )
 
         func score(_ g: Garment) -> Double {
             // Formality match
             let formScore = 10.0 - Double(abs(g.formality - desiredFormality))
             
             // Warmth match
-            let warmthScore = 10.0 - Double(abs(g.warmth - desiredWarmth))
+            let warmthScore = 6 + 4 * TemperatureComfort.garmentScore(g, context: thermalContext)
 
             // Love boost (0..6)
             let loveBoost = Double(g.loveScore) / 100.0 * 6.0
@@ -85,13 +88,7 @@ struct OutfitRecommender {
     }
 
     private func warmthTarget(for temp: Double) -> Int {
-        switch temp {
-        case ..<8:   return 5
-        case ..<14:  return 4
-        case ..<20:  return 3
-        case ..<26:  return 2
-        default:     return 1
-        }
+        Int(TemperatureComfort.targetWarmth(temperatureC: temp).rounded())
     }
 
     private func daysSinceLastWorn(_ g: Garment) -> Int {

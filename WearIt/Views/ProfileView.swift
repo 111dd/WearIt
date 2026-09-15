@@ -2,63 +2,59 @@ import SwiftUI
 import SwiftData
 import UIKit
 
+//
+//  ProfileView.swift
+//  WearIt
+//
+//  Identity-first profile page: editable avatar/name/bio, social-style stats
+//  row, style identity chips (from the persisted TasteProfile), and a grid of
+//  recent looks. App configuration lives in SettingsView (toolbar gear).
+//
+
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: AuthManager
-    @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
 
     @Query<UserProfile> private var users: [UserProfile]
-    @Query<NotificationPreferences> private var notificationPrefs: [NotificationPreferences]
-    @Query<RecoState> private var recoStates: [RecoState]
+    @Query(sort: \Garment.createdAt, order: .reverse) private var garments: [Garment]
+    @Query private var dayPlans: [DayPlan]
+    @Query private var dailyLooks: [DailyLook]
+    @Query private var tasteProfiles: [TasteProfile]
 
-    @State private var avatarEmoji: String = "🧑🏻"
     @State private var displayName: String = ""
-    @State private var email: String = ""
-    @State private var phone: String = ""
-    @State private var preferredFormality: Int = 3
-    @State private var warmthSensitivity: Int = 3
-    @State private var rainTolerance: Int = 3
-    @State private var showSignInSheet = false
-    @State private var showSignOutDialog = false
-    @State private var showResetLearningDialog = false
-    @State private var showBackdropPicker = false
-    @AppStorage("didSkipSignIn") private var didSkipSignIn = false
-    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
-    @AppStorage(AppBackdropKeys.customImagePath) private var backdropCustomPath: String = ""
-    @AppStorage(AppBackdropKeys.blurAmount) private var backdropBlurAmount: Double = AppBackdropBlur.defaultAmount
-    @AppStorage(CalendarContextKeys.hebrewEnabled) private var hebrewCalendarEnabled = true
-    @AppStorage(CalendarContextKeys.deviceCalendarEnabled) private var deviceCalendarEnabled = false
+    @State private var bio: String = ""
+    @State private var avatarEmoji: String = "🧑🏻"
+    @State private var avatarImagePath: String?
+    @State private var avatarImage: UIImage?
+    @State private var didLoadProfile = false
+    @State private var showAvatarDialog = false
+    @State private var showAvatarPicker = false
+    @State private var profileSaveDebouncer = Debouncer(interval: 1.5)
 
-    @State private var currentDate: Date = Date()
-    @State private var prefsSaveDebouncer = Debouncer(interval: 3.0)
-    @State private var scheduleNotificationsDebouncer = Debouncer(interval: 5.0)
+    init() {
+        _users = Query(FetchDescriptor<UserProfile>())
 
-    init() { _users = Query(FetchDescriptor<UserProfile>()) }
+        var plans = FetchDescriptor<DayPlan>(
+            sortBy: [SortDescriptor(\DayPlan.date, order: .reverse)]
+        )
+        plans.fetchLimit = 90
+        _dayPlans = Query(plans)
+
+        var looks = FetchDescriptor<DailyLook>(
+            sortBy: [SortDescriptor(\DailyLook.date, order: .reverse)]
+        )
+        looks.fetchLimit = 30
+        _dailyLooks = Query(looks)
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: DS.Spacing.lg) {
-                heroProfileCard
-                accountCard
-                appearanceSection
-                tasteLearningSection
-                calendarContextSection
-                notificationsSection
-                dataManagementSection
-                languageSection
-
-                #if DEBUG
-                debugSection
-                #endif
-                
-                Button {
-                    DS.haptic(0.6)
-                    saveProfile()
-                } label: {
-                    Label(String(localized: "profile_save_changes"), systemImage: "checkmark.circle.fill")
-                }
-                .dsPrimaryButton()
+                heroCard
+                statsRow
+                styleIdentitySection
+                myLooksSection
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.top, DS.Spacing.sm)
@@ -69,788 +65,383 @@ struct ProfileView: View {
         .minimalCollapsingNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    saveProfile()
+                NavigationLink {
+                    SettingsView()
+                        .withLocalAppBackdrop()
                 } label: {
-                    Image(systemName: "checkmark.circle.fill")
+                    Image(systemName: "gearshape")
                 }
-                .accessibilityLabel(String(localized: "action_save"))
+                .accessibilityLabel(String(localized: "settings_title"))
             }
         }
-        .onAppear {
-            refreshCurrentDate()
-            loadOrCreateUser()
-        }
+        .onAppear { loadOrCreateUser() }
         .onChange(of: auth.userIdentifier) { _, _ in loadOrCreateUser() }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            refreshCurrentDate()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
-            refreshCurrentDate()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .profileFlushPrefsSave)) { _ in
-            try? context.save()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .profileScheduleNotifications)) { _ in
-            scheduleNotifications()
-        }
+        .onChange(of: displayName) { _, _ in scheduleProfileSave() }
+        .onChange(of: bio) { _, _ in scheduleProfileSave() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
-                prefsSaveDebouncer.flush()
-                try? context.save()
+                saveProfile()
             }
         }
-        .sheet(isPresented: $showSignInSheet) {
-            SignInView()
+        .onDisappear { saveProfile() }
+        .sheet(isPresented: $showAvatarPicker) {
+            PhotoLibraryPickerWrapper { image in
+                applyAvatarImage(image)
+            }
         }
-        .sheet(isPresented: $showBackdropPicker) {
-            // Full-frame photo (no square crop) — backdrop is always blurred full-screen.
-            PHPickerWrapper { image in
-                if let path = AppBackdropStore.saveCustomImage(image) {
-                    backdropCustomPath = path
-                    backdropPresetRaw = AppBackdropPreset.photo.rawValue
-                    DS.haptic(0.45)
+        .confirmationDialog(
+            String(localized: "profile_avatar_change"),
+            isPresented: $showAvatarDialog,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "garment_choose_library")) {
+                showAvatarPicker = true
+            }
+            if avatarImagePath != nil {
+                Button(String(localized: "profile_avatar_remove_photo"), role: .destructive) {
+                    removeAvatarImage()
                 }
             }
-        }
-        .confirmationDialog(
-            String(localized: "profile_signout_title"),
-            isPresented: $showSignOutDialog,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "profile_signout_stay_offline")) {
-                auth.signOut()
-                didSkipSignIn = true
-            }
-            Button(String(localized: "profile_signout_go_to_signin")) {
-                auth.signOut()
-                didSkipSignIn = false
-            }
             Button(String(localized: "action_cancel"), role: .cancel) {}
-        } message: {
-            Text(String(localized: "profile_signout_message"))
         }
-        .confirmationDialog(
-            String(localized: "profile_reset_learning_title"),
-            isPresented: $showResetLearningDialog,
-            titleVisibility: .visible
-        ) {
-            Button(String(localized: "profile_reset_learning_confirm"), role: .destructive) {
-                AIRecommender.shared.resetLearning(profileID: activeProfileID, modelContext: context)
-                RecommendationEventStore.removeAll(profileID: activeProfileID, modelContext: context)
-            }
-            Button(String(localized: "action_cancel"), role: .cancel) {}
-        } message: {
-            Text(String(localized: "profile_reset_learning_message"))
+        .task(id: avatarImagePath) {
+            await loadAvatarPreview()
         }
     }
 
-    // MARK: - Sections
-    
-    private var heroProfileCard: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            HStack(alignment: .center, spacing: DS.Spacing.md) {
-                ZStack {
-                    if avatarEmoji.isEmpty {
-                        Image(systemName: "person.crop.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(avatarEmoji)
-                            .font(.system(size: 36))
-                    }
+    // MARK: - Hero
+
+    private var heroCard: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            Button {
+                DS.haptic(0.35)
+                showAvatarDialog = true
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    avatarView
+                        .frame(width: 96, height: 96)
+                        .liquidGlassCircle()
+
+                    Image(systemName: "camera.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(6)
+                        .background(Color.accentColor, in: Circle())
                 }
-                .frame(width: 72, height: 72)
-                .liquidGlassCircle()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "profile_avatar_change"))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(displayNameText)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
+            TextField(String(localized: "profile_display_name_placeholder"), text: $displayName)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .accessibilityLabel(String(localized: "profile_display_name"))
 
-                    if !emailText.isEmpty {
-                        Text(emailText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+            TextField(String(localized: "profile_bio_placeholder"), text: $bio, axis: .vertical)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(1...3)
+                .accessibilityLabel(String(localized: "profile_bio_placeholder"))
 
-                    Text(signedInStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(String(localized: "profile_profile_managed"))
+            HStack(spacing: DS.Spacing.xs) {
+                if let memberSince {
+                    Label(memberSince, systemImage: "calendar")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
 
-                Spacer()
-
-                Button(String(localized: "action_edit")) { }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.vertical, 6)
-                    .liquidGlassPill()
-                    .disabled(true)
-                    .opacity(0.5)
-            }
-        }
-        .dsCard()
-    }
-
-    private var accountCard: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_account"), icon: "person.circle.fill")
-
-            HStack(alignment: .center, spacing: DS.Spacing.sm) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "profile_signed_in_with_apple"))
-                        .font(.subheadline.weight(.medium))
-                    Text(auth.isSignedIn ? String(localized: "profile_signed_in") : String(localized: "profile_signed_out"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if auth.isSignedIn, let currentEmail = auth.email, !currentEmail.isEmpty {
-                        Text(currentEmail)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if auth.isSignedIn {
-                    Button(role: .destructive) {
-                        showSignOutDialog = true
-                    } label: {
-                        Label(String(localized: "profile_sign_out"), systemImage: "rectangle.portrait.and.arrow.right")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, DS.Spacing.sm)
-                            .padding(.vertical, 6)
-                            .liquidGlassPill(interactive: true)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button {
-                        showSignInSheet = true
-                    } label: {
-                        Label(String(localized: "profile_sign_in"), systemImage: "person.crop.circle.badge.plus")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, DS.Spacing.sm)
-                            .padding(.vertical, 6)
-                            .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.10))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: DS.Spacing.sm) {
-                Image(systemName: "icloud.fill")
-                    .font(.title3)
-                    .foregroundStyle(.blue)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "profile_cloud_sync"))
-                        .font(.subheadline.weight(.medium))
-                    Text(cloudStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-            }
-
-            Text(cloudExplanationText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            Button {
-                openAppSettings()
-            } label: {
-                HStack {
-                    Text(String(localized: "profile_manage_icloud_settings"))
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Text(String(localized: "profile_account_sync_caption"))
+                Label(
+                    auth.isSignedIn
+                        ? String(localized: "profile_signed_in")
+                        : String(localized: "profile_signed_out"),
+                    systemImage: auth.isSignedIn ? "checkmark.icloud" : "icloud.slash"
+                )
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+            }
         }
+        .frame(maxWidth: .infinity)
         .dsCard()
     }
 
-    private var tasteLearningSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_taste_title"), icon: "sparkles")
-
-            Text(String(localized: "profile_taste_intro"))
-                .font(.caption)
+    @ViewBuilder
+    private var avatarView: some View {
+        if let avatarImage {
+            Image(uiImage: avatarImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 96, height: 96)
+                .clipShape(Circle())
+        } else if avatarEmoji.isEmpty {
+            Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 44))
                 .foregroundStyle(.secondary)
-
-            LiquidGlassGroup(spacing: DS.Spacing.xs) {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 120), spacing: DS.Spacing.xs)],
-                    alignment: .leading,
-                    spacing: DS.Spacing.xs
-                ) {
-                    TasteInsightChip(icon: "briefcase", text: formalityInsight)
-                    TasteInsightChip(icon: "thermometer.medium", text: warmthInsight)
-                    TasteInsightChip(icon: "umbrella", text: rainInsight)
-                }
-            }
-            .padding(.vertical, DS.Spacing.xxs)
-
-            PreferenceRow(
-                label: String(localized: "profile_formality"),
-                icon: "briefcase",
-                value: $preferredFormality,
-                range: 1...5,
-                labels: [String(localized: "profile_casual"), String(localized: "profile_elegant")]
-            )
-
-            PreferenceRow(
-                label: String(localized: "profile_warmth_sensitivity"),
-                icon: "thermometer.medium",
-                value: $warmthSensitivity,
-                range: 1...5,
-                labels: [String(localized: "profile_resistant"), String(localized: "profile_sensitive")]
-            )
-
-            PreferenceRow(
-                label: String(localized: "profile_rain_tolerance"),
-                icon: "umbrella",
-                value: $rainTolerance,
-                range: 1...5,
-                labels: [String(localized: "profile_dont_care"), String(localized: "profile_prefer_dry")]
-            )
-
-            Divider()
-
-            HStack(alignment: .center, spacing: DS.Spacing.sm) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "profile_learning_status_title"))
-                        .font(.subheadline.weight(.medium))
-                    Text(learningStatusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    showResetLearningDialog = true
-                } label: {
-                    Label(String(localized: "profile_reset_learning"), systemImage: "arrow.counterclockwise")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, DS.Spacing.sm)
-                .padding(.vertical, 6)
-                .liquidGlassPill(interactive: true)
-            }
-        }
-        .dsCard()
-    }
-
-    private var calendarContextSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "calendar_context_section_title"), icon: "calendar")
-
-            Text(String(localized: "calendar_context_section_subtext"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle(String(localized: "calendar_context_hebrew_toggle"), isOn: $hebrewCalendarEnabled)
-                .tint(.accentColor)
-
-            Text(String(localized: "calendar_context_hebrew_help"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            Toggle(String(localized: "calendar_context_device_toggle"), isOn: $deviceCalendarEnabled)
-                .tint(.accentColor)
-                .onChange(of: deviceCalendarEnabled) { _, enabled in
-                    guard enabled else {
-                        CalendarContextService.shared.invalidateCache()
-                        return
-                    }
-                    Task {
-                        _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
-                        CalendarContextService.shared.invalidateCache()
-                    }
-                }
-
-            Text(String(localized: "calendar_context_device_help"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .dsCard()
-        .onChange(of: hebrewCalendarEnabled) { _, _ in
-            CalendarContextService.shared.invalidateCache()
+        } else {
+            Text(avatarEmoji)
+                .font(.system(size: 44))
         }
     }
 
-    private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "notifications_section_title"), icon: "bell.badge")
-
-            Text(String(localized: "notifications_section_subtext"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Toggle(String(localized: "notifications_morning_title"), isOn: morningEnabledBinding)
-                    .tint(.accentColor)
-
-                DatePicker(
-                    String(localized: "notifications_time_label"),
-                    selection: morningTimeBinding,
-                    displayedComponents: [.hourAndMinute]
-                )
-                .disabled(!prefs.morningEnabled)
-
-                Text(String(localized: "notifications_morning_help"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Toggle(String(localized: "notifications_weather_title"), isOn: weatherEnabledBinding)
-                    .tint(.accentColor)
-
-                Text(String(localized: "notifications_weather_help"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                Toggle(String(localized: "notifications_confirm_title"), isOn: confirmEnabledBinding)
-                    .tint(.accentColor)
-
-                DatePicker(
-                    String(localized: "notifications_time_label"),
-                    selection: confirmTimeBinding,
-                    displayedComponents: [.hourAndMinute]
-                )
-                .disabled(!prefs.confirmEnabled)
-
-                Text(String(localized: "notifications_confirm_help"))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(String(localized: "notifications_learn_more"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .dsCard()
-        .onChange(of: prefs.morningEnabled) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.weatherEnabled) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.confirmEnabled) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.morningHour) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.morningMinute) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.confirmHour) { _, _ in scheduleNotificationsDebounced() }
-        .onChange(of: prefs.confirmMinute) { _, _ in scheduleNotificationsDebounced() }
+    private var memberSince: String? {
+        guard let profile = activeProfile else { return nil }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        let dateText = formatter.string(from: profile.createdAt)
+        return String(format: NSLocalizedString("profile_member_since_format", comment: ""), dateText)
     }
 
-    private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "backdrop_section_title"), icon: "photo.on.rectangle.angled")
+    // MARK: - Stats Row
 
-            Text(String(localized: "backdrop_section_subtitle"))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Spacing.sm) {
-                    ForEach(AppBackdropPreset.allCases.filter { $0 != .photo }) { preset in
-                        backdropPresetChip(preset)
-                    }
-                    customPhotoChip
-                }
-                .padding(.vertical, 2)
-            }
-
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                HStack {
-                    Text(String(localized: "backdrop_blur_label"))
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text(backdropBlurLabel)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-
-                Slider(value: $backdropBlurAmount, in: 0...1, step: 0.05)
-                    .tint(.accentColor)
-                    .accessibilityLabel(String(localized: "backdrop_blur_label"))
-
-                Text(String(localized: "backdrop_blur_hint"))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.top, DS.Spacing.xxs)
-        }
-        .dsCard()
-    }
-
-    private var backdropBlurLabel: String {
-        let percent = Int((backdropBlurAmount * 100).rounded())
-        return String(format: NSLocalizedString("backdrop_blur_percent_format", comment: ""), percent)
-    }
-
-    private func backdropPresetChip(_ preset: AppBackdropPreset) -> some View {
-        let selected = backdropPresetRaw == preset.rawValue
-        return Button {
-            DS.haptic(0.35)
-            backdropPresetRaw = preset.rawValue
+    private var statsRow: some View {
+        NavigationLink {
+            StatsView()
+                .withLocalAppBackdrop()
         } label: {
-            VStack(spacing: 6) {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: preset.previewColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 72, height: 96)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(
-                                selected ? Color.accentColor : Color.primary.opacity(0.08),
-                                lineWidth: selected ? 2.5 : 1
-                            )
-                    }
-                    .overlay(alignment: .bottom) {
-                        // Mini glass card to preview the floating effect
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                            .frame(width: 44, height: 28)
-                            .padding(.bottom, 10)
-                    }
-
-                Text(String(localized: preset.titleKey))
-                    .font(.caption2.weight(selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
-                    .lineLimit(1)
+            HStack(spacing: 0) {
+                profileStat(value: "\(garments.count)", title: String(localized: "profile_stat_items"))
+                statDivider
+                profileStat(value: "\(wornLooksCount)", title: String(localized: "profile_stat_looks"))
+                statDivider
+                profileStat(value: "\(wearStreak)", title: String(localized: "profile_stat_streak"))
             }
+            .padding(.vertical, DS.Spacing.sm)
+            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(String(localized: preset.titleKey))
-        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityHint(String(localized: "stats_title"))
     }
 
-    private var customPhotoChip: some View {
-        let selected = backdropPresetRaw == AppBackdropPreset.photo.rawValue
-        return Button {
-            DS.haptic(0.35)
-            showBackdropPicker = true
-        } label: {
-            VStack(spacing: 6) {
-                ZStack {
-                    if selected,
-                       !backdropCustomPath.isEmpty,
-                       let image = ImageStore.loadImage(path: backdropCustomPath) {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 72, height: 96)
-                            .clipped()
-                            .overlay(Color.black.opacity(0.12))
-                    } else {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(.systemGray5))
-                    }
-
-                    Image(systemName: "photo.badge.plus")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary.opacity(0.75))
-                }
-                .frame(width: 72, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(
-                            selected ? Color.accentColor : Color.primary.opacity(0.08),
-                            lineWidth: selected ? 2.5 : 1
-                        )
-                }
-
-                Text(String(localized: AppBackdropPreset.photo.titleKey))
-                    .font(.caption2.weight(selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? Color.accentColor : .secondary)
-                    .lineLimit(1)
-            }
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            if selected, !backdropCustomPath.isEmpty {
-                Button(role: .destructive) {
-                    AppBackdropStore.clearCustomImage()
-                    backdropCustomPath = ""
-                    backdropPresetRaw = AppBackdropPreset.softSky.rawValue
-                } label: {
-                    Label(String(localized: "backdrop_remove_photo"), systemImage: "trash")
-                }
-            }
-        }
-        .accessibilityLabel(String(localized: AppBackdropPreset.photo.titleKey))
-    }
-
-    private var languageSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            DSSectionHeader(String(localized: "language_section_title"), icon: "globe")
-
-            HStack {
-                Text(String(localized: "language_system_label"))
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(currentLanguageName)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(String(localized: "language_system_note"))
+    private func profileStat(value: String, title: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.primary)
+                .contentTransition(.numericText())
+            Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
-        .dsCard()
+        .frame(maxWidth: .infinity)
     }
 
-    private var dataManagementSection: some View {
+    private var statDivider: some View {
+        Rectangle()
+            .fill(.quaternary)
+            .frame(width: 1, height: 28)
+    }
+
+    /// Worn-confirmed plans in the recent window (matches the calendar's 90-day scope).
+    private var wornLooksCount: Int {
+        dayPlans.filter { $0.wasWornConfirmed }.count
+    }
+
+    /// Consecutive days with a worn-confirmed look, ending today or yesterday.
+    private var wearStreak: Int {
+        let calendar = Calendar.current
+        let wornDays = Set(
+            dayPlans.filter { $0.wasWornConfirmed }.map { calendar.startOfDay(for: $0.date) }
+        )
+        guard !wornDays.isEmpty else { return 0 }
+
+        var day = calendar.startOfDay(for: Date())
+        if !wornDays.contains(day) {
+            guard let yesterday = calendar.date(byAdding: .day, value: -1, to: day) else { return 0 }
+            day = yesterday
+        }
+
+        var streak = 0
+        while wornDays.contains(day) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: day) else { break }
+            day = previous
+        }
+        return streak
+    }
+
+    // MARK: - Style Identity
+
+    @ViewBuilder
+    private var styleIdentitySection: some View {
+        let chips = styleIdentityChips
+        if !chips.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSSectionHeader(String(localized: "profile_style_identity"), icon: "sparkles")
+
+                LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 110), spacing: DS.Spacing.xs)],
+                        alignment: .leading,
+                        spacing: DS.Spacing.xs
+                    ) {
+                        ForEach(chips) { chip in
+                            StyleIdentityChip(chip: chip)
+                        }
+                    }
+                }
+            }
+            .padding(DS.Spacing.sm)
+            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        }
+    }
+
+    private var activeTasteProfile: TasteProfile? {
+        let profileID = activeProfile?.id
+        return tasteProfiles.first(where: { $0.profileID == profileID })
+            ?? tasteProfiles.first(where: { $0.profileID == nil })
+    }
+
+    private var styleIdentityChips: [StyleIdentityChipModel] {
+        guard let taste = activeTasteProfile, taste.sourceGarmentCount > 0 else { return [] }
+        var chips: [StyleIdentityChipModel] = []
+
+        for raw in taste.topStyleRawValues.prefix(2) {
+            if let tag = StyleTag(rawValue: raw) {
+                chips.append(StyleIdentityChipModel(id: "style-\(raw)", text: tag.title, icon: "sparkle", dotColor: nil))
+            }
+        }
+
+        for raw in taste.topColorRawValues.prefix(3) {
+            if let tag = ColorTag(rawValue: raw) {
+                chips.append(StyleIdentityChipModel(id: "color-\(raw)", text: tag.title, icon: nil, dotColor: tag.color))
+            }
+        }
+
+        let brandNames = brandNamesByKey
+        for key in taste.topBrandKeys.prefix(2) {
+            if let name = brandNames[key] {
+                chips.append(StyleIdentityChipModel(id: "brand-\(key)", text: name, icon: "tag", dotColor: nil))
+            }
+        }
+
+        return chips
+    }
+
+    private var brandNamesByKey: [String: String] {
+        var map: [String: String] = [:]
+        for garment in garments {
+            guard let brand = garment.brand?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !brand.isEmpty else { continue }
+            let key = BrandStore.normalizeBrandKey(brand)
+            if map[key] == nil { map[key] = brand }
+        }
+        return map
+    }
+
+    // MARK: - My Looks
+
+    private var recentLookPhotos: [(id: String, path: String)] {
+        var photos: [(id: String, path: String)] = []
+        for look in dailyLooks {
+            for path in look.photoPaths {
+                photos.append((id: path, path: path))
+                if photos.count >= 9 { return photos }
+            }
+        }
+        return photos
+    }
+
+    private var myLooksSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_data_management"), icon: "tray.full")
+            DSSectionHeader(String(localized: "profile_my_looks"), icon: "photo.stack")
 
-            NavigationLink {
-                BrandManagementView()
-            } label: {
-                Label(String(localized: "brand_management_title"), systemImage: "tag")
-                    .font(.subheadline.weight(.medium))
-            }
-            .dsSecondaryButton()
-        }
-        .dsCard()
-    }
-
-    private var cloudStatusText: String {
-        switch cloudKit.status {
-        case .notAvailable:
-            return String(localized: "profile_cloud_status_unavailable")
-        case .syncing:
-            return String(localized: "profile_cloud_status_syncing")
-        case .synced:
-            return String(localized: "profile_cloud_status_synced")
-        case .error:
-            return String(localized: "profile_cloud_status_error")
-        }
-    }
-
-    private var currentLanguageName: String {
-        let code = Locale.current.language.languageCode?.identifier ?? Locale.current.identifier
-        return Locale.current.localizedString(forLanguageCode: code) ?? code
-    }
-
-    private var displayNameText: String {
-        if !displayName.isEmpty { return displayName }
-        if let authName = auth.displayName, !authName.isEmpty { return authName }
-        return String(localized: "profile_default_name")
-    }
-
-    private var emailText: String {
-        if !email.isEmpty { return email }
-        return auth.email ?? ""
-    }
-
-    private var signedInStatusText: String {
-        auth.isSignedIn
-            ? String(localized: "profile_signed_in_with_apple")
-            : String(localized: "profile_signed_out")
-    }
-
-    private var cloudExplanationText: String {
-        if cloudKit.status == .notAvailable {
-            return cloudKit.availabilityMessage.isEmpty
-                ? String(localized: "profile_cloud_guidance")
-                : cloudKit.availabilityMessage
-        }
-        if case .error(let message) = cloudKit.status {
-            return message
-        }
-        return String(localized: "profile_icloud_signin_separate")
-    }
-
-    private var formalityInsight: String {
-        if preferredFormality <= 2 { return String(localized: "profile_taste_casual") }
-        if preferredFormality >= 4 { return String(localized: "profile_taste_elegant") }
-        return String(localized: "profile_taste_balanced")
-    }
-
-    private var warmthInsight: String {
-        if warmthSensitivity <= 2 { return String(localized: "profile_taste_cool_resistant") }
-        if warmthSensitivity >= 4 { return String(localized: "profile_taste_cold_sensitive") }
-        return String(localized: "profile_taste_medium_warmth")
-    }
-
-    private var rainInsight: String {
-        if rainTolerance <= 2 { return String(localized: "profile_taste_rain_flexible") }
-        if rainTolerance >= 4 { return String(localized: "profile_taste_prefers_dry") }
-        return String(localized: "profile_taste_medium_rain")
-    }
-
-    private var learningStatusText: String {
-        let count = activeRecoState?.interactionCount ?? 0
-        if count == 0 { return String(localized: "profile_learning_status_empty") }
-        return String(format: NSLocalizedString("profile_learning_status_count", comment: ""), count)
-    }
-
-    private var activeProfileID: UUID? {
-        CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)?.id
-    }
-
-    private var activeRecoState: RecoState? {
-        recoStates.first(where: { $0.profileID == activeProfileID })
-            ?? recoStates.first(where: { $0.profileID == nil && $0.id == "global" })
-    }
-
-    #if DEBUG
-    private var debugSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            DSSectionHeader("Debug", icon: "ladybug")
-            Button("Re-run Diagnostics") {
-                DebugOutfitDiagnostics.runDiagnostics(context: context, limit: 8)
-            }
-            .dsSecondaryButton()
-            let lines = DebugOutfitDiagnostics.sampleLines(context: context, limit: 8)
-            if lines.isEmpty {
-                Text("OUTFIT_SAMPLE,empty=true")
-                    .font(.caption2.monospaced())
+            let photos = recentLookPhotos
+            if photos.isEmpty {
+                Text(String(localized: "profile_looks_empty"))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, DS.Spacing.md)
             } else {
-                ForEach(lines, id: \.self) { line in
-                    Text(line)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: DS.Spacing.xxs), count: 3),
+                    spacing: DS.Spacing.xxs
+                ) {
+                    ForEach(photos, id: \.id) { photo in
+                        DSAsyncStoredImage(path: photo.path, height: 110, displayWidth: 120)
+                            .contextMenu {
+                                if let url = ImageStore.fileURL(path: photo.path) {
+                                    ShareLink(item: url) {
+                                        Label(String(localized: "action_share"), systemImage: "square.and.arrow.up")
+                                    }
+                                }
+                            }
+                    }
                 }
             }
         }
-        .dsCard(padding: DS.Spacing.sm)
-    }
-    #endif
-
-    // MARK: - Notifications
-
-    private var prefs: NotificationPreferences {
-        if let existing = notificationPrefs.first { return existing }
-        let created = NotificationPreferences()
-        context.insert(created)
-        try? context.save()
-        return created
-    }
-
-    private var morningEnabledBinding: Binding<Bool> {
-        Binding(get: { prefs.morningEnabled }, set: { prefs.morningEnabled = $0; schedulePrefsSave() })
-    }
-
-    private var weatherEnabledBinding: Binding<Bool> {
-        Binding(get: { prefs.weatherEnabled }, set: { prefs.weatherEnabled = $0; schedulePrefsSave() })
-    }
-
-    private var confirmEnabledBinding: Binding<Bool> {
-        Binding(get: { prefs.confirmEnabled }, set: { prefs.confirmEnabled = $0; schedulePrefsSave() })
-    }
-
-    private var morningTimeBinding: Binding<Date> {
-        Binding(
-            get: { timeFrom(hour: prefs.morningHour, minute: prefs.morningMinute) },
-            set: {
-                let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
-                prefs.morningHour = comps.hour ?? prefs.morningHour
-                prefs.morningMinute = comps.minute ?? prefs.morningMinute
-                schedulePrefsSave()
-            }
-        )
-    }
-
-    private var confirmTimeBinding: Binding<Date> {
-        Binding(
-            get: { timeFrom(hour: prefs.confirmHour, minute: prefs.confirmMinute) },
-            set: {
-                let comps = Calendar.current.dateComponents([.hour, .minute], from: $0)
-                prefs.confirmHour = comps.hour ?? prefs.confirmHour
-                prefs.confirmMinute = comps.minute ?? prefs.confirmMinute
-                schedulePrefsSave()
-            }
-        )
-    }
-
-    private func schedulePrefsSave() {
-        prefsSaveDebouncer.schedule {
-            NotificationCenter.default.post(name: .profileFlushPrefsSave, object: nil)
-        }
-    }
-
-    private func timeFrom(hour: Int, minute: Int) -> Date {
-        var comps = Calendar.current.dateComponents([.year, .month, .day], from: currentDate)
-        comps.hour = hour
-        comps.minute = minute
-        return Calendar.current.date(from: comps) ?? currentDate
-    }
-
-    private func refreshCurrentDate() {
-        currentDate = Date()
-    }
-
-    private func scheduleNotifications() {
-        Task { await NotificationService.shared.scheduleDailyNotifications(context: context) }
-    }
-
-    private func scheduleNotificationsDebounced() {
-        scheduleNotificationsDebouncer.schedule {
-            NotificationCenter.default.post(name: .profileScheduleNotifications, object: nil)
-        }
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
     // MARK: - Data
 
-    private func loadOrCreateUser() {
-        let uid = auth.userIdentifier
-        let me = fetchOrCreateProfile(userIdentifier: uid)
+    private var activeProfile: UserProfile? {
+        CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)
+    }
 
-        if uid != nil || me.userIdentifier == nil {
-            avatarEmoji = me.avatarEmoji ?? "🧑🏻"
-            displayName = me.displayName
-            email = me.email ?? (auth.email ?? "")
-            phone = me.phone ?? ""
-            preferredFormality = me.preferredFormality
-            warmthSensitivity = me.warmthSensitivity
-            rainTolerance = me.rainTolerance
+    private func loadOrCreateUser() {
+        let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
+        didLoadProfile = false
+        avatarEmoji = me.avatarEmoji ?? "🧑🏻"
+        avatarImagePath = me.avatarImagePath
+        displayName = me.displayName
+        bio = me.bio ?? ""
+        didLoadProfile = true
+    }
+
+    private func scheduleProfileSave() {
+        guard didLoadProfile else { return }
+        profileSaveDebouncer.schedule {
+            saveProfile()
         }
     }
 
     private func saveProfile() {
+        guard didLoadProfile else { return }
         let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
-
-        me.avatarEmoji = avatarEmoji.isEmpty ? "🧑🏻" : avatarEmoji
         me.displayName = displayName.isEmpty ? (auth.displayName ?? String(localized: "profile_default_name")) : displayName
-        me.email = email.isEmpty ? (auth.email ?? "") : email
-        me.phone = phone.isEmpty ? nil : phone
-        me.preferredFormality = preferredFormality
-        me.warmthSensitivity = warmthSensitivity
-        me.rainTolerance = rainTolerance
-
+        let trimmedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
+        me.bio = trimmedBio.isEmpty ? nil : trimmedBio
         try? context.save()
+    }
+
+    private func applyAvatarImage(_ image: UIImage) {
+        guard let path = try? ImageStore.save(image: image.avatarSized(max: 512)) else { return }
+        let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
+        if let old = me.avatarImagePath {
+            ImageStore.delete(path: old)
+        }
+        me.avatarImagePath = path
+        avatarImagePath = path
+        try? context.save()
+        DS.haptic(0.5)
+    }
+
+    private func removeAvatarImage() {
+        let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
+        if let old = me.avatarImagePath {
+            ImageStore.delete(path: old)
+        }
+        me.avatarImagePath = nil
+        avatarImagePath = nil
+        avatarImage = nil
+        try? context.save()
+    }
+
+    private func loadAvatarPreview() async {
+        guard let path = avatarImagePath else {
+            avatarImage = nil
+            return
+        }
+        let maxPixel = 96 * UIScreen.main.scale
+        let loaded: UIImage? = await Task.detached(priority: .utility) {
+            ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
+        }.value
+        guard !Task.isCancelled else { return }
+        avatarImage = loaded
     }
 
     private func fetchOrCreateProfile(userIdentifier uid: String?) -> UserProfile {
@@ -871,94 +462,56 @@ struct ProfileView: View {
         try? context.save()
         return new
     }
-
-    private func openAppSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url)
-    }
 }
 
-// MARK: - Taste Insight Chip
+// MARK: - Style Identity Chip
 
-private struct TasteInsightChip: View {
-    let icon: String
+private struct StyleIdentityChipModel: Identifiable {
+    let id: String
     let text: String
+    let icon: String?
+    let dotColor: Color?
+}
+
+private struct StyleIdentityChip: View {
+    let chip: StyleIdentityChipModel
 
     var body: some View {
-        Label(text, systemImage: icon)
-            .font(.caption.weight(.semibold))
-            .lineLimit(2)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, DS.Spacing.sm)
-            .padding(.vertical, DS.Spacing.xs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassPill()
+        HStack(spacing: DS.Spacing.xxs) {
+            if let dotColor = chip.dotColor {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+            } else if let icon = chip.icon {
+                Image(systemName: icon)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(chip.text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassPill()
     }
 }
 
-// MARK: - Preference Row
+// MARK: - Avatar resize helper
 
-private struct PreferenceRow: View {
-    let label: String
-    let icon: String
-    @Binding var value: Int
-    let range: ClosedRange<Int>
-    let labels: [String]
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            HStack {
-                Label(label, systemImage: icon)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                
-                Spacer()
-
-                Text(scaleLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, DS.Spacing.xs)
-                    .padding(.vertical, 4)
-                    .liquidGlassPill()
-            }
-            
-            HStack {
-                Text(labels.first ?? "")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                
-                Slider(
-                    value: Binding(
-                        get: { Double(value) },
-                        set: { value = Int($0) }
-                    ),
-                    in: Double(range.lowerBound)...Double(range.upperBound),
-                    step: 1
-                )
-                .tint(.accentColor)
-                
-                Text(labels.last ?? "")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            Text(String(localized: "profile_pref_affects"))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+private extension UIImage {
+    func avatarSized(max: CGFloat) -> UIImage {
+        let maxSide = Swift.max(size.width, size.height)
+        guard maxSide > max else { return self }
+        let scale = max / maxSide
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            self.draw(in: CGRect(origin: .zero, size: newSize))
         }
-        .padding(.vertical, DS.Spacing.xxs)
-    }
-
-    private var scaleLabel: String {
-        let minValue = range.lowerBound
-        let maxValue = range.upperBound
-        if maxValue <= minValue { return String(localized: "profile_level_medium") }
-        let normalized = Double(value - minValue) / Double(maxValue - minValue)
-        if normalized < 0.34 {
-            return String(localized: "profile_level_low")
-        } else if normalized < 0.67 {
-            return String(localized: "profile_level_medium")
-        }
-        return String(localized: "profile_level_high")
     }
 }

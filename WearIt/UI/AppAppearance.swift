@@ -29,6 +29,8 @@ enum AppAppearance {
     }
 
     private static func installTransparentBarAppearances() {
+        // Let the system own Liquid Glass and scroll-edge contrast on modern iOS.
+        if #available(iOS 26.0, *) { return }
         // Fully clear chrome so the app wallpaper continues under
         // status / nav / tab regions (no black material strips).
         let nav = UINavigationBarAppearance()

@@ -101,7 +101,8 @@ enum DS {
     // MARK: Shadows
     enum Shadow {
         static let subtle = (color: Color.black.opacity(0.04), radius: 8.0, y: 4.0)
-        static let medium = (color: Color.black.opacity(0.08), radius: 16.0, y: 8.0)
+        /// Matches the glass-surface shadow (see `AdaptiveGlassSurface`).
+        static let medium = (color: Color.black.opacity(0.07), radius: 16.0, y: 8.0)
         static let elevated = (color: Color.black.opacity(0.12), radius: 24.0, y: 12.0)
     }
     
@@ -126,6 +127,13 @@ enum DS {
     
     static func haptic(_ intensity: CGFloat = 0.5) {
         feedback.impactOccurred(intensity: intensity)
+    }
+
+    /// Warms up the Taptic Engine so the first interaction has no latency.
+    /// Call from a root view's `onAppear`.
+    static func prepareHaptics() {
+        feedback.prepare()
+        mediumFeedback.prepare()
     }
 }
 
@@ -318,6 +326,8 @@ struct DSGarmentThumbnail: View {
     let garment: Garment
     let size: ThumbnailSize
     @State private var image: UIImage?
+    /// Lets thumbnails breathe with Dynamic Type (capped so rows still fit).
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1.0
     
     enum ThumbnailSize {
         case small  // 50pt
@@ -345,6 +355,18 @@ struct DSGarmentThumbnail: View {
         self.garment = garment
         self.size = size
     }
+
+    private var taskID: String {
+        "\(garment.id.uuidString)|\(garment.thumbnailPath ?? "")|\(garment.imagePath ?? "")|\(size.dimension)"
+    }
+
+    private var scaledDimension: CGFloat {
+        size.dimension * min(max(typeScale, 1.0), 1.35)
+    }
+
+    private var scaledIconSize: CGFloat {
+        size.iconSize * min(max(typeScale, 1.0), 1.35)
+    }
     
     var body: some View {
         ZStack {
@@ -355,25 +377,31 @@ struct DSGarmentThumbnail: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: size.dimension, height: size.dimension)
+                    .frame(width: scaledDimension, height: scaledDimension)
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
             } else {
                 Image(systemName: garment.category.icon)
-                    .font(.system(size: size.iconSize))
+                    .font(.system(size: scaledIconSize))
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: size.dimension, height: size.dimension)
+        .frame(width: scaledDimension, height: scaledDimension)
         .overlay(
             RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                 .strokeBorder(.primary.opacity(0.05), lineWidth: 1)
         )
-        .task(id: "\(garment.id.uuidString)|\(garment.thumbnailPath ?? "")|\(garment.imagePath ?? "")|\(size.dimension)") {
+        .task(id: taskID) {
             let thumbPath = garment.thumbnailPath
             let imagePath = garment.imagePath
+            let imageData = garment.imageData
             let cacheKey = garment.id.uuidString
             let pixelSize = size.dimension * UIScreen.main.scale
             let garmentID = garment.id
+
+            if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
+                image = cached
+                return
+            }
 
             if let path = imagePath, !ImageStore.fileExists(path: path) {
                 CloudKitImageSyncService.shared.ensureLocalMainImage(
@@ -393,11 +421,16 @@ struct DSGarmentThumbnail: View {
                    let cached = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
                     return cached
                 }
-                if let imagePath {
-                    return ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize)
+                if let imagePath,
+                   let thumb = ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize) {
+                    return thumb
+                }
+                if let imageData {
+                    return ImageStore.downsample(data: imageData, maxPixelSize: pixelSize)
                 }
                 return nil as UIImage?
             }.value
+            guard !Task.isCancelled else { return }
             image = loaded
         }
     }
@@ -408,10 +441,19 @@ struct DSGarmentThumbnail: View {
 struct DSGarmentTile: View {
     let garment: Garment
     let showTitle: Bool
+    @State private var image: UIImage?
     
     init(_ garment: Garment, showTitle: Bool = true) {
         self.garment = garment
         self.showTitle = showTitle
+    }
+
+    private var taskID: String {
+        "\(garment.id.uuidString)|\(garment.thumbnailPath ?? "")|\(garment.imagePath ?? "")"
+    }
+
+    private var tilePixelSize: CGFloat {
+        DS.Grid.maxColumnWidth * UIScreen.main.scale * 1.2
     }
     
     var body: some View {
@@ -420,8 +462,8 @@ struct DSGarmentTile: View {
                 RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                     .fill(Color(.secondarySystemBackground).opacity(0.35))
                 
-                if let img = tileImage {
-                    Image(uiImage: img)
+                if let image {
+                    Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -455,13 +497,26 @@ struct DSGarmentTile: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .task(id: garment.imagePath) {
-            guard let path = garment.imagePath else { return }
-            if !ImageStore.fileExists(path: path) {
+        .task(id: taskID) {
+            let thumbPath = garment.thumbnailPath
+            let imagePath = garment.imagePath
+            let imageData = garment.imageData
+            let cacheKey = garment.id.uuidString
+            let pixelSize = tilePixelSize
+            let garmentID = garment.id
+
+            if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
+                image = cached
+            } else {
+                // Avoid briefly showing a previous garment while the new image loads.
+                image = nil
+            }
+
+            if let path = imagePath, !ImageStore.fileExists(path: path) {
                 CloudKitImageSyncService.shared.ensureLocalMainImage(
-                    garmentID: garment.id,
+                    garmentID: garmentID,
                     imagePath: path,
-                    thumbnailPath: garment.thumbnailPath,
+                    thumbnailPath: thumbPath,
                     updateThumbnail: { newPath in
                         if let newPath {
                             garment.thumbnailPath = newPath
@@ -469,21 +524,26 @@ struct DSGarmentTile: View {
                     }
                 )
             }
-        }
-    }
 
-    private var tileImage: UIImage? {
-        if let thumbPath = garment.thumbnailPath {
-            let cacheKey = garment.id.uuidString
-            if let image = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                return image
-            }
+            if image != nil { return }
+
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                if let thumbPath,
+                   let thumb = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
+                    return thumb
+                }
+                if let imagePath,
+                   let thumb = ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize) {
+                    return thumb
+                }
+                if let imageData {
+                    return ImageStore.downsample(data: imageData, maxPixelSize: pixelSize)
+                }
+                return nil as UIImage?
+            }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
-        if let path = garment.imagePath {
-            let pixelSize = DS.Grid.maxColumnWidth * UIScreen.main.scale * 1.2
-            return ImageStore.loadThumbnail(path: path, maxPixelSize: pixelSize)
-        }
-        return garment.resolvedImage
     }
 
     private func garmentMetaLine(for garment: Garment) -> String {
@@ -495,6 +555,55 @@ struct DSGarmentTile: View {
     }
 }
 
+// MARK: - Async stored photo (calendar / gallery grids)
+
+/// Loads a stored WearItImages path asynchronously at display size.
+/// Renders a placeholder immediately; never decodes full-resolution images on the main actor.
+struct DSAsyncStoredImage: View {
+    let path: String
+    var height: CGFloat = 120
+    var cornerRadius: CGFloat = DS.Radius.sm
+    /// Display width hint used for pixel sizing (points).
+    var displayWidth: CGFloat = 140
+    @State private var image: UIImage?
+    @State private var loadFailed = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color(.systemGray6))
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            } else if loadFailed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+            }
+        }
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .task(id: path) {
+            image = nil
+            loadFailed = false
+            let path = path
+            let maxPixel = max(displayWidth, height) * UIScreen.main.scale
+            let loaded: UIImage? = await Task.detached(priority: .utility) {
+                ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let loaded {
+                image = loaded
+            } else {
+                loadFailed = true
+            }
+        }
+    }
+}
+
 // MARK: - Empty State
 
 struct DSEmptyState: View {
@@ -503,6 +612,7 @@ struct DSEmptyState: View {
     let message: String
     let actionTitle: String?
     let action: (() -> Void)?
+    @ScaledMetric(relativeTo: .largeTitle) private var heroIconSize: CGFloat = DS.IconSize.hero
     
     init(
         icon: String,
@@ -521,7 +631,7 @@ struct DSEmptyState: View {
     var body: some View {
         VStack(spacing: DS.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: DS.IconSize.hero, weight: .light))
+                .font(.system(size: heroIconSize, weight: .light))
                 .foregroundStyle(.secondary)
             
             Text(title)

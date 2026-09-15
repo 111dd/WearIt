@@ -46,16 +46,15 @@ enum AvailabilityService {
         return false
     }
 
+    /// Minimum days between wears before an item is recommended again.
+    /// Shoes, outerwear and accessories are worn on consecutive days as a
+    /// matter of course, so they carry no cooldown — variety for them comes
+    /// from the recency score, not a hard block.
     static func cooldownDays(for category: Category, ctx: RecoContext) -> Int {
         switch category {
-        case .top, .bottom, .shoes:
+        case .top, .bottom:
             return 2
-        case .outer:
-            if ctx.isRaining || ctx.temperatureC <= 12 {
-                return 0
-            }
-            return 0
-        case .accessory:
+        case .shoes, .outer, .accessory:
             return 0
         }
     }

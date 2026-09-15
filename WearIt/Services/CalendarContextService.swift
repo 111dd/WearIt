@@ -167,15 +167,11 @@ final class CalendarContextService {
         guard CalendarContextPreferences.deviceCalendarEnabled else { return false }
         let status = EKEventStore.authorizationStatus(for: .event)
         switch status {
-        case .fullAccess, .authorized:
+        case .fullAccess:
             return true
         case .notDetermined:
             do {
-                if #available(iOS 17.0, *) {
-                    return try await store.requestFullAccessToEvents()
-                } else {
-                    return try await store.requestAccess(to: .event)
-                }
+                return try await store.requestFullAccessToEvents()
             } catch {
                 return false
             }
@@ -193,12 +189,7 @@ final class CalendarContextService {
         hints: [PlannerHint]
     ) {
         let status = EKEventStore.authorizationStatus(for: .event)
-        let allowed: Bool
-        if #available(iOS 17.0, *) {
-            allowed = status == .fullAccess || status == .authorized
-        } else {
-            allowed = status == .authorized
-        }
+        let allowed = status == .fullAccess
         guard allowed else {
             return (false, 0, 0, 0, .none, [])
         }

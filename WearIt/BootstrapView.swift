@@ -1,12 +1,50 @@
 import SwiftUI
 import SwiftData
 import CoreLocation
+import os
 
 // MARK: - App Load State
 
 enum AppLoadState: Equatable {
     case loading
     case ready
+}
+
+// MARK: - Bootstrap coordination
+
+/// Prevents duplicate critical/deferred startup work if SwiftUI recreates BootstrapView.
+@MainActor
+enum BootstrapCoordinator {
+    private static var criticalTask: Task<Void, Never>?
+    private static var deferredTask: Task<Void, Never>?
+    private static let signposter = OSSignposter(
+        subsystem: WearItPerformance.subsystem,
+        category: WearItPerformance.SignpostCategory.bootstrap
+    )
+
+    /// Runs critical bootstrap once. Concurrent callers await the same task.
+    static func runCriticalOnce(_ work: @escaping @MainActor () async -> Void) async {
+        if let criticalTask {
+            await criticalTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            let state = signposter.beginInterval("critical-bootstrap")
+            defer { signposter.endInterval("critical-bootstrap", state) }
+            await work()
+        }
+        criticalTask = task
+        await task.value
+    }
+
+    static func startDeferredIfNeeded(_ work: @escaping @MainActor () async -> Void) {
+        guard deferredTask == nil else { return }
+        deferredTask = Task { @MainActor in
+            let state = signposter.beginInterval("deferred-bootstrap")
+            defer { signposter.endInterval("deferred-bootstrap", state) }
+            await work()
+        }
+    }
 }
 
 // MARK: - Bootstrap View
@@ -42,61 +80,48 @@ struct BootstrapView: View {
     // MARK: - Bootstrap Tasks
 
     private func performBootstrap() async {
-        // Small delay to ensure loading screen appears smoothly
-        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
-        
-        // Step 0: Refresh auth + iCloud status (do not block on sync events)
-        loadingMessage = String(localized: "loading_ready")
-        await auth.refreshCredentialStateIfNeeded()
-        await cloudKit.refreshAccountStatus()
+        await BootstrapCoordinator.runCriticalOnce {
+            // Auth is needed before AppGateView routing to avoid a sign-in flash.
+            loadingMessage = String(localized: "loading_ready")
+            await auth.refreshCredentialStateIfNeeded()
 
-        // Step 1: Data migrations
-        loadingMessage = String(localized: "loading_preparing")
-        await DataMigrationService.shared.runMigrationsAndWait(context: context)
-        
-        // Step 2: Seed data
-        if !didSeed {
-            loadingMessage = String(localized: "loading_setting_up")
-            SeedData.load(context: context)
-            didSeed = true
-        }
-        
-        // Step 3: Weather (non-blocking, with timeout)
-        loadingMessage = String(localized: "loading_weather")
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { [self] in
-                await refreshWeatherFromLocation()
-            }
-            group.addTask { [weather] in
-                await weather.refreshForecast(source: "BootstrapView.performBootstrap")
-            }
-            group.addTask {
-                // Timeout after 3 seconds
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-            }
-            
-            // Wait for first task to complete (or timeout)
-            await group.next()
-            group.cancelAll()
-        }
-        
-        // Minimum loading time for polish (ensures animation is visible)
-        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+            // Critical migrations: garment field normalization + brand merge.
+            loadingMessage = String(localized: "loading_preparing")
+            await DataMigrationService.shared.runCriticalMigrationsAndWait(context: context)
 
-        // Schedule notifications (after forecasts are updated)
-        await NotificationService.shared.scheduleDailyNotifications(context: context)
-        
-        // Transition to ready state
-        await MainActor.run {
-            withAnimation(.easeOut(duration: 0.35)) {
-                loadState = .ready
+            // First-launch seed must complete before UI to avoid an empty wardrobe flash.
+            if !didSeed {
+                loadingMessage = String(localized: "loading_setting_up")
+                SeedData.load(context: context)
+                didSeed = true
             }
+        }
+
+        withAnimation(.easeOut(duration: 0.35)) {
+            loadState = .ready
+        }
+
+        // Capture values needed by deferred work (avoid capturing View across tasks).
+        let modelContext = context
+        let weatherCenter = weather
+        let cloudKitMonitor = cloudKit
+
+        BootstrapCoordinator.startDeferredIfNeeded {
+            await cloudKitMonitor.refreshAccountStatus()
+
+            await DataMigrationService.shared.runDeferredBackfills(context: modelContext)
+
+            async let locationWeather: Void = Self.refreshWeatherFromLocation(weather: weatherCenter)
+            async let forecast: Void = weatherCenter.refreshForecast(source: "BootstrapView.deferred")
+            _ = await (locationWeather, forecast)
+
+            await NotificationService.shared.scheduleDailyNotifications(context: modelContext)
         }
     }
 
     // MARK: - Weather
 
-    private func refreshWeatherFromLocation() async {
+    private static func refreshWeatherFromLocation(weather: WeatherCenter) async {
         do {
             let coord = try await LocationManager.shared.requestLocation()
             let snap = try await WeatherService.forecastNextHours(
@@ -108,6 +133,7 @@ struct BootstrapView: View {
                 weather.update(tempC: snap.temperatureC, isRaining: snap.isRaining)
             }
         } catch {
+            // Weather failure must not affect launch or deferred bootstrap completion.
             print("Weather refresh failed:", error.localizedDescription)
         }
     }
@@ -123,6 +149,7 @@ private final class IconCycleCounter: ObservableObject {
 struct AppLoadingView: View {
     let message: String
     
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
     @StateObject private var iconCycleCounter = IconCycleCounter()
     private static let maxIconCycles = 5
@@ -158,9 +185,12 @@ struct AppLoadingView: View {
                     Image(systemName: icons[iconCycleCounter.count % icons.count])
                         .font(.system(size: 44, weight: .light))
                         .foregroundStyle(Color.accentColor)
-                        .symbolEffect(.pulse.byLayer, options: .repeating, value: isAnimating)
+                        .symbolEffect(.pulse.byLayer, options: .repeating, isActive: isAnimating && !reduceMotion)
                 }
-                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: isAnimating)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 1.5).repeatForever(autoreverses: true),
+                    value: isAnimating
+                )
                 
                 // Loading text
                 VStack(spacing: 8) {
@@ -174,11 +204,13 @@ struct AppLoadingView: View {
                             Circle()
                                 .fill(Color.secondary.opacity(0.4))
                                 .frame(width: 6, height: 6)
-                                .scaleEffect(isAnimating && (iconCycleCounter.count % 3 == i) ? 1.3 : 1.0)
+                                .scaleEffect(isAnimating && !reduceMotion && (iconCycleCounter.count % 3 == i) ? 1.3 : 1.0)
                                 .animation(
-                                    .easeInOut(duration: 0.4)
-                                    .repeatForever()
-                                    .delay(Double(i) * 0.15),
+                                    reduceMotion
+                                        ? nil
+                                        : .easeInOut(duration: 0.4)
+                                            .repeatForever()
+                                            .delay(Double(i) * 0.15),
                                     value: isAnimating
                                 )
                         }

@@ -18,6 +18,7 @@ struct DayForecast: Identifiable, Equatable {
     let lowTempC: Double
     let rainProbability: Double  // 0.0 - 1.0
     let condition: WeatherCondition
+    var thermalHours: [ThermalWeatherSample] = []
     
     init(
         id: UUID = UUID(),
@@ -26,7 +27,8 @@ struct DayForecast: Identifiable, Equatable {
         highTempC: Double,
         lowTempC: Double,
         rainProbability: Double,
-        condition: WeatherCondition
+        condition: WeatherCondition,
+        thermalHours: [ThermalWeatherSample] = []
     ) {
         self.id = id
         self.date = date
@@ -35,18 +37,40 @@ struct DayForecast: Identifiable, Equatable {
         self.lowTempC = lowTempC
         self.rainProbability = rainProbability
         self.condition = condition
+        self.thermalHours = thermalHours
     }
     
     static func == (lhs: DayForecast, rhs: DayForecast) -> Bool {
         lhs.id == rhs.id &&
         lhs.date == rhs.date &&
         lhs.temperatureC == rhs.temperatureC &&
+        lhs.highTempC == rhs.highTempC &&
+        lhs.lowTempC == rhs.lowTempC &&
+        lhs.thermalHours == rhs.thermalHours &&
         lhs.rainProbability == rhs.rainProbability &&
         lhs.condition == rhs.condition
     }
     
     var isRaining: Bool {
         rainProbability > 0.3
+    }
+
+    func thermalSamples(for lookTime: LookTime, now: Date = .now) -> [ThermalWeatherSample] {
+        let calendar = Calendar.current
+        return thermalHours.filter { sample in
+            let hour = calendar.component(.hour, from: sample.date)
+            let inWindow = lookTime == .evening ? hour >= 18 : (7..<18).contains(hour)
+            return inWindow && sample.date.addingTimeInterval(3600) > now &&
+                sample.comfortTemperatureC.isFinite
+        }
+    }
+
+    func meanTemperature(in hours: Range<Int>) -> Double? {
+        let values = thermalHours.filter {
+            hours.contains(Calendar.current.component(.hour, from: $0.date)) && $0.temperatureC.isFinite
+        }.map(\.temperatureC)
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / Double(values.count)
     }
     
     var dayName: String {
@@ -125,6 +149,19 @@ final class WeatherKitProvider: WeatherProvider {
             including: .daily
         )
         
+        // Hourly failure must not discard a valid daily forecast.
+        let hourly: Forecast<HourWeather>? = try? await appleWeatherService.weather(
+            for: location, including: .hourly
+        )
+        let samples = hourly?.map { hour in
+            ThermalWeatherSample(
+                date: hour.date,
+                temperatureC: hour.temperature.converted(to: .celsius).value,
+                apparentTemperatureC: hour.apparentTemperature.converted(to: .celsius).value,
+                rainProbability: hour.precipitationChance
+            )
+        } ?? []
+
         // Get next 3 days
         let next3 = daily.prefix(3).map { day in
             DayForecast(
@@ -133,7 +170,8 @@ final class WeatherKitProvider: WeatherProvider {
                 highTempC: day.highTemperature.converted(to: UnitTemperature.celsius).value,
                 lowTempC: day.lowTemperature.converted(to: UnitTemperature.celsius).value,
                 rainProbability: day.precipitationChance,
-                condition: mapCondition(day.condition)
+                condition: mapCondition(day.condition),
+                thermalHours: samples.filter { Calendar.current.isDate($0.date, inSameDayAs: day.date) }
             )
         }
         
@@ -400,6 +438,7 @@ final class ForecastService: ObservableObject {
                 left.temperatureC != right.temperatureC ||
                 left.highTempC != right.highTempC ||
                 left.lowTempC != right.lowTempC ||
+                left.thermalHours != right.thermalHours ||
                 left.rainProbability != right.rainProbability ||
                 left.condition != right.condition {
                 return false

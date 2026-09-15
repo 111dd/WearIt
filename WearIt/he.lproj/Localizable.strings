@@ -145,7 +145,6 @@
 "wardrobe_empty_message" = "לחץ על + להוספת הפריט הראשון";
 "wardrobe_filter_all" = "הכל";
 "wardrobe_filter_season" = "עונה";
-"wardrobe_clear_filters" = "נקה פילטרים";
 "wardrobe_suitable_for_temp" = "מתאים ל-%@°";
 "wardrobe_delete_confirm_title" = "למחוק את הפריט?";
 "wardrobe_delete_confirm_message" = "לא ניתן לבטל פעולה זו.";
@@ -211,6 +210,7 @@
 "garment_love" = "אהבה";
 "garment_more_options" = "אפשרויות נוספות";
 "garment_pattern" = "דוגמה";
+"garment_materials" = "חומרים";
 "action_save_changes" = "שמור שינויים";
 "action_delete_item" = "מחק פריט";
 "planner_evening_empty" = "מראה ערב יופיע כאן";
@@ -223,7 +223,6 @@
 "planner_day_header_format" = "%@ · %@ · %@ · %d°–%d° · %@";
 "planner_day_header_no_forecast_format" = "%@ · %@";
 "planner_add_item_category_mismatch" = "הפריט לא מתאים לקטגוריית המשבצת.";
-"garment_colors" = "צבעים";
 "garment_colors_recommended" = "מומלץ";
 "tag_bilingual_hint" = "הוסיפו תגיות בעברית ובאנגלית (למשל \"קפוצ׳ון, hoodie\")";
 "color_black" = "שחור";
@@ -308,17 +307,17 @@
 "calendar_unlock_garment" = "בטל נעילה";
 "calendar_past_day" = "עבר";
 "calendar_future_day" = "מתוכנן";
-"calendar_summary_today" = "הלוק והתמונות של היום";
-"calendar_summary_past" = "מה תוכנן או נלבש";
-"calendar_summary_future" = "תכנון ליום הזה";
-"calendar_items_count_format" = "%d פריטים";
-"calendar_photos_count_format" = "%d תמונות";
 "calendar_day_photos" = "תמונות מהיום";
-"calendar_no_photos_title" = "אין תמונות עדיין";
-"calendar_no_photos_message" = "אפשר להוסיף תמונה קצרה כדי לזכור את הלוק.";
-"calendar_recent_days" = "ימים אחרונים";
-"calendar_show_more_history" = "הצג עוד";
-"calendar_show_less_history" = "הצג פחות";
+"calendar_add_photo" = "תמונה";
+"calendar_how_was_it" = "איך היה?";
+"calendar_notes_placeholder" = "הערה ליום הזה…";
+"calendar_segment_day" = "יום";
+"calendar_segment_evening" = "ערב";
+"calendar_choose_look" = "בחר לוק";
+"calendar_open_in_planner" = "ערוך בפלאנר";
+"calendar_edit_look" = "עריכת לוק";
+"calendar_no_items_for_slot" = "אין פריטים מתאימים בארון";
+"calendar_slot_empty" = "ריק";
 
 // MARK: - Stats
 "stats_title" = "סטטיסטיקה";
@@ -387,6 +386,23 @@
 "error_title" = "שגיאה";
 "edit_image_save_failed" = "לא הצלחנו לשמור את התמונה החדשה. נסה שוב.";
 "error_generic" = "משהו השתבש.";
+"barcode_scan_hint" = "סרקו ברקוד מוצר או QR עם קישור לדף המוצר";
+"barcode_looking_up" = "מחפש את המוצר…";
+"webpage_looking_up" = "מושך פרטים מדף המוצר…";
+"barcode_found_needs_photo" = "מילאנו פרטים מהמוצר — הוסיפו תמונה כדי לשמור בארון";
+"barcode_found_needs_photo_action" = "הוסיפו תמונה כדי לשמור";
+"barcode_details_filled" = "מילאנו מברקוד / דף מוצר — אפשר לערוך הכל";
+"webpage_error_unavailable" = "לא הצלחנו לפתוח את דף המוצר — נסו לצלם במקום.";
+"webpage_error_no_metadata" = "לא הצלחנו לקרוא פרטים מדף זה — נסו לצלם במקום.";
+"barcode_error_missing_key" = "חסר מפתח API לסריקת ברקוד";
+"barcode_error_invalid_url" = "כתובת חיפוש ברקוד לא תקינה";
+"barcode_error_not_found" = "לא מצאנו מוצר לברקוד הזה. נסו לצלם במקום.";
+"barcode_error_unsupported_code" = "QR/קישור לא נתמך — סרקו את הברקוד הקווי (המספרים) שעל התווית.";
+"barcode_error_unauthorized" = "שגיאת הרשאה בחיפוש ברקוד. בדקו את מפתח ה-API.";
+"barcode_error_http_format" = "שגיאת שרת (%d) בחיפוש ברקוד";
+"barcode_error_decoding" = "לא הצלחנו לקרוא את תוצאת הברקוד";
+"barcode_error_image" = "לא הצלחנו להוריד את תמונת המוצר";
+"barcode_error_not_apparel" = "זה לא נראה כמו בגד או נעליים — WearIt מוסיף רק פריטי ארון. נסו ברקוד של בגד, או צלמו תמונה.";
 "error_save_failed" = "השמירה נכשלה";
 "error_load_failed" = "הטעינה נכשלה";
 
@@ -498,6 +514,27 @@
 "planner_confirm_day" = "אשר";
 "planner_confirm_plan" = "אשר תוכנית";
 "planner_confirm_worn" = "אשר כנלבש";
+"planner_swipe_wear_look" = "אלבש את הלוק";
+"planner_swipe_did_wear" = "לבשתי";
+"planner_swipe_will_wear" = "אלבש";
+"planner_swipe_did_not_wear" = "לא לבשתי";
+"planner_swipe_will_not_wear" = "לא אלבש";
+"planner_swipe_replace_look" = "החלף לוק";
+"planner_swipe_replaced_message" = "הבחירה הוחלפה עבור יום זה בלבד";
+"planner_swipe_replaced_slot_message" = "הבחירה הוחלפה עבור חלק זה של היום";
+"planner_swipe_plan_confirmed_message" = "התוכנית אושרה";
+"planner_swipe_marked_not_worn_message" = "הלוק סומן כלא נלבש";
+"planner_swipe_marked_not_planned_message" = "הלוק סומן כלא מתוכנן ללבישה";
+"planner_swipe_status_worn" = "נלבש";
+"planner_swipe_status_not_worn" = "לא נלבש";
+"planner_swipe_status_planned" = "מתוכנן";
+"planner_swipe_status_not_planned" = "לא מתוכנן ללבישה";
+"planner_swipe_clear_status" = "נקה סטטוס";
+"planner_swipe_more_actions" = "עוד פעולות ללוק";
+"planner_day_look_a11y" = "לוק יום";
+"a11y_tile_locked" = "נעול";
+"a11y_tile_linked" = "מקושר ללוק היום";
+"planner_swipe_hint" = "החליקו ימינה לאישור, או שמאלה לאפשרויות נוספות";
 "planner_undo_confirm" = "בטל אישור";
 "planner_evening_look" = "לוק ערב";
 "inspire_favorites" = "בהשראת המועדפים שלך.";
@@ -664,12 +701,37 @@
 
 // MARK: - Add Garment AI
 "add_garment_hero_title" = "הוספה לארון";
-"add_garment_hero_subtitle" = "צלמו או בחרו מהגלריה — נציע קטגוריה וצבעים";
+"add_garment_hero_subtitle" = "צלמו, סרקו ברקוד, הדביקו קישור למוצר או בחרו מהגלריה";
 "add_garment_take_photo" = "צילום";
+"add_garment_scan_barcode" = "סריקת ברקוד";
+"add_garment_paste_link" = "הדבקת קישור למוצר";
+"add_garment_paste_link_placeholder" = "https://…";
+"add_garment_paste_link_hint" = "הדביקו קישור לדף מוצר (למשל מ־Terminal X). ננסה למלא שם, מותג, צבע ותמונה.";
+"add_garment_paste_from_clipboard" = "הדבקה מהלוח";
+"add_garment_fetch_link" = "משיכת פרטים";
+"add_garment_paste_link_invalid" = "זה לא נראה כמו קישור תקין. הדביקו כתובת https:// מלאה של דף מוצר.";
 "add_garment_choose_library" = "בחירה מהגלריה";
 "add_garment_analyzing" = "מנתח את הפריט…";
 "add_garment_ai_filled" = "מילאנו הצעות — אפשר לערוך הכל";
-"add_garment_crop_hint" = "בשלב הבא תחתכו ותתאימו את התמונה לפני מילוי הפרטים.";
+"add_garment_crop_hint" = "הרקע מוסר והפרטים מתמלאים אוטומטית — נשאר רק לבדוק ולשמור.";
+"add_garment_chip_choose_category" = "בחירת קטגוריה";
+"add_garment_chip_colors" = "צבעים";
+"add_garment_chip_warmth_format" = "חום %d/5";
+"add_garment_chip_formality_format" = "רשמיות %d/5";
+"add_garment_chips_hint" = "נראה נכון? פשוט לשמור. הקשה על צ׳יפ מאפשרת התאמה.";
+"add_garment_chips_hint_missing_category" = "נותר רק לבחור קטגוריה — כל השאר אופציונלי.";
+"add_garment_more_details" = "פרטים נוספים";
+"batch_review_title" = "בדיקת פריטים";
+"batch_review_hint" = "כל תמונה הופכת לפריט. אפשר לתקן מה שנראה לא נכון ולשמור את הכול בבת אחת.";
+"batch_processing_status_format" = "מנתח עוד %d תמונות…";
+"batch_needs_category" = "בחירת קטגוריה";
+"batch_save_all_format" = "שמירת הכול (%d)";
+"batch_item_remove" = "הסרת פריט";
+"label_scan_button" = "סריקת תווית";
+"label_scan_found_format" = "זוהה בתווית: %@";
+"label_scan_nothing" = "לא הצלחנו לקרוא פרטים מהתווית. כדאי לנסות שוב בתאורה טובה יותר.";
+"micro_question_brand_format" = "שאלה קטנה — מה המותג של ״%@״?";
+"micro_question_skip" = "לא עכשיו";
 "add_garment_details_title" = "פרטי הפריט";
 "add_garment_edit_photo" = "עריכת תמונה";
 "add_garment_retake" = "צילום מחדש";
@@ -716,3 +778,59 @@
 "backdrop_blur_label" = "טשטוש";
 "backdrop_blur_hint" = "טשטוש נמוך משאיר יותר פרטים; גבוה מרגיש רך יותר מתחת לזכוכית";
 "backdrop_blur_percent_format" = "%d%%";
+
+// MARK: - Calendar date strip
+"calendar_previous_month" = "חודש קודם";
+"calendar_next_month" = "חודש הבא";
+"calendar_previous_week" = "שבוע קודם";
+"calendar_next_week" = "שבוע הבא";
+"calendar_show_month" = "הצג חודש";
+"calendar_show_week" = "הצג שבוע";
+"day_yesterday" = "אתמול";
+"a11y_day_has_outfit" = "לוק מתוכנן";
+"a11y_day_worn" = "נלבש";
+"a11y_day_has_photos" = "יש תמונות";
+
+// MARK: - Profile identity
+"settings_title" = "הגדרות";
+"profile_bio_placeholder" = "הסטייל שלך במשפט אחד…";
+"profile_member_since_format" = "חבר מאז %@";
+"profile_stat_items" = "פריטים";
+"profile_stat_looks" = "לוקים שנלבשו";
+"profile_stat_streak" = "רצף ימים";
+"profile_style_identity" = "זהות סטייל";
+"profile_my_looks" = "הלוקים שלי";
+"profile_looks_empty" = "תמונות שתוסיף ביומן יופיעו כאן";
+"profile_avatar_change" = "שינוי תמונת פרופיל";
+"profile_avatar_remove_photo" = "הסרת תמונה";
+"action_share" = "שיתוף";
+
+// MARK: - AI look explanations (Foundation Models)
+"settings_ai_section_title" = "Apple Intelligence";
+"settings_ai_look_explanations_toggle" = "תיאורי לוקים עם AI";
+"settings_ai_look_explanations_help" = "הסבר קצר שנוצר במכשיר למה כל לוק מתוכנן מתאים ליום.";
+"settings_ai_look_explanations_unavailable" = "דורש Apple Intelligence ושפה נתמכת.";
+"garment_ai_name_suggest" = "שם עם AI";
+
+"planner_why_this_look" = "למה הלוק הזה?";
+"planner_day_options" = "אפשרויות היום";
+"planner_details_expanded" = "מורחב";
+"planner_details_collapsed" = "מכווץ";
+"thermal_title" = "נוחות במזג האוויר";
+"thermal_insulation" = "מידת החימום";
+"thermal_ventilation" = "אוורור";
+"thermal_automatic" = "אוטומטי";
+"thermal_edit_hint" = "אפשר להשאיר על אוטומטי, או לתקן לפי התחושה בלבישה. אלו הערכות, לא מדידות של תכונות הבד.";
+"thermal_source_estimated" = "הערכה לפי פרטי הבגד · אפשר לתקן";
+"thermal_source_adjusted" = "כולל התאמות שבחרת";
+"thermal_warmth_1" = "קליל מאוד";
+"thermal_warmth_2" = "קליל";
+"thermal_warmth_3" = "מחמם במידה בינונית";
+"thermal_warmth_4" = "מחמם";
+"thermal_warmth_5" = "מחמם מאוד";
+"thermal_breathability_1" = "אוורור נמוך";
+"thermal_breathability_2" = "אוורור קל";
+"thermal_breathability_3" = "אוורור בינוני";
+"thermal_breathability_4" = "מאוורר";
+"thermal_breathability_5" = "מאוורר מאוד";
+"edit_details_and_options" = "פרטי הבגד ואפשרויות נוספות";

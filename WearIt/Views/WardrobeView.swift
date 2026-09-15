@@ -55,6 +55,10 @@ struct WardrobeView: View {
     @State private var currentDate: Date = Date()
     @State private var rebuildDebouncer = Debouncer(interval: 0.2)
 
+    /// Micro-question nudge: at most one tiny data-completion question a day.
+    @AppStorage("wardrobeMicroQuestionLastDay") private var microQuestionLastDay = ""
+    @State private var microQuestionDismissed = false
+
     private var latestWearMap: [UUID: Date] {
         WearHistoryService.latestWearMap(events: wearEvents)
     }
@@ -237,6 +241,15 @@ struct WardrobeView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
+                if let garment = microQuestionGarment {
+                    MicroQuestionCard(garment: garment) {
+                        completeMicroQuestion()
+                    }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.sm)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 if visibleGarments.isEmpty {
                     DSEmptyState(
                         icon: "tshirt",
@@ -270,6 +283,31 @@ struct WardrobeView: View {
                     .padding(.bottom, 100)
                 }
             }
+        }
+    }
+
+    // MARK: - Micro questions
+
+    private var todayKey: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: currentDate)
+    }
+
+    /// One garment the user actually wears that is missing its brand.
+    /// Answering (or skipping) hides the card until tomorrow.
+    private var microQuestionGarment: Garment? {
+        guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
+        return allGarments
+            .filter { ($0.brand ?? "").isEmpty && !$0.isCurrentlyUnavailable }
+            .max { $0.timesWorn < $1.timesWorn }
+            .flatMap { $0.timesWorn > 0 ? $0 : nil }
+    }
+
+    private func completeMicroQuestion() {
+        microQuestionLastDay = todayKey
+        withAnimation(DS.Animation.standard) {
+            microQuestionDismissed = true
         }
     }
 

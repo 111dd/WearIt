@@ -43,6 +43,9 @@ final class Garment {
 
     // MARK: - Attributes (User-rated)
     var warmth: Int = 3          // 1..5
+    /// Optional user corrections; nil means automatic. Additive/CloudKit-safe.
+    var thermalWarmthOverride: Int?
+    var thermalBreathabilityOverride: Int?
     var formality: Int = 3       // 1..5
     var loveScore: Int = 50      // 0..100
 
@@ -59,6 +62,12 @@ final class Garment {
     var aiSuggestedColors: [ColorTag]?
     var aiConfidence: Float?
     var aiProcessedAt: Date?
+
+    /// Provenance: attribute fields filled by defaults/AI enrichment rather
+    /// than by the user (keys from `ItemTypeDefaults.FieldKey`). A manual edit
+    /// removes the key, making the user's value authoritative. Lets future
+    /// consumers (e.g. shopping recommendations) weight data reliability.
+    var aiEnrichedFieldsRaw: [String]?
 
     // MARK: - Usage/Meta
     var isFavorite: Bool = false
@@ -181,6 +190,9 @@ final class Garment {
         }
     }
 
+    /// Synchronous full-resolution image accessor for compatibility paths.
+    /// Do **not** call from SwiftUI `body` or grid-cell render paths — use
+    /// `ImageStore.loadThumbnail` / async `.task` loaders instead.
     @Transient
     var resolvedImage: UIImage? {
         if let p = imagePath, let img = ImageStore.loadImage(path: p) { return img }
@@ -195,8 +207,21 @@ final class Garment {
             return (min, max)
         }
         // Default based on warmth (always works, even for legacy data)
-        return Self.defaultTempRange(forWarmth: warmth)
+        return Self.defaultTempRange(forWarmth: recommendationWarmth)
     }
+
+    @Transient
+    var thermalProfile: GarmentThermalProfile {
+        GarmentThermalProfile(
+            warmth: warmth, itemType: itemType, materials: materialTags ?? [],
+            fit: fitTag, weatherTags: weatherTags ?? [], estimatedFields: aiEnrichedFields,
+            warmthOverride: thermalWarmthOverride,
+            breathabilityOverride: thermalBreathabilityOverride
+        )
+    }
+
+    @Transient
+    var recommendationWarmth: Int { Int(thermalProfile.insulation.rounded()) }
     
     /// Check if garment is suitable for a given temperature
     func isSuitableFor(temperature: Double) -> Bool {
@@ -228,6 +253,28 @@ final class Garment {
         if isBlocked { return true }
         if let until = unavailableUntil, until > Date() { return true }
         return false
+    }
+
+    // MARK: - Enrichment provenance
+
+    /// Fields whose values came from defaults/AI enrichment (not the user).
+    @Transient
+    var aiEnrichedFields: Set<String> {
+        Set(aiEnrichedFieldsRaw ?? [])
+    }
+
+    /// Record that enrichment (defaults or AI) filled these fields.
+    func markEnriched(_ fields: [String]) {
+        guard !fields.isEmpty else { return }
+        aiEnrichedFieldsRaw = Array(aiEnrichedFields.union(fields)).sorted()
+    }
+
+    /// Record a manual edit — the user's value becomes authoritative and
+    /// enrichment must never overwrite it again.
+    func markUserEdited(_ field: String) {
+        guard var fields = aiEnrichedFieldsRaw, fields.contains(field) else { return }
+        fields.removeAll { $0 == field }
+        aiEnrichedFieldsRaw = fields.isEmpty ? nil : fields
     }
     
     /// Mark garment as unavailable

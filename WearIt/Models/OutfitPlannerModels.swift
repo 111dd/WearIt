@@ -80,6 +80,13 @@ enum LookTime: String, Codable, CaseIterable {
     case evening
 }
 
+/// Per look-slot wear outcome. Persist only `rawValue` on DayPlan; nil = undecided.
+enum LookWearStatus: String, Codable, Sendable, Equatable {
+    case planned
+    case worn
+    case notWorn
+}
+
 // MARK: - Drag Item (Transferable)
 
 struct GarmentDragItem: Equatable, Codable {
@@ -165,6 +172,10 @@ struct PlannerDayState: Identifiable, Equatable {
     var temperatureFeedback: TemperatureFeedback? = nil
     var notes: String? = nil
     var insufficientItemsWarning: Bool = false
+    /// Derived from DayPlan (source of truth). nil = undecided.
+    var dayLookWearStatus: LookWearStatus? = nil
+    /// Derived from DayPlan (source of truth). nil = undecided.
+    var eveningLookWearStatus: LookWearStatus? = nil
     
     /// Slot assignments for daytime
     var slots: [OutfitSlot: SlotAssignment] = [:]
@@ -262,7 +273,9 @@ struct PlannerDayState: Identifiable, Equatable {
         lhs.eveningUsesDayBottom == rhs.eveningUsesDayBottom &&
         lhs.eveningLinkedSlots == rhs.eveningLinkedSlots &&
         lhs.slots == rhs.slots &&
-        lhs.eveningSlots == rhs.eveningSlots
+        lhs.eveningSlots == rhs.eveningSlots &&
+        lhs.dayLookWearStatus == rhs.dayLookWearStatus &&
+        lhs.eveningLookWearStatus == rhs.eveningLookWearStatus
     }
 }
 

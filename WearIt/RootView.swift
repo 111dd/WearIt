@@ -7,12 +7,21 @@ struct RootView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var selected: AppTab = .planner
     @State private var appIntentRouter = WearItAppIntentRouter.shared
     @State private var showSignInSheet = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
+    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
+    @AppStorage(AppBackdropKeys.customImageIsDark) private var backdropImageIsDark = false
     enum AppTab: Hashable { case planner, calendar, wardrobe, add }
+
+    private var backdropScheme: ColorScheme {
+        let preset = AppBackdropPreset(rawValue: backdropPresetRaw) ?? .softSky
+        if preset == .photo { return backdropImageIsDark ? .dark : .light }
+        return preset.prefersDarkScheme ? .dark : .light
+    }
 
     var body: some View {
         // Backdrop via `.background` (not ZStack) so wallpaper never expands layout width.
@@ -42,14 +51,29 @@ struct RootView: View {
             LiquidGlassBackdrop()
                 .ignoresSafeArea()
         }
-        .animation(DS.Animation.transition, value: selected)
+        .animation(reduceMotion ? nil : DS.Animation.transition, value: selected)
         .overlay(alignment: .top) {
             if shouldShowSignInCTA {
                 signInBanner
             }
         }
         .onAppear {
+            DS.prepareHaptics()
             handleIncomingSystemAction()
+        }
+        .task {
+            if AppBackdropPreset(rawValue: backdropPresetRaw) == .photo,
+               UserDefaults.standard.object(forKey: AppBackdropKeys.customImageIsDark) == nil,
+               let image = AppBackdropStore.loadCustomImage() {
+                let isDark = (AppBackdropStore.averageLuminance(of: image) ?? 1.0)
+                    < AppBackdropStore.darkLuminanceThreshold
+                backdropImageIsDark = isDark
+            }
+            // One-time wardrobe upgrade: per-type defaults + on-device AI
+            // enrichment for legacy garments stuck on generic 3/nil values.
+            // Delayed so launch-critical work (weather, planner) goes first.
+            try? await Task.sleep(for: .seconds(3))
+            await GarmentEnrichmentService.runRetroactivePassIfNeeded(context: context)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -64,6 +88,9 @@ struct RootView: View {
                 selected = .planner
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { _ in
+            selected = .planner
+        }
         .onOpenURL { url in
             if url.host == "planner" {
                 selected = .planner
@@ -76,7 +103,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+                .preferredColorScheme(backdropScheme)
         }
+        .preferredColorScheme(backdropScheme)
     }
 
     @MainActor

@@ -129,6 +129,7 @@ final class WeatherCenter: ObservableObject {
                 left.temperatureC != right.temperatureC ||
                 left.highTempC != right.highTempC ||
                 left.lowTempC != right.lowTempC ||
+                left.thermalHours != right.thermalHours ||
                 left.rainProbability != right.rainProbability ||
                 left.condition != right.condition {
                 return false

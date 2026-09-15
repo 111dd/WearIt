@@ -59,19 +59,33 @@ enum OutfitComposer {
                 .map { $0.0 }
         }
 
+        func outerOptions(from candO: [Garment], needOuter: Bool) -> [Garment?] {
+            switch ctx.outerLayerPolicy {
+            case .suppress:
+                return [nil]
+            case .lightOnly:
+                let light = candO.filter { TemperatureComfort.outerGarmentAllowed($0, policy: .lightOnly) }
+                if light.isEmpty { return [nil] }
+                return needOuter ? light.map { Optional($0) } : [nil] + light.map { Optional($0) }
+            case .prefer:
+                if needOuter && !candO.isEmpty { return candO.map { Optional($0) } }
+                return [nil] + candO.map { Optional($0) }
+            }
+        }
+
+        let needOuter = ctx.outerLayerPolicy == .prefer || ctx.isRaining
+
         // אם יש פריט נעול — בחר סביבו
         if let locked = locked, base.contains(where: { $0.persistentModelID == locked.persistentModelID }) {
             switch locked.category {
             case .top:
                 let candB = pruned(bottoms, n: 8)
                 let candS = pruned(shoes, n: 6)
-                let needOuter = ctx.isRaining || ctx.temperatureC < 16
                 let candO = pruned(outers, n: 4)
                 var best: ([Garment], Double)? = nil
                 for b in (candB.isEmpty ? bottoms : candB) {
                     for s in (candS.isEmpty ? shoes : candS) {
-                        let outerCandidates: [Garment?] = needOuter && !candO.isEmpty ? candO.map { Optional($0) } : [nil] + candO.map { Optional($0) }
-                        for o in outerCandidates {
+                        for o in outerOptions(from: candO, needOuter: needOuter) {
                             let set = [locked, b, s] + (o != nil ? [o!] : [])
                             let key = outfitKey(for: set)
                             if dismissedKeys.contains(key) { continue }
@@ -82,19 +96,17 @@ enum OutfitComposer {
                 }
                 if let res = best?.0 { return res }
                 // fallback: מינימום חוקי
-                let fallbackOuter = (ctx.isRaining || ctx.temperatureC < 16) ? outers.first : nil
+                let fallbackOuter = needOuter ? outers.first : nil
                 return [locked, bottoms.first!, shoes.first!] + (fallbackOuter.map { [$0] } ?? [])
 
             case .bottom:
                 let candT = pruned(tops, n: 8)
                 let candS = pruned(shoes, n: 6)
-                let needOuter = ctx.isRaining || ctx.temperatureC < 16
                 let candO = pruned(outers, n: 4)
                 var best: ([Garment], Double)? = nil
                 for t in (candT.isEmpty ? tops : candT) {
                     for s in (candS.isEmpty ? shoes : candS) {
-                        let outerCandidates: [Garment?] = needOuter && !candO.isEmpty ? candO.map { Optional($0) } : [nil] + candO.map { Optional($0) }
-                        for o in outerCandidates {
+                        for o in outerOptions(from: candO, needOuter: needOuter) {
                             let set = [t, locked, s] + (o != nil ? [o!] : [])
                             let key = outfitKey(for: set)
                             if dismissedKeys.contains(key) { continue }
@@ -104,19 +116,17 @@ enum OutfitComposer {
                     }
                 }
                 if let res = best?.0 { return res }
-                let fallbackOuter = (ctx.isRaining || ctx.temperatureC < 16) ? outers.first : nil
+                let fallbackOuter = needOuter ? outers.first : nil
                 return [tops.first!, locked, shoes.first!] + (fallbackOuter.map { [$0] } ?? [])
 
             case .shoes:
                 let candT = pruned(tops, n: 8)
                 let candB = pruned(bottoms, n: 8)
-                let needOuter = ctx.isRaining || ctx.temperatureC < 16
                 let candO = pruned(outers, n: 4)
                 var best: ([Garment], Double)? = nil
                 for t in (candT.isEmpty ? tops : candT) {
                     for b in (candB.isEmpty ? bottoms : candB) {
-                        let outerCandidates: [Garment?] = needOuter && !candO.isEmpty ? candO.map { Optional($0) } : [nil] + candO.map { Optional($0) }
-                        for o in outerCandidates {
+                        for o in outerOptions(from: candO, needOuter: needOuter) {
                             let set = [t, b, locked] + (o != nil ? [o!] : [])
                             let key = outfitKey(for: set)
                             if dismissedKeys.contains(key) { continue }
@@ -126,7 +136,7 @@ enum OutfitComposer {
                     }
                 }
                 if let res = best?.0 { return res }
-                let fallbackOuter = (ctx.isRaining || ctx.temperatureC < 16) ? outers.first : nil
+                let fallbackOuter = needOuter ? outers.first : nil
                 return [tops.first!, bottoms.first!, locked] + (fallbackOuter.map { [$0] } ?? [])
 
             default: break
@@ -139,14 +149,11 @@ enum OutfitComposer {
         let candS = pruned(shoes, n: 6)
         let candO = pruned(outers, n: 4)
 
-        let needOuter = ctx.isRaining || ctx.temperatureC < 16
-
         var best: (set: [Garment], score: Double)? = nil
         for t in (candT.isEmpty ? tops : candT) {
             for b in (candB.isEmpty ? bottoms : candB) {
                 for s in (candS.isEmpty ? shoes : candS) {
-                    let outerCandidates: [Garment?] = needOuter && !candO.isEmpty ? candO.map { Optional($0) } : [nil] + candO.map { Optional($0) }
-                    for o in outerCandidates {
+                    for o in outerOptions(from: candO, needOuter: needOuter) {
                         let set = [t, b, s] + (o != nil ? [o!] : [])
                         let key = outfitKey(for: set)
                         if dismissedKeys.contains(key) { continue }

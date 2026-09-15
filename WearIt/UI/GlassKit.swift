@@ -69,16 +69,16 @@ public struct LiquidGlassBackdrop: View {
             }
             let path = customImagePath
             let radius = blurRadius
+            let maxPixel = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
             photo = await Task.detached(priority: .utility) {
-                Self.prepareWallpaper(path: path, blurRadius: radius)
+                Self.prepareWallpaper(path: path, blurRadius: radius, maxPixel: maxPixel)
             }.value
         }
     }
 
     /// Downsample + optional one-shot blur off the main thread.
-    nonisolated private static func prepareWallpaper(path: String, blurRadius: CGFloat) -> UIImage? {
+    nonisolated private static func prepareWallpaper(path: String, blurRadius: CGFloat, maxPixel: CGFloat) -> UIImage? {
         // Prefer a modest decode size — full-screen wallpaper doesn't need 4K.
-        let maxPixel = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
         guard let base = ImageStore.loadThumbnail(path: path, maxPixelSize: maxPixel)
                 ?? ImageStore.loadImage(path: path) else { return nil }
         guard blurRadius > 0.5, let cg = base.cgImage else { return base }
@@ -125,6 +125,11 @@ private struct AdaptiveGlassSurface: ViewModifier {
     let fallbackMaterial: Material
     let castsShadow: Bool
 
+    // Single source of truth: DS.Shadow.medium instead of duplicated literals.
+    private var shadowColor: Color { castsShadow ? DS.Shadow.medium.color : .clear }
+    private var shadowRadius: CGFloat { castsShadow ? DS.Shadow.medium.radius : 0 }
+    private var shadowY: CGFloat { castsShadow ? DS.Shadow.medium.y : 0 }
+
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -135,11 +140,7 @@ private struct AdaptiveGlassSurface: ViewModifier {
                         .regular.tint(tint).interactive(),
                         in: .rect(cornerRadius: cornerRadius)
                     )
-                    .shadow(
-                        color: castsShadow ? Color.black.opacity(0.07) : .clear,
-                        radius: castsShadow ? 16 : 0,
-                        y: castsShadow ? 8 : 0
-                    )
+                    .shadow(color: shadowColor, radius: shadowRadius, y: shadowY)
             } else {
                 content
                     .padding(padding)
@@ -147,11 +148,7 @@ private struct AdaptiveGlassSurface: ViewModifier {
                         .regular.tint(tint),
                         in: .rect(cornerRadius: cornerRadius)
                     )
-                    .shadow(
-                        color: castsShadow ? Color.black.opacity(0.07) : .clear,
-                        radius: castsShadow ? 16 : 0,
-                        y: castsShadow ? 8 : 0
-                    )
+                    .shadow(color: shadowColor, radius: shadowRadius, y: shadowY)
             }
         } else {
             content
@@ -172,11 +169,7 @@ private struct AdaptiveGlassSurface: ViewModifier {
                         )
                         .blendMode(.plusLighter)
                 )
-                .shadow(
-                    color: castsShadow ? Color.black.opacity(0.07) : .clear,
-                    radius: castsShadow ? 16 : 0,
-                    y: castsShadow ? 8 : 0
-                )
+                .shadow(color: shadowColor, radius: shadowRadius, y: shadowY)
         }
     }
 }

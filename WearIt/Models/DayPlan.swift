@@ -72,8 +72,18 @@ final class DayPlan {
     /// If true, evening bottom uses the day bottom
     var eveningUsesDayBottom: Bool = false
     
-    /// Whether the user confirmed they actually wore this outfit
+    /// Whether the user confirmed they wore the *current* day-look assignment.
+    /// This is a day-level plan flag (calendar / widget / notifications), not evening status
+    /// and not a substitute for WearEvent history. Legacy records may have this set with
+    /// `dayLookWearStatusRaw == nil`; per-slot status takes precedence when present.
     var wasWornConfirmed: Bool = false
+
+    /// Persisted wear outcome for the day look (`LookWearStatus.rawValue`).
+    /// nil = undecided / legacy record without an explicit per-slot status.
+    var dayLookWearStatusRaw: String?
+
+    /// Persisted wear outcome for the evening look (`LookWearStatus.rawValue`).
+    var eveningLookWearStatusRaw: String?
     
     /// Feedback rating for this day's outfit
     var feedbackRating: Int?  // OutfitFeedbackRating.rawValue
@@ -203,6 +213,46 @@ final class DayPlan {
     @Transient
     var isFutureDay: Bool {
         date > Calendar.current.startOfDay(for: Date())
+    }
+
+    /// Typed day-look wear status. nil means undecided.
+    @Transient
+    var dayLookWearStatus: LookWearStatus? {
+        get { dayLookWearStatusRaw.flatMap(LookWearStatus.init(rawValue:)) }
+        set { dayLookWearStatusRaw = newValue?.rawValue }
+    }
+
+    /// Typed evening-look wear status. nil means undecided.
+    @Transient
+    var eveningLookWearStatus: LookWearStatus? {
+        get { eveningLookWearStatusRaw.flatMap(LookWearStatus.init(rawValue:)) }
+        set { eveningLookWearStatusRaw = newValue?.rawValue }
+    }
+
+    /// Day status with legacy `wasWornConfirmed` fallback. Does not infer evening.
+    /// Resolution: explicit `dayLookWearStatus` wins; else `wasWornConfirmed` → `.worn`; else nil.
+    /// WearEvent presence is intentionally ignored — history must not stamp a replaced look as worn.
+    @Transient
+    var resolvedDayLookWearStatus: LookWearStatus? {
+        if let dayLookWearStatus { return dayLookWearStatus }
+        if wasWornConfirmed { return .worn }
+        return nil
+    }
+
+    /// Apply wear status for the *current* day-look assignment.
+    /// Syncs `wasWornConfirmed` to that meaning. Does not create or delete WearEvents.
+    /// Passing `nil` (undecided / after replace) clears `wasWornConfirmed` so legacy fallback
+    /// cannot mark a new outfit as worn.
+    func applyDayLookWearStatus(_ status: LookWearStatus?) {
+        dayLookWearStatus = status
+        wasWornConfirmed = (status == .worn)
+        updatedAt = Date()
+    }
+
+    /// Apply evening-look wear status only. Never touches `wasWornConfirmed` or day status.
+    func applyEveningLookWearStatus(_ status: LookWearStatus?) {
+        eveningLookWearStatus = status
+        updatedAt = Date()
     }
     
     @Transient
@@ -404,14 +454,23 @@ struct DayTemperatureProfile: Equatable {
         highTemp - lowTemp
     }
     
-    /// Whether layering is recommended based on temperature range
+    /// Whether layering is recommended: cool part of day needs a layer,
+    /// and the day warms enough that a removable layer makes sense.
     var layeringRecommended: Bool {
-        temperatureRange >= 8  // 8°C or more difference
+        temperatureRange >= 8
+            && lowTemp < RecoContext.outerLayerTempThresholdC
+            && highTemp >= 22
+    }
+
+    /// Light/packable layer only (cool morning → warm afternoon).
+    var lightLayeringRecommended: Bool {
+        warmAfternoonCoolMorning && morningTemp < RecoContext.outerLayerTempThresholdC && afternoonTemp >= 22
     }
     
     /// Whether evening jacket is recommended
     var eveningJacketRecommended: Bool {
-        eveningTemp < morningTemp - 5 || eveningTemp < 15
+        eveningTemp < RecoContext.outerLayerTempThresholdC
+            && (eveningTemp < morningTemp - 5 || eveningTemp < 15)
     }
     
     /// Whether it's a "cold morning, warm afternoon" scenario
@@ -482,9 +541,9 @@ struct DayTemperatureProfile: Equatable {
         
         // Estimate time-of-day temperatures based on high/low
         let range = highTemp - lowTemp
-        self.morningTemp = lowTemp + (range * 0.3)  // Morning is ~30% up from low
-        self.afternoonTemp = highTemp               // Afternoon is typically the high
-        self.eveningTemp = lowTemp + (range * 0.5)  // Evening is ~50% between
+        self.morningTemp = forecast.meanTemperature(in: 7..<11) ?? (lowTemp + range * 0.3)
+        self.afternoonTemp = forecast.meanTemperature(in: 12..<17) ?? highTemp
+        self.eveningTemp = forecast.meanTemperature(in: 18..<23) ?? (lowTemp + range * 0.5)
     }
     
     /// Create with explicit temperatures

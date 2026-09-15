@@ -110,6 +110,9 @@ struct RecoContext {
     let combination: CombinationAffinity
     /// Calendar-derived occasion (wedding, sport, work…).
     let occasionKind: CalendarOccasionKind
+    /// Optional morning→evening temps for smarter layering decisions.
+    let diurnal: DiurnalTemps?
+    let thermalSamples: [ThermalWeatherSample]
 
     init(
         desiredFormality: Int,
@@ -122,7 +125,9 @@ struct RecoContext {
         lookTime: LookTime = .day,
         taste: TasteAffinityBuilder.Profile = .empty,
         combination: CombinationAffinity = .empty,
-        occasionKind: CalendarOccasionKind = .none
+        occasionKind: CalendarOccasionKind = .none,
+        diurnal: DiurnalTemps? = nil,
+        thermalSamples: [ThermalWeatherSample] = []
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -135,6 +140,8 @@ struct RecoContext {
         self.taste = taste
         self.combination = combination
         self.occasionKind = occasionKind
+        self.diurnal = diurnal
+        self.thermalSamples = thermalSamples
     }
     
     // Temperature bucket helpers
@@ -142,6 +149,43 @@ struct RecoContext {
     var isMild: Bool { temperatureC >= 10 && temperatureC < 20 }
     var isWarm: Bool { temperatureC >= 20 && temperatureC < 28 }
     var isHot: Bool { temperatureC >= 28 }
+
+    /// Dry-weather cutoff: at/above this temp, heavy outer layers are not recommended.
+    static let outerLayerTempThresholdC: Double = 20
+
+    var outerLayerPolicy: OuterLayerPolicy {
+        TemperatureComfort.outerLayerPolicy(
+            temperatureC: temperatureC,
+            isRaining: isRaining,
+            lookTime: lookTime,
+            diurnal: diurnal
+        )
+    }
+
+    /// True when an outer layer is appropriate (cool weather, rain, or light packable).
+    var prefersOuterLayer: Bool {
+        switch outerLayerPolicy {
+        case .prefer: return true
+        case .lightOnly, .suppress: return false
+        }
+    }
+
+    /// True when outer layers should be fully suppressed.
+    var suppressesOuterLayer: Bool {
+        outerLayerPolicy == .suppress
+    }
+
+    /// True when only light/packable outers should be considered.
+    var prefersLightOuterOnly: Bool {
+        outerLayerPolicy == .lightOnly
+    }
+
+    var targetWarmth: Double {
+        TemperatureComfort.targetWarmth(
+            temperatureC: temperatureC,
+            warmthTaste: warmthTaste
+        )
+    }
 
     var warmthTaste: Double {
         Double(warmthSensitivity - 3) / 2.0
@@ -160,7 +204,39 @@ final class AIRecommender {
 
     // MARK: - State Management
 
+    /// Resolved states are memoized per profile: scoring loops (suggest / score /
+    /// OutfitChangeAdvisor) call `ensureState` many times per pass, and a full
+    /// SwiftData fetch each time was measurable main-thread churn.
+    /// Lock-guarded because tests may exercise the singleton concurrently.
+    private let stateCacheLock = NSLock()
+    private var cachedStates: [String: RecoState] = [:]
+
+    private func stateCacheKey(profileID: UUID?) -> String {
+        profileID.map { "profile-\($0.uuidString)" } ?? "global"
+    }
+
     func ensureState(context: ModelContext, profileID: UUID? = nil) -> RecoState {
+        let cacheKey = stateCacheKey(profileID: profileID)
+        stateCacheLock.lock()
+        let cached = cachedStates[cacheKey]
+        stateCacheLock.unlock()
+        // profileID must still match: legacy-global adoption re-keys a state in
+        // place, which would otherwise leave a stale entry under "global".
+        if let cached,
+           !cached.isDeleted,
+           cached.modelContext === context,
+           cached.profileID == profileID {
+            return cached
+        }
+
+        let state = fetchOrCreateState(context: context, profileID: profileID)
+        stateCacheLock.lock()
+        cachedStates[cacheKey] = state
+        stateCacheLock.unlock()
+        return state
+    }
+
+    private func fetchOrCreateState(context: ModelContext, profileID: UUID?) -> RecoState {
         let states = (try? context.fetch(FetchDescriptor<RecoState>())) ?? []
 
         if let matching = states.first(where: { $0.profileID == profileID && (profileID != nil || $0.id == "global") }) {
@@ -212,28 +288,7 @@ final class AIRecommender {
         }
 
         // 2) Warmth match (based on temperature)
-        let baseTargetWarmth: Double
-        switch ctx.temperatureC {
-        case ..<8:   baseTargetWarmth = 5
-        case ..<14:  baseTargetWarmth = 4
-        case ..<20:  baseTargetWarmth = 3
-        case ..<26:  baseTargetWarmth = 2
-        default:     baseTargetWarmth = 1
-        }
-        let targetWarmth = min(max(baseTargetWarmth + (ctx.warmthTaste * 0.5) + warmthOffset, 1), 5)
-        let warmthDelta = abs(Double(g.warmth) - targetWarmth)
-        x[FeatureSpace.iWarmthMatch] = max(0, 1.0 - warmthDelta / 4.0)
-
-        // Fit comfort adjustments (light penalty in cold/hot extremes)
-        if let fit = g.fitTag {
-            if ctx.isCold, fit == .skinny {
-                x[FeatureSpace.iWarmthMatch] -= 0.12
-            } else if ctx.isCold, fit == .slim {
-                x[FeatureSpace.iWarmthMatch] -= 0.06
-            } else if ctx.isHot, fit == .oversized {
-                x[FeatureSpace.iWarmthMatch] -= 0.06
-            }
-        }
+        x[FeatureSpace.iWarmthMatch] = TemperatureComfort.garmentScore(g, context: ctx, warmthOffset: warmthOffset)
 
         // 3) Formality match
         let targetFormality = min(max(Double(ctx.desiredFormality) + formalityOffset, 1), 5)
@@ -277,24 +332,18 @@ final class AIRecommender {
         
         // 10) Temperature suitability (using garment's temp range)
         let tempRange = g.effectiveTempRange
-        if ctx.temperatureC >= tempRange.min && ctx.temperatureC <= tempRange.max {
-            x[FeatureSpace.iTempInRange] = 1.0
-        } else {
-            // Calculate how far outside the range
-            let distanceOutside: Double
-            if ctx.temperatureC < tempRange.min {
-                distanceOutside = tempRange.min - ctx.temperatureC
-            } else {
-                distanceOutside = ctx.temperatureC - tempRange.max
-            }
-            // Penalty based on distance (max penalty at 15°C outside range)
-            let penalty = min(0.5, distanceOutside / 30.0)
-            x[FeatureSpace.iWarmthMatch] -= penalty
+        let rangeScore = TemperatureComfort.tempRangeScore(
+            temperatureC: ctx.temperatureC,
+            range: tempRange
+        )
+        x[FeatureSpace.iTempInRange] = rangeScore
+        if rangeScore < 1.0 {
+            x[FeatureSpace.iWarmthMatch] -= (1.0 - rangeScore) * 0.35
         }
 
         // 11) Explicit user-context interactions. These vary per garment, so the
         // linear model can learn useful ranking differences within one request.
-        let normalizedGarmentWarmth = Double(g.warmth - 3) / 2.0
+        let normalizedGarmentWarmth = Double(g.recommendationWarmth - 3) / 2.0
         x[FeatureSpace.iWarmthTaste] = ctx.warmthTaste * normalizedGarmentWarmth
 
         let rainTags = Set(g.weatherTags ?? [])
@@ -387,36 +436,24 @@ final class AIRecommender {
         
         // Temperature suitability (primary signal)
         let tempRange = g.effectiveTempRange
-        if ctx.temperatureC >= tempRange.min && ctx.temperatureC <= tempRange.max {
-            score += 0.25  // Strong bonus for being in range
-        } else {
-            let distanceOutside: Double
-            if ctx.temperatureC < tempRange.min {
-                distanceOutside = tempRange.min - ctx.temperatureC
-            } else {
-                distanceOutside = ctx.temperatureC - tempRange.max
-            }
-            // Penalty based on distance
-            score -= min(0.3, distanceOutside / 20.0)
-        }
+        let rangeScore = TemperatureComfort.tempRangeScore(
+            temperatureC: ctx.temperatureC,
+            range: tempRange
+        )
+        score += (rangeScore - 0.5) * 0.5  // in-range ≈ +0.25, far out ≈ −0.25
         
-        // Warmth match (secondary)
-        let baseTargetWarmth: Double
-        switch ctx.temperatureC {
-        case ..<8:   baseTargetWarmth = 5
-        case ..<14:  baseTargetWarmth = 4
-        case ..<20:  baseTargetWarmth = 3
-        case ..<26:  baseTargetWarmth = 2
-        default:     baseTargetWarmth = 1
-        }
-        let targetWarmth = min(max(baseTargetWarmth + (ctx.warmthTaste * 0.5) + warmthOffset, 1), 5)
-        var warmthMatch = 1.0 - abs(Double(g.warmth) - targetWarmth) / 4.0
-        if let fit = g.fitTag {
-            if ctx.isCold, fit == .skinny { warmthMatch -= 0.12 }
-            if ctx.isCold, fit == .slim { warmthMatch -= 0.06 }
-            if ctx.isHot, fit == .oversized { warmthMatch -= 0.06 }
-        }
+        // Warmth match (secondary) — asymmetric in heat/cold
+        let warmthMatch = TemperatureComfort.garmentScore(g, context: ctx, warmthOffset: warmthOffset)
         score += warmthMatch * 0.15
+
+        // Soft season prior when tagged
+        let seasonScore = TemperatureComfort.seasonMatch(
+            season: g.seasonSuitability,
+            temperatureC: ctx.temperatureC
+        )
+        if seasonScore > 0 {
+            score += seasonScore * 0.06
+        }
         
         // Formality match
         let targetFormality = min(max(Double(ctx.desiredFormality) + formalityOffset, 1), 5)
@@ -459,10 +496,25 @@ final class AIRecommender {
         if ctx.isCold && g.category == .outer {
             score += 0.1
         }
-        
-        // Hot weather: penalize outer
-        if ctx.isHot && g.category == .outer {
-            score -= 0.2
+
+        // Outer-layer policy: suppress / light-only / prefer
+        if g.category == .outer {
+            switch ctx.outerLayerPolicy {
+            case .suppress:
+                score -= ctx.isHot ? 0.35 : 0.28
+            case .lightOnly:
+                if g.recommendationWarmth >= 4 {
+                    score -= 0.3
+                } else if g.recommendationWarmth <= 2 {
+                    score += 0.06
+                } else {
+                    score -= 0.12
+                }
+            case .prefer:
+                if g.recommendationWarmth >= 4, ctx.temperatureC >= 16 {
+                    score -= 0.08
+                }
+            }
         }
 
         // Soft taste priors from wardrobe history (safe when affinities are empty)
@@ -653,17 +705,26 @@ final class AIRecommender {
             // Skip if already covered by locked item
             guard !usedCategories.contains(category) else { continue }
             
-            // For outer, only include in cold weather
-            if category == .outer && ctx.temperatureC > 18 {
-                continue
+            // Outer layers follow temperature policy (suppress / light-only / prefer)
+            if category == .outer {
+                switch ctx.outerLayerPolicy {
+                case .suppress:
+                    continue
+                case .lightOnly, .prefer:
+                    break
+                }
             }
             
             // Filter pool for this category
             let categoryPool = garments.filter { g in
-                g.category == category && 
-                !g.isBlocked && 
-                !excludeSet.contains(g.id) &&
-                !g.isCurrentlyUnavailable
+                guard g.category == category,
+                      !g.isBlocked,
+                      !excludeSet.contains(g.id),
+                      !g.isCurrentlyUnavailable else { return false }
+                if category == .outer {
+                    return TemperatureComfort.outerGarmentAllowed(g, policy: ctx.outerLayerPolicy)
+                }
+                return true
             }
             
             guard !categoryPool.isEmpty else { continue }

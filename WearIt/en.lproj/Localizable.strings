@@ -216,7 +216,6 @@
 "wardrobe_empty_message" = "Tap the + button to add your first item";
 "wardrobe_filter_all" = "All";
 "wardrobe_filter_season" = "Season";
-"wardrobe_clear_filters" = "Clear Filters";
 "wardrobe_suitable_for_temp" = "Suitable for %@°";
 "wardrobe_delete_confirm_title" = "Delete item?";
 "wardrobe_delete_confirm_message" = "This action cannot be undone.";
@@ -282,6 +281,7 @@
 "garment_love" = "Love";
 "garment_more_options" = "More Options";
 "garment_pattern" = "Pattern";
+"garment_materials" = "Materials";
 "action_save_changes" = "Save Changes";
 "action_delete_item" = "Delete Item";
 "planner_evening_empty" = "Evening look will appear here";
@@ -294,7 +294,6 @@
 "planner_day_header_format" = "%@ · %@ · %@ · %d°–%d° · %@";
 "planner_day_header_no_forecast_format" = "%@ · %@";
 "planner_add_item_category_mismatch" = "This item doesn’t match the selected slot.";
-"garment_colors" = "Colors";
 "garment_colors_recommended" = "recommended";
 "tag_bilingual_hint" = "Add tags in Hebrew and English (e.g., \"קפוצ׳ון, hoodie\")";
 "color_black" = "Black";
@@ -379,17 +378,17 @@
 "calendar_unlock_garment" = "Unlock";
 "calendar_past_day" = "Past";
 "calendar_future_day" = "Planned";
-"calendar_summary_today" = "Today’s look and photos";
-"calendar_summary_past" = "What was planned or worn";
-"calendar_summary_future" = "Plan ahead for this day";
-"calendar_items_count_format" = "%d items";
-"calendar_photos_count_format" = "%d photos";
 "calendar_day_photos" = "Photos from this day";
-"calendar_no_photos_title" = "No photos yet";
-"calendar_no_photos_message" = "Add a quick photo if you want to remember the look.";
-"calendar_recent_days" = "Recent days";
-"calendar_show_more_history" = "Show more";
-"calendar_show_less_history" = "Show less";
+"calendar_add_photo" = "Photo";
+"calendar_how_was_it" = "How was it?";
+"calendar_notes_placeholder" = "Note for this day…";
+"calendar_segment_day" = "Day";
+"calendar_segment_evening" = "Evening";
+"calendar_choose_look" = "Choose look";
+"calendar_open_in_planner" = "Edit in planner";
+"calendar_edit_look" = "Edit look";
+"calendar_no_items_for_slot" = "No matching items in your wardrobe";
+"calendar_slot_empty" = "Empty";
 
 // MARK: - Stats
 "stats_title" = "Stats";
@@ -458,6 +457,23 @@
 "error_title" = "Error";
 "edit_image_save_failed" = "Couldn't save the new photo. Try again.";
 "error_generic" = "Something went wrong.";
+"barcode_scan_hint" = "Scan a product barcode or a QR code with a product link";
+"barcode_looking_up" = "Looking up product…";
+"webpage_looking_up" = "Fetching product details from the page…";
+"barcode_found_needs_photo" = "Details filled from the product — add a photo to save it to your wardrobe";
+"barcode_found_needs_photo_action" = "Add a photo to save";
+"barcode_details_filled" = "Filled from barcode / product page — you can edit anything";
+"webpage_error_unavailable" = "Couldn't open the product page — try taking a photo instead.";
+"webpage_error_no_metadata" = "Couldn't read product details from this page — try taking a photo instead.";
+"barcode_error_missing_key" = "Barcode API key is missing";
+"barcode_error_invalid_url" = "Invalid barcode lookup URL";
+"barcode_error_not_found" = "No product found for this barcode. Try taking a photo instead.";
+"barcode_error_unsupported_code" = "QR/link isn’t supported — scan the lined barcode (numbers) on the label.";
+"barcode_error_unauthorized" = "Barcode lookup authorization failed. Check the API key.";
+"barcode_error_http_format" = "Barcode lookup server error (%d)";
+"barcode_error_decoding" = "Couldn’t read the barcode lookup response";
+"barcode_error_image" = "Couldn’t download the product image";
+"barcode_error_not_apparel" = "This doesn’t look like clothing or footwear — WearIt only adds wardrobe items. Try a garment barcode, or take a photo.";
 "error_save_failed" = "Save failed";
 "error_load_failed" = "Failed to load";
 
@@ -569,6 +585,27 @@
 "planner_confirm_day" = "Confirm";
 "planner_confirm_plan" = "Confirm Plan";
 "planner_confirm_worn" = "Confirm Worn";
+"planner_swipe_wear_look" = "Wear this look";
+"planner_swipe_did_wear" = "I wore this";
+"planner_swipe_will_wear" = "I'll wear this";
+"planner_swipe_did_not_wear" = "I didn't wear this";
+"planner_swipe_will_not_wear" = "I won't wear this";
+"planner_swipe_replace_look" = "Replace look";
+"planner_swipe_replaced_message" = "Look replaced for this day only";
+"planner_swipe_replaced_slot_message" = "Look replaced for this part of the day";
+"planner_swipe_plan_confirmed_message" = "Plan confirmed";
+"planner_swipe_marked_not_worn_message" = "Look marked as not worn";
+"planner_swipe_marked_not_planned_message" = "Look marked as not planned to wear";
+"planner_swipe_status_worn" = "Worn";
+"planner_swipe_status_not_worn" = "Not worn";
+"planner_swipe_status_planned" = "Planned";
+"planner_swipe_status_not_planned" = "Not planned to wear";
+"planner_swipe_clear_status" = "Clear status";
+"planner_swipe_more_actions" = "More outfit actions";
+"planner_day_look_a11y" = "Day look";
+"a11y_tile_locked" = "Locked";
+"a11y_tile_linked" = "Linked to day look";
+"planner_swipe_hint" = "Swipe right to confirm, or left for more options";
 "planner_undo_confirm" = "Undo";
 "planner_evening_look" = "Evening look";
 "inspire_favorites" = "Inspired by your favorites.";
@@ -645,12 +682,37 @@
 
 // MARK: - Add Garment AI
 "add_garment_hero_title" = "Add to Wardrobe";
-"add_garment_hero_subtitle" = "Take a photo or choose from library — we’ll suggest category and colors";
+"add_garment_hero_subtitle" = "Take a photo, scan a barcode, paste a product link, or choose from library";
 "add_garment_take_photo" = "Take Photo";
+"add_garment_scan_barcode" = "Scan Barcode";
+"add_garment_paste_link" = "Paste Product Link";
+"add_garment_paste_link_placeholder" = "https://…";
+"add_garment_paste_link_hint" = "Paste a product page URL (for example from Terminal X). We’ll try to fill title, brand, color, and photo.";
+"add_garment_paste_from_clipboard" = "Paste from Clipboard";
+"add_garment_fetch_link" = "Fetch Details";
+"add_garment_paste_link_invalid" = "That doesn’t look like a valid web link. Paste a full https:// product URL.";
 "add_garment_choose_library" = "Choose from Library";
 "add_garment_analyzing" = "Analyzing item…";
 "add_garment_ai_filled" = "Suggestions filled — you can edit anything";
-"add_garment_crop_hint" = "Next you’ll crop and adjust the photo before saving details.";
+"add_garment_crop_hint" = "The background is removed and details are filled in automatically — just review and save.";
+"add_garment_chip_choose_category" = "Choose category";
+"add_garment_chip_colors" = "Colors";
+"add_garment_chip_warmth_format" = "Warmth %d/5";
+"add_garment_chip_formality_format" = "Formality %d/5";
+"add_garment_chips_hint" = "Looks right? Just save. Tap a chip to adjust.";
+"add_garment_chips_hint_missing_category" = "Pick a category to finish — everything else is optional.";
+"add_garment_more_details" = "More details";
+"batch_review_title" = "Review Items";
+"batch_review_hint" = "Each photo becomes an item. Fix anything that looks off, then save them all at once.";
+"batch_processing_status_format" = "Analyzing %d more photos…";
+"batch_needs_category" = "Choose category";
+"batch_save_all_format" = "Save All (%d)";
+"batch_item_remove" = "Remove item";
+"label_scan_button" = "Scan label";
+"label_scan_found_format" = "Found on label: %@";
+"label_scan_nothing" = "Couldn't read details from the label. Try again in better light.";
+"micro_question_brand_format" = "Quick one — what brand is “%@”?";
+"micro_question_skip" = "Not now";
 "add_garment_details_title" = "Item details";
 "add_garment_edit_photo" = "Edit photo";
 "add_garment_retake" = "Retake";
@@ -697,3 +759,59 @@
 "backdrop_blur_label" = "Blur";
 "backdrop_blur_hint" = "Lower blur keeps more detail; higher blur feels softer under glass";
 "backdrop_blur_percent_format" = "%d%%";
+
+// MARK: - Calendar date strip
+"calendar_previous_month" = "Previous month";
+"calendar_next_month" = "Next month";
+"calendar_previous_week" = "Previous week";
+"calendar_next_week" = "Next week";
+"calendar_show_month" = "Show month";
+"calendar_show_week" = "Show week";
+"day_yesterday" = "Yesterday";
+"a11y_day_has_outfit" = "Look planned";
+"a11y_day_worn" = "Worn";
+"a11y_day_has_photos" = "Has photos";
+
+// MARK: - Profile identity
+"settings_title" = "Settings";
+"profile_bio_placeholder" = "Your style in one line…";
+"profile_member_since_format" = "Member since %@";
+"profile_stat_items" = "Items";
+"profile_stat_looks" = "Looks worn";
+"profile_stat_streak" = "Day streak";
+"profile_style_identity" = "Style Identity";
+"profile_my_looks" = "My Looks";
+"profile_looks_empty" = "Photos you add in the calendar will appear here";
+"profile_avatar_change" = "Change profile photo";
+"profile_avatar_remove_photo" = "Remove photo";
+"action_share" = "Share";
+
+// MARK: - AI look explanations (Foundation Models)
+"settings_ai_section_title" = "Apple Intelligence";
+"settings_ai_look_explanations_toggle" = "AI look descriptions";
+"settings_ai_look_explanations_help" = "A short on-device explanation of why each planned look works for the day.";
+"settings_ai_look_explanations_unavailable" = "Requires Apple Intelligence and a supported language.";
+"garment_ai_name_suggest" = "AI name";
+
+"planner_why_this_look" = "Why this look?";
+"planner_day_options" = "Day options";
+"planner_details_expanded" = "Expanded";
+"planner_details_collapsed" = "Collapsed";
+"thermal_title" = "Weather comfort";
+"thermal_insulation" = "Warmth";
+"thermal_ventilation" = "Breathability";
+"thermal_automatic" = "Automatic";
+"thermal_edit_hint" = "Leave on Automatic, or adjust based on wearing this item. These are estimates, not measured fabric properties.";
+"thermal_source_estimated" = "Estimated from item details · Adjust if needed";
+"thermal_source_adjusted" = "Includes your adjustments";
+"thermal_warmth_1" = "Very light";
+"thermal_warmth_2" = "Light";
+"thermal_warmth_3" = "Moderately warm";
+"thermal_warmth_4" = "Warm";
+"thermal_warmth_5" = "Very warm";
+"thermal_breathability_1" = "Low airflow";
+"thermal_breathability_2" = "Slight airflow";
+"thermal_breathability_3" = "Moderate airflow";
+"thermal_breathability_4" = "Airy";
+"thermal_breathability_5" = "Very airy";
+"edit_details_and_options" = "Item details and more options";
