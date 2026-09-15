@@ -19,6 +19,9 @@ extension Notification.Name {
     // Widget actions
     static let confirmWornFromWidget = Notification.Name("ConfirmWornFromWidget")
 
+    /// Calendar → planner hand-off. `userInfo["date"]` is the start-of-day to focus.
+    static let openPlannerDay = Notification.Name("OpenPlannerDay")
+
     // Planner debounced persistence
     static let plannerFlushDirtyPlans = Notification.Name("PlannerFlushDirtyPlans")
 
