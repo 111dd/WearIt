@@ -1,0 +1,16 @@
+---
+description: Shared memory for every WearIt agent — read and update LEARNINGS
+alwaysApply: true
+---
+
+# Multi-agent handoff
+
+You are one of several agents on this repo. Context does not carry across chats.
+
+1. At the start of a non-trivial task, read `AGENTS.md` and `docs/LEARNINGS.md`.
+2. Treat `AGENTS.md` hard constraints as non-negotiable (especially: no build, no simulator).
+3. Before editing an area, skim the latest LEARNINGS entries that mention those files.
+4. When you finish meaningful work (bug fix, behavior change, perf, a real mistake), append a short newest-first entry to `docs/LEARNINGS.md`. Do not rewrite history.
+5. Promote a lesson into `AGENTS.md` only if it is now a standing rule, not a one-off.
+
+Keep LEARNINGS entries short. Facts and pitfalls beat narrative.

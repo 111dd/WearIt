@@ -574,11 +574,13 @@ struct DSAsyncStoredImage: View {
                 .fill(Color(.systemGray6))
 
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
+                GeometryReader { geometry in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                }
             } else if loadFailed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)

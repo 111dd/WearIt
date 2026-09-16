@@ -389,7 +389,8 @@ final class PlannerBoardState {
         toDay dayIndex: Int,
         toSlot slot: OutfitSlot,
         garments: [Garment],
-        allowUnavailable: Bool = false
+        allowUnavailable: Bool = false,
+        allowRepeats: Bool = false
     ) -> Bool {
         guard dayIndex < days.count else { return false }
         
@@ -410,7 +411,7 @@ final class PlannerBoardState {
         }
         
         // Check if garment would create duplicate
-        if isGarmentUsedElsewhere(garmentID, excludingDay: dayIndex) {
+        if !allowRepeats, isGarmentUsedElsewhere(garmentID, excludingDay: dayIndex) {
             // Remove from other day first (if not locked)
             for (index, day) in days.enumerated() where index != dayIndex {
                 for slot in OutfitSlot.allCases {

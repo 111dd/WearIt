@@ -22,6 +22,8 @@ struct CalendarLookView: View {
     @State private var isStripExpanded = false
     @State private var photosPickerItems: [PhotosPickerItem] = []
     @State private var showCamera = false
+    @State private var showDatePicker = false
+    @State private var jumpDate = Date()
     @State private var showLookEditor = false
     @State private var statusToast: String?
     @State private var currentDate: Date = Date()
@@ -146,6 +148,14 @@ struct CalendarLookView: View {
         .navigationTitle(String(localized: "nav_calendar"))
         .minimalCollapsingNavBar()
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    jumpDate = selectedDate
+                    showDatePicker = true
+                } label: {
+                    Label("calendar_jump_date", systemImage: "calendar.badge.clock")
+                }
+            }
             if timing != .today {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(String(localized: "day_today")) {
@@ -178,6 +188,27 @@ struct CalendarLookView: View {
                 initialLockedSlots: Self.effectiveLockedSlots(for: planForSelectedDay, lookup: garmentsByID)
             ) { assignments, lockedSlots in
                 updateLook(assignments: assignments, lockedSlots: lockedSlots)
+            }
+        }
+        .sheet(isPresented: $showDatePicker) {
+            NavigationStack {
+                Form {
+                    DatePicker("calendar_jump_date", selection: $jumpDate, displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                }
+                .navigationTitle(String(localized: "calendar_jump_date"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("action_cancel") { showDatePicker = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("calendar_go_to_date") {
+                            jump(to: jumpDate)
+                            showDatePicker = false
+                        }
+                    }
+                }
             }
         }
         .overlay(alignment: .bottom) {

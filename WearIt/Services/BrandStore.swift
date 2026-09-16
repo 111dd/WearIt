@@ -52,17 +52,27 @@ enum BrandStore {
 
     static func mergeDuplicateBrands(context: ModelContext) {
         let brands = (try? context.fetch(FetchDescriptor<Brand>())) ?? []
-        let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
         guard !brands.isEmpty else { return }
 
         var groups: [String: [Brand]] = [:]
+        var didNormalizeKeys = false
         for brand in brands {
             let key = brand.normalizedKey ?? normalizeBrandKey(brand.name)
-            brand.normalizedKey = key
+            if brand.normalizedKey != key {
+                brand.normalizedKey = key
+                didNormalizeKeys = true
+            }
             groups[key, default: []].append(brand)
         }
 
-        for (key, group) in groups where group.count > 1 {
+        let duplicateGroups = groups.filter { $0.value.count > 1 }
+        guard !duplicateGroups.isEmpty || didNormalizeKeys else { return }
+
+        let garments = duplicateGroups.isEmpty
+            ? []
+            : (try? context.fetch(FetchDescriptor<Garment>())) ?? []
+
+        for (key, group) in duplicateGroups {
             let primaryName = group.map(\.name).reduce(group[0].name, preferredDisplayName)
 
             // Update garments to canonical display name

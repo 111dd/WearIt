@@ -21,16 +21,15 @@ enum WearHistoryService {
         guard !uniqueIDs.isEmpty else { return }
 
         let sourceRaw = source.rawValue
-        var eventDescriptor = FetchDescriptor<WearEvent>(
-            predicate: #Predicate { event in
-                event.date == day &&
-                event.sourceRaw == sourceRaw &&
-                event.slotRaw == nil
-            }
-        )
-        eventDescriptor.fetchLimit = 1
-
-        if let existing = (try? context.fetch(eventDescriptor))?.first {
+        // A failed read must not be treated as an empty history and add a
+        // duplicate event/count. Snapshot value data before mutating models.
+        guard var history = try? context.fetch(FetchDescriptor<WearEvent>()) else { return }
+        let daysBefore = wearDays(history)
+        var affectedIDs = Set(uniqueIDs)
+        if let existing = history.first(where: {
+            $0.date == day && $0.sourceRaw == sourceRaw && $0.slotRaw == nil
+        }) {
+            affectedIDs.formUnion(existing.garmentIDs)
             existing.garmentIDs = uniqueIDs
             existing.outfitID = outfitID
         } else {
@@ -42,9 +41,11 @@ enum WearHistoryService {
                 outfitID: outfitID
             )
             context.insert(event)
+            history.append(event)
         }
 
-        let targetIDs = uniqueIDs
+        let daysAfter = wearDays(history)
+        let targetIDs = Array(affectedIDs)
         let garmentDescriptor = FetchDescriptor<Garment>(
             predicate: #Predicate { garment in
                 targetIDs.contains(garment.id)
@@ -52,19 +53,35 @@ enum WearHistoryService {
         )
         let garments = (try? context.fetch(garmentDescriptor)) ?? []
         for garment in garments {
-            let shouldUpdate = garment.lastWorn == nil || garment.lastWorn! < day
-            if shouldUpdate {
-                garment.lastWorn = day
-                if incrementTimesWorn {
-                    garment.timesWorn += 1
+            let before = daysBefore[garment.id] ?? []
+            let after = daysAfter[garment.id] ?? []
+            let change = after.count - before.count
+            if incrementTimesWorn {
+                // Keep legacy totals; only apply the change in distinct wear days.
+                garment.timesWorn = max(0, garment.timesWorn + change)
+            }
+            if let latest = after.max() {
+                if garment.lastWorn == nil || latest > garment.lastWorn! || before.contains(garment.lastWorn!) {
+                    garment.lastWorn = latest
                 }
-                if let delta = loveScoreDelta, delta != 0 {
-                    garment.loveScore = max(0, min(100, garment.loveScore + delta))
-                }
+            } else if let last = garment.lastWorn, before.contains(last) {
+                garment.lastWorn = nil
+            }
+            if change > 0, let delta = loveScoreDelta, delta != 0 {
+                garment.loveScore = max(0, min(100, garment.loveScore + delta))
             }
         }
 
         try? context.save()
+    }
+
+    private static func wearDays(_ events: [WearEvent]) -> [UUID: Set<Date>] {
+        var result: [UUID: Set<Date>] = [:]
+        for event in events where event.source != .calendarBlock {
+            let day = Calendar.current.startOfDay(for: event.date)
+            for id in Set(event.garmentIDs) { result[id, default: []].insert(day) }
+        }
+        return result
     }
 
     static func latestWearMap(events: [WearEvent]) -> [UUID: Date] {

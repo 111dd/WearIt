@@ -12,8 +12,7 @@ struct AppGateView: View {
                 SignInView()
             }
         }
-        .task {
-            await auth.refreshCredentialStateIfNeeded()
-        }
+        // BootstrapCoordinator owns the launch credential check. Running it
+        // here too duplicates the request while this view is under the overlay.
     }
 }

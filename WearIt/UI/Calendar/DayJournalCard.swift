@@ -223,7 +223,17 @@ struct DayJournalCard: View {
             ForEach(items, id: \.garment.id) { item in
                 VStack(spacing: DS.Spacing.xxs) {
                     ZStack(alignment: .topTrailing) {
-                        DSGarmentTile(item.garment, showTitle: false)
+                        // The grid cell, not the photo, determines layout size.
+                        Color.clear
+                            .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
+                            .overlay {
+                                GeometryReader { geometry in
+                                    DSGarmentTile(item.garment, showTitle: false)
+                                        .frame(width: geometry.size.width, height: geometry.size.height)
+                                        .clipped()
+                                }
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile))
 
                         if model.lockedGarmentIDs.contains(item.garment.id) {
                             Image(systemName: "lock.fill")

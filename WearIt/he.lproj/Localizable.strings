@@ -834,3 +834,6 @@
 "thermal_breathability_4" = "מאוורר";
 "thermal_breathability_5" = "מאוורר מאוד";
 "edit_details_and_options" = "פרטי הבגד ואפשרויות נוספות";
+"calendar_jump_date" = "בחירת תאריך";
+"calendar_go_to_date" = "מעבר לתאריך";
+"planner_allow_repeats" = "אפשר חזרה על כל סוגי הפריטים";

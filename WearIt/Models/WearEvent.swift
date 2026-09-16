@@ -3,6 +3,7 @@ import SwiftData
 
 enum WearEventSource: String, Codable {
     case planner
+    case plannerEvening
     case manual
     case calendar
     case calendarBlock

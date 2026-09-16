@@ -27,6 +27,9 @@ final class AppBootstrapper: ObservableObject {
     }
 
     private func loadContainer() async {
+        let signposter = WearItPerformance.bootstrapSignposter
+        let interval = signposter.beginInterval("persistent-store", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("persistent-store", interval) }
         statusMessage = String(localized: "loading_preparing")
 
         let schema = Schema([

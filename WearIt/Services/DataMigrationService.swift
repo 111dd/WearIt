@@ -16,6 +16,10 @@ final class DataMigrationService {
     private let logger = Logger(subsystem: "WearIt", category: "Migration")
     private let idsMigrationKey = "cloudKitIDsMigrationDone"
     private let wearHistoryBackfillKey = "wearHistoryBackfillDone"
+    private let criticalGarmentMigrationVersionKey = "criticalGarmentMigrationVersion"
+    private let brandDuplicateMergeKey = "brandDuplicateMergeDone"
+    /// Must stay in lockstep with `Garment.migrateIfNeeded()`'s written version.
+    private let currentCriticalGarmentMigrationVersion = 2
 
     // LookWearStatus on DayPlan (`dayLookWearStatusRaw` / `eveningLookWearStatusRaw`) is additive
     // optional String? — SwiftData lightweight migration + CloudKit nil defaults; no VersionedSchema
@@ -33,26 +37,39 @@ final class DataMigrationService {
     /// Critical migrations required before the main UI reads garment/brand data.
     @MainActor
     func runCriticalMigrationsAndWait(context: ModelContext) async {
+        let defaults = UserDefaults.standard
+        let storedVersion = defaults.integer(forKey: criticalGarmentMigrationVersionKey)
+        let brandMergeDone = defaults.bool(forKey: brandDuplicateMergeKey)
+        if storedVersion >= currentCriticalGarmentMigrationVersion, brandMergeDone {
+            return
+        }
+
         logger.info("Running critical data migrations...")
 
         do {
-            let descriptor = FetchDescriptor<Garment>()
-            let garments = try context.fetch(descriptor)
+            if storedVersion < currentCriticalGarmentMigrationVersion {
+                let garments = try fetchGarmentsNeedingMigration(context: context)
 
-            var migratedCount = 0
-            for garment in garments where garment.needsMigration {
-                migrateGarment(garment, generateThumbnail: false)
-                migratedCount += 1
+                var migratedCount = 0
+                for garment in garments {
+                    migrateGarment(garment, generateThumbnail: false)
+                    migratedCount += 1
+                }
+
+                if migratedCount > 0 {
+                    try context.save()
+                    logger.info("Migrated \(migratedCount) garments successfully")
+                } else {
+                    logger.info("No critical garment migrations needed")
+                }
+
+                defaults.set(currentCriticalGarmentMigrationVersion, forKey: criticalGarmentMigrationVersionKey)
             }
 
-            if migratedCount > 0 {
-                try context.save()
-                logger.info("Migrated \(migratedCount) garments successfully")
-            } else {
-                logger.info("No critical garment migrations needed")
+            if !brandMergeDone {
+                BrandStore.mergeDuplicateBrands(context: context)
+                defaults.set(true, forKey: brandDuplicateMergeKey)
             }
-
-            BrandStore.mergeDuplicateBrands(context: context)
         } catch {
             logger.error("Critical migration failed: \(error.localizedDescription)")
         }
@@ -65,35 +82,70 @@ final class DataMigrationService {
         logger.info("Running deferred data backfills...")
 
         do {
-            let garments = try context.fetch(FetchDescriptor<Garment>())
-            var thumbCount = 0
-            for garment in garments where garment.thumbnailPath == nil && garment.imagePath != nil {
-                if let path = garment.imagePath {
-                    garment.thumbnailPath = ImageStore.generateAndSaveThumbnail(
-                        for: path,
-                        maxPixelSize: ImageStore.thumbnailMaxPixelSize
-                    )
-                    if garment.thumbnailPath != nil {
-                        thumbCount += 1
-                    }
-                }
-            }
-            if thumbCount > 0 {
-                try context.save()
-                logger.info("Backfilled \(thumbCount) garment thumbnails")
-            }
-
-            migrateCloudKitIDsIfNeeded(context: context)
-            migrateWearHistoryIfNeeded(context: context)
+            try await backfillMissingThumbnails(context: context)
         } catch {
-            logger.error("Deferred backfill failed: \(error.localizedDescription)")
+            logger.error("Thumbnail backfill failed: \(error.localizedDescription)")
         }
+        migrateCloudKitIDsIfNeeded(context: context)
+        migrateWearHistoryIfNeeded(context: context)
     }
 
     /// Run migrations and await completion (boot-time use — critical only).
     @MainActor
     func runMigrationsAndWait(context: ModelContext) async {
         await runCriticalMigrationsAndWait(context: context)
+    }
+
+    /// SwiftData `#Predicate` cannot portably express `optionalInt < 2`, so we
+    /// union the only pre-current versions that ever existed (`nil`, `0`, `1`).
+    private func fetchGarmentsNeedingMigration(context: ModelContext) throws -> [Garment] {
+        let unversioned = FetchDescriptor<Garment>(
+            predicate: #Predicate { $0.migrationVersion == nil }
+        )
+        let version0 = FetchDescriptor<Garment>(
+            predicate: #Predicate { $0.migrationVersion == 0 }
+        )
+        let version1 = FetchDescriptor<Garment>(
+            predicate: #Predicate { $0.migrationVersion == 1 }
+        )
+
+        var seen = Set<UUID>()
+        var result: [Garment] = []
+        for descriptor in [unversioned, version0, version1] {
+            for garment in try context.fetch(descriptor) where seen.insert(garment.id).inserted {
+                result.append(garment)
+            }
+        }
+        return result
+    }
+
+    @MainActor
+    private func backfillMissingThumbnails(context: ModelContext) async throws {
+        let descriptor = FetchDescriptor<Garment>(
+            predicate: #Predicate { $0.thumbnailPath == nil && $0.imagePath != nil }
+        )
+        let missing = try context.fetch(descriptor)
+        guard !missing.isEmpty else { return }
+
+        let maxPixelSize = ImageStore.thumbnailMaxPixelSize
+        var thumbCount = 0
+        for garment in missing {
+            guard let path = garment.imagePath else { continue }
+            let thumbnailPath = await Task.detached(priority: .utility) {
+                ImageStore.generateAndSaveThumbnail(for: path, maxPixelSize: maxPixelSize)
+            }.value
+            guard let thumbnailPath else { continue }
+            garment.thumbnailPath = thumbnailPath
+            thumbCount += 1
+            if thumbCount.isMultiple(of: 8) {
+                try context.save()
+                await Task.yield()
+            }
+        }
+        if thumbCount > 0 {
+            try context.save()
+            logger.info("Backfilled \(thumbCount) garment thumbnails")
+        }
     }
 
     @MainActor

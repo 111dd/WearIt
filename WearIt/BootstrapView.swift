@@ -61,9 +61,12 @@ struct BootstrapView: View {
 
     var body: some View {
         ZStack {
-            // Main app content (always in hierarchy for state preservation)
-            AppGateView()
-                .opacity(loadState == .ready ? 1 : 0)
+            // Do not start planner queries, recommendations, or image tasks
+            // underneath the loading overlay while migrations are still running.
+            // Readiness only moves forward, preserving the app hierarchy afterward.
+            if loadState == .ready {
+                AppGateView()
+            }
             
             // Loading overlay
             if loadState == .loading {
@@ -83,14 +86,25 @@ struct BootstrapView: View {
         await BootstrapCoordinator.runCriticalOnce {
             // Auth is needed before AppGateView routing to avoid a sign-in flash.
             loadingMessage = String(localized: "loading_ready")
-            await auth.refreshCredentialStateIfNeeded()
+            let signposter = WearItPerformance.bootstrapSignposter
+            do {
+                let interval = signposter.beginInterval("credential-check", id: signposter.makeSignpostID())
+                defer { signposter.endInterval("credential-check", interval) }
+                await auth.refreshCredentialStateIfNeeded()
+            }
 
             // Critical migrations: garment field normalization + brand merge.
             loadingMessage = String(localized: "loading_preparing")
-            await DataMigrationService.shared.runCriticalMigrationsAndWait(context: context)
+            do {
+                let interval = signposter.beginInterval("critical-migrations", id: signposter.makeSignpostID())
+                defer { signposter.endInterval("critical-migrations", interval) }
+                await DataMigrationService.shared.runCriticalMigrationsAndWait(context: context)
+            }
 
             // First-launch seed must complete before UI to avoid an empty wardrobe flash.
             if !didSeed {
+                let interval = signposter.beginInterval("initial-seed", id: signposter.makeSignpostID())
+                defer { signposter.endInterval("initial-seed", interval) }
                 loadingMessage = String(localized: "loading_setting_up")
                 SeedData.load(context: context)
                 didSeed = true
@@ -100,6 +114,8 @@ struct BootstrapView: View {
         withAnimation(.easeOut(duration: 0.35)) {
             loadState = .ready
         }
+        // Marks readiness, not the first rendered frame or animation completion.
+        WearItPerformance.bootstrapSignposter.emitEvent("bootstrap-ready")
 
         // Capture values needed by deferred work (avoid capturing View across tasks).
         let modelContext = context

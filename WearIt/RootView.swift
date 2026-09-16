@@ -72,7 +72,12 @@ struct RootView: View {
             // One-time wardrobe upgrade: per-type defaults + on-device AI
             // enrichment for legacy garments stuck on generic 3/nil values.
             // Delayed so launch-critical work (weather, planner) goes first.
-            try? await Task.sleep(for: .seconds(3))
+            do {
+                try await Task.sleep(for: .seconds(3))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             await GarmentEnrichmentService.runRetroactivePassIfNeeded(context: context)
         }
         .onChange(of: scenePhase) { _, newPhase in

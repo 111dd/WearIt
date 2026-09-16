@@ -26,7 +26,8 @@ enum AvailabilityService {
         }
 
         // Source of truth is WearEvent / lastWorn map — not the legacy Garment.isWorn flag.
-        if isWornOnDate(garmentID: garment.id, date: date, latestWearMap: latestWearMap) {
+        if !(ctx.allowRepeatedItems && ctx.lookTime == .evening),
+           isWornOnDate(garmentID: garment.id, date: date, latestWearMap: latestWearMap) {
             return .worn
         }
 
@@ -51,6 +52,7 @@ enum AvailabilityService {
     /// matter of course, so they carry no cooldown — variety for them comes
     /// from the recency score, not a hard block.
     static func cooldownDays(for category: Category, ctx: RecoContext) -> Int {
+        if ctx.allowRepeatedItems { return 0 }
         switch category {
         case .top, .bottom:
             return 2

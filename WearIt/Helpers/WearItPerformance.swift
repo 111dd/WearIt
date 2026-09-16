@@ -17,7 +17,17 @@ enum WearItPerformance {
         static let images = "Images"
         static let widget = "Widget"
         static let bootstrap = "Bootstrap"
+        static let planner = "Planner"
     }
+
+    static let bootstrapSignposter = OSSignposter(
+        subsystem: subsystem,
+        category: SignpostCategory.bootstrap
+    )
+    static let plannerSignposter = OSSignposter(
+        subsystem: subsystem,
+        category: SignpostCategory.planner
+    )
 }
 
 extension UIImage {

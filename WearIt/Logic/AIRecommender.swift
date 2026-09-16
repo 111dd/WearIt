@@ -113,6 +113,7 @@ struct RecoContext {
     /// Optional morning→evening temps for smarter layering decisions.
     let diurnal: DiurnalTemps?
     let thermalSamples: [ThermalWeatherSample]
+    let allowRepeatedItems: Bool
 
     init(
         desiredFormality: Int,
@@ -127,7 +128,8 @@ struct RecoContext {
         combination: CombinationAffinity = .empty,
         occasionKind: CalendarOccasionKind = .none,
         diurnal: DiurnalTemps? = nil,
-        thermalSamples: [ThermalWeatherSample] = []
+        thermalSamples: [ThermalWeatherSample] = [],
+        allowRepeatedItems: Bool = false
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -142,6 +144,7 @@ struct RecoContext {
         self.occasionKind = occasionKind
         self.diurnal = diurnal
         self.thermalSamples = thermalSamples
+        self.allowRepeatedItems = allowRepeatedItems
     }
     
     // Temperature bucket helpers

@@ -815,3 +815,6 @@
 "thermal_breathability_4" = "Airy";
 "thermal_breathability_5" = "Very airy";
 "edit_details_and_options" = "Item details and more options";
+"calendar_jump_date" = "Choose date";
+"calendar_go_to_date" = "Go to date";
+"planner_allow_repeats" = "Allow repeats for all item types";

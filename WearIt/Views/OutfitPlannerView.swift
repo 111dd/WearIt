@@ -8,6 +8,7 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import UIKit
+import os
 
 struct OutfitPlannerView: View {
     @Environment(\.modelContext) private var context
@@ -29,6 +30,7 @@ struct OutfitPlannerView: View {
     @State private var activeSheet: PlannerSheet?
     /// Single hover target — cheaper than a Set that churns on every drag frame.
     @State private var targetedSlot: SlotTarget?
+    @AppStorage("planner.allowRepeatedItems") private var allowRepeatedItems = true
     @State private var garmentActionTarget: SlotTarget?
     @State private var lastForecastSignature: String = ""
     @State private var expandedDayDetails: Set<Int> = []
@@ -184,6 +186,11 @@ struct OutfitPlannerView: View {
         .onChange(of: dismissedOutfits.count) { _, _ in
             refreshAffinityCaches()
         }
+        .onChange(of: allowRepeatedItems) { _, _ in
+            updateAvailableGarments()
+            advisorMemo.changeSuggestions.removeAll()
+            advisorMemo.availability.removeAll()
+        }
         .alert(String(localized: "error_title"), isPresented: $boardState.showUnavailableAlert) {
             Button(String(localized: "action_confirm"), role: .cancel) { }
         } message: {
@@ -295,6 +302,9 @@ struct OutfitPlannerView: View {
     }
 
     private func handleAppear() {
+        let signposter = WearItPerformance.plannerSignposter
+        let interval = signposter.beginInterval("planner-restore", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("planner-restore", interval) }
         boardState.initializeDays()
         hydrateFromPlans()
         updateAvailableGarments()
@@ -564,8 +574,8 @@ struct OutfitPlannerView: View {
             .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         }
         .equatable()
-        // Restarts (and cancels) whenever the outfit/forecast/occasion changes;
-        // the actor serializes generations so day 0 is always produced first.
+        // Generate explanations only when their details are requested, not for
+        // every hidden/collapsed card during launch. Reuse cached results.
         .task(id: lookExplanationTaskID(for: dayIndex)) {
             await generateLookExplanationIfNeeded(dayIndex: dayIndex)
         }
@@ -768,6 +778,8 @@ struct OutfitPlannerView: View {
 
     private func dayActionMenu(for dayIndex: Int) -> some View {
         Menu {
+            Toggle("planner_allow_repeats", isOn: $allowRepeatedItems)
+            Divider()
             Button {
                 refreshDay(dayIndex)
             } label: {
@@ -1084,15 +1096,23 @@ struct OutfitPlannerView: View {
     /// `.task(id:)` identity — changes whenever anything that affects the
     /// explanation changes, restarting (and cancelling) the generation task.
     private func lookExplanationTaskID(for dayIndex: Int) -> String {
-        lookExplanationRequest(for: dayIndex)?.cacheKey ?? "none-\(dayIndex)"
+        guard isDetailsExpanded(dayIndex), scenePhase == .active else {
+            return "inactive-\(dayIndex)"
+        }
+        return lookExplanationRequest(for: dayIndex)?.cacheKey ?? "none-\(dayIndex)"
     }
 
     private func generateLookExplanationIfNeeded(dayIndex: Int) async {
         guard #available(iOS 26.0, *) else { return }
+        guard isDetailsExpanded(dayIndex), scenePhase == .active, !Task.isCancelled else { return }
         guard let request = lookExplanationRequest(for: dayIndex) else { return }
         guard lookExplanations[request.cacheKey] == nil else { return }
         guard LookExplanationAvailability.isSupported else { return }
-        await LookExplanationService.shared.prewarmIfNeeded()
+        let signposter = WearItPerformance.plannerSignposter
+        let interval = signposter.beginInterval("requested-explanation", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("requested-explanation", interval) }
+        // The generation itself loads its session; avoid prewarming a separate
+        // disposable session immediately before the actual request.
         guard let result = await LookExplanationService.shared.explanation(for: request) else { return }
         guard !Task.isCancelled else { return }
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.35)) {
@@ -1453,7 +1473,11 @@ struct OutfitPlannerView: View {
                 // recordWorn updates the existing planner event in place; it does not delete history.
                 confirmWorn(dayIndex: dayIndex)
             } else {
-                // Evening: persist slot status only. No day-level WearEvent / wasWornConfirmed.
+                WearHistoryService.recordWorn(
+                    date: boardState.days[dayIndex].date,
+                    garmentIDs: boardState.days[dayIndex].eveningAssignedGarmentIDs,
+                    source: .plannerEvening, context: context
+                )
                 setLookWearStatus(dayIndex: dayIndex, lookTime: lookTime, status: .worn)
             }
         }
@@ -2755,7 +2779,7 @@ struct OutfitPlannerView: View {
     /// True when another board day already uses this garment *and* the category
     /// is one we keep unique across days. Shoes/outer/accessories may repeat.
     private func isGarmentUsedElsewhere(_ id: UUID, excludingDay dayIndex: Int) -> Bool {
-        if let garment = garmentsByID[id], Self.flexibleReuseCategories.contains(garment.category) {
+        if let garment = garmentsByID[id], flexibleReuseCategories.contains(garment.category) {
             return false
         }
         for (index, day) in boardState.days.enumerated() where index != dayIndex {
@@ -2822,7 +2846,9 @@ struct OutfitPlannerView: View {
 
     /// Categories that may repeat on consecutive board days. Cross-day use is a
     /// soft score penalty for these instead of a hard exclusion.
-    private static let flexibleReuseCategories: Set<Category> = [.shoes, .outer, .accessory]
+    private var flexibleReuseCategories: Set<Category> {
+        allowRepeatedItems ? Set(Category.allCases) : [.shoes, .outer, .accessory]
+    }
 
     /// Garments assigned on *other* board days (day + evening), split into hard
     /// exclusions (tops/bottoms) and soft penalties (shoes/outer/accessories).
@@ -2839,7 +2865,7 @@ struct OutfitPlannerView: View {
         var hard = Set<UUID>()
         var soft = Set<UUID>()
         for id in ids {
-            if let garment = garmentsByID[id], Self.flexibleReuseCategories.contains(garment.category) {
+            if let garment = garmentsByID[id], flexibleReuseCategories.contains(garment.category) {
                 soft.insert(id)
             } else {
                 hard.insert(id)
@@ -2853,15 +2879,20 @@ struct OutfitPlannerView: View {
     private func eveningExclusions(for dayIndex: Int) -> (hard: Set<UUID>, soft: Set<UUID>) {
         let crossDay = crossDayExclusions(excludingDay: dayIndex)
         var hard = crossDay.hard
+        var soft = crossDay.soft
         let day = boardState.days[dayIndex]
-        hard.formUnion(day.assignedGarmentIDs)
+        if allowRepeatedItems {
+            soft.formUnion(day.assignedGarmentIDs)
+        } else {
+            hard.formUnion(day.assignedGarmentIDs)
+        }
         hard.formUnion(day.eveningAssignedGarmentIDs)
         for slot in day.eveningLinkedSlots {
             if let dayID = day.garmentID(for: slot) {
                 hard.remove(dayID)
             }
         }
-        return (hard, crossDay.soft.subtracting(hard))
+        return (hard, soft.subtracting(hard))
     }
 
     private func rotationKey(_ dayIndex: Int, _ lookTime: LookTime, slot: OutfitSlot? = nil) -> String {
@@ -3024,7 +3055,8 @@ struct OutfitPlannerView: View {
                         apparentTemperatureC: $0.apparentTemperatureC.map { $0 + calendar.temperatureBiasC },
                         rainProbability: $0.rainProbability
                     )
-                } ?? []) : []
+                } ?? []) : [],
+            allowRepeatedItems: allowRepeatedItems
         )
     }
 
@@ -3099,7 +3131,8 @@ struct OutfitPlannerView: View {
                 toDay: dayIndex,
                 toSlot: slot,
                 garments: allGarments,
-                allowUnavailable: allowUnavailable
+                allowUnavailable: allowUnavailable,
+                allowRepeats: allowRepeatedItems || flexibleReuseCategories.contains(garment.category)
             )
         }
         if success {
@@ -3338,6 +3371,9 @@ struct OutfitPlannerView: View {
     }
 
     private func generateAllOutfits(fillMissingOnly: Bool) async {
+        let signposter = WearItPerformance.plannerSignposter
+        let interval = signposter.beginInterval("planner-generation", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("planner-generation", interval) }
         refreshCalendarContextsAndApplyEvening()
         for i in 0..<boardState.days.count {
             guard !Task.isCancelled else { return }
@@ -3355,6 +3391,14 @@ struct OutfitPlannerView: View {
     private func generateDayOutfit(dayIndex i: Int, fillMissingOnly: Bool) {
         guard i < boardState.days.count else { return }
         let state = boardState.days[i]
+        let signposter = WearItPerformance.plannerSignposter
+        let missingSlots = Set(OutfitSlot.allCases.filter {
+            !state.isLocked($0) && state.garmentID(for: $0) == nil
+        })
+        if fillMissingOnly, missingSlots.isEmpty {
+            signposter.emitEvent("day-generation-skipped")
+            return
+        }
         let ctx = recoContext(for: i)
         let referenceDate = state.date
         let crossDay = crossDayExclusions(excludingDay: i)
@@ -3369,6 +3413,29 @@ struct OutfitPlannerView: View {
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
             .filter { !lockedCats.contains($0.category) }
 
+        // Optional slots (e.g. an outer layer in summer) must not trigger a
+        // complete recommendation pass that cannot change any assignment.
+        // Keep the full pool for partial looks so combination scoring stays intact.
+        if fillMissingOnly {
+            let canFillMissingSlot = pool.contains { garment in
+                guard missingSlots.contains(OutfitSlot.from(category: garment.category)),
+                      !excludedMerged.contains(garment.id),
+                      !garment.isBlocked,
+                      !garment.isCurrentlyUnavailable else { return false }
+                if garment.category == .outer {
+                    return TemperatureComfort.outerGarmentAllowed(garment, policy: ctx.outerLayerPolicy)
+                }
+                return true
+            }
+            guard canFillMissingSlot else {
+                boardState.days[i].insufficientItemsWarning = state.assignedGarmentIDs.isEmpty && i > 0
+                signposter.emitEvent("day-generation-skipped")
+                return
+            }
+        }
+
+        let interval = signposter.beginInterval("day-recommendation", id: signposter.makeSignpostID())
+        defer { signposter.endInterval("day-recommendation", interval) }
         let outfit = AIRecommender.shared.suggestOutfit(
             from: pool,
             ctx: ctx,
@@ -3552,8 +3619,7 @@ struct OutfitPlannerView: View {
             let lockedSlots = plan.lockedSlots
             for slot in OutfitSlot.allCases {
                 if let id = assignments[slot],
-                   let garment = allGarments.first(where: { $0.id == id }),
-                   !usedIDs.contains(garment.id) {
+                   let garment = allGarments.first(where: { $0.id == id }) {
                     boardState.days[dayIndex].setGarment(garment.id, for: slot, locked: lockedSlots.contains(slot))
                     usedIDs.insert(garment.id)
                 }
@@ -3563,7 +3629,7 @@ struct OutfitPlannerView: View {
             for slot in OutfitSlot.allCases {
                 if let id = remainingIDs.first(where: { id in
                     guard let garment = allGarments.first(where: { $0.id == id }) else { return false }
-                    return OutfitSlot.from(category: garment.category) == slot && !usedIDs.contains(id)
+                    return OutfitSlot.from(category: garment.category) == slot
                 }) {
                     boardState.days[dayIndex].setGarment(id, for: slot)
                     usedIDs.insert(id)
@@ -3586,8 +3652,7 @@ struct OutfitPlannerView: View {
             let eveningLockedSlots = plan.eveningLockedSlots
             for slot in OutfitSlot.allCases {
                 if let id = eveningAssignments[slot],
-                   let garment = allGarments.first(where: { $0.id == id }),
-                   !usedIDs.contains(garment.id) {
+                   let garment = allGarments.first(where: { $0.id == id }) {
                     boardState.days[dayIndex].setEveningGarment(
                         garment.id,
                         for: slot,
