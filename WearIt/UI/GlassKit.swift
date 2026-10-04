@@ -342,6 +342,18 @@ public extension View {
         modifier(AdaptiveGlassCircle(interactive: interactive, tint: tint))
     }
 
+    /// Tags a glass shape so sibling shapes inside the same `LiquidGlassGroup`
+    /// morph into each other when one is swapped for another (iOS 26+).
+    /// Apply after the glass modifier. No-op on earlier systems.
+    @ViewBuilder
+    func liquidGlassID<ID: Hashable & Sendable>(_ id: ID, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffectID(id, in: namespace)
+        } else {
+            self
+        }
+    }
+
     /// הופך כל View לכרטיס זכוכית מוכן (iOS 18+)
     func glassCard(corner: CGFloat = 24, intensity: GlassCard.MaterialIntensity = .ultraThin) -> some View {
         modifier(GlassCard(corner: corner, intensity: intensity))
