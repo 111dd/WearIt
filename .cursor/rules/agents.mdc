@@ -1,0 +1,6 @@
+---
+description: Shared WearIt project notes for all AI tools
+alwaysApply: true
+---
+
+Read `AGENTS.md` at the repo root before working. It holds the app map, conventions and the progress log shared with other AI tools. When you finish a change, add a line to its Progress log and update Next steps.
