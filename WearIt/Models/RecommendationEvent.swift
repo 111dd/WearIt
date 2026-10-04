@@ -10,6 +10,8 @@ enum RecommendationFeedbackKind: String, Codable, Sendable {
     case tooFormal
     case tooCasual
     case worn
+    /// The user swapped this suggested piece for another. A weak, implicit "not this".
+    case replaced
 }
 
 @Model
@@ -71,7 +73,8 @@ enum RecommendationEventStore {
         shownGarmentIDs: [UUID],
         dayPlanID: UUID?,
         context: RecoContext,
-        modelContext: ModelContext
+        modelContext: ModelContext,
+        save: Bool = true
     ) -> Bool {
         let selectedIDs = Array(Set(selectedGarmentIDs)).sorted { $0.uuidString < $1.uuidString }
         let shownIDs = Array(Set(shownGarmentIDs)).sorted { $0.uuidString < $1.uuidString }
@@ -102,7 +105,9 @@ enum RecommendationEventStore {
                 context: context
             )
         )
-        try? modelContext.save()
+        if save {
+            try? modelContext.save()
+        }
         return true
     }
 

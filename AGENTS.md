@@ -92,6 +92,10 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-04 · Claude Code · Wardrobe gaps: `Logic/WardrobeGapAnalyzer` (rain/cold/heat/formal/
+  workhorse/missing-core rules with evidence + taste-shaped suggestion), shown in Stats via
+  `Views/Components/WardrobeGapsSection` (search link, 60-day dismiss). Planner "suggest better"
+  swaps now log a `.replaced` RecommendationEvent (implicit signal, saved with the debounced persist).
 - 2026-10-04 · Claude Code · Created this AGENTS.md (app map, conventions, backlog).
 - 2026-09-15 · Cursor · Garment enrichment (barcode/QR/URL/label), thermal comfort,
   planner variety + confirm/not-worn/replace, AI look explanations, Settings split from
@@ -106,8 +110,20 @@ Newest first. One line per meaningful change: date, tool, what.
 
 Ideas, not commitments. The owner picks what to do next.
 
-- Shopping / deals suggestions from `TasteProfile` (the model was built for it) and
-  wardrobe gaps ("you have no rain shoes").
+Agreed direction (2026-10-04): understand the user better with low-effort, on-device signals,
+and recommend from that. Order: wardrobe gaps → smarter stats → trip packing list.
+
+- User understanding: feed implicit signals (`.replaced`, not-worn looks, dismissed outfits,
+  feedback kinds) into `TasteAffinityBuilder` as soft negatives; today taste uses only
+  love/wear/favorite on garments.
+- Smarter micro-questions: extend `MicroQuestionCard` beyond brand, max one per day, picking
+  the question with the most information (e.g. "you often say too cold, do you run cold?",
+  "never worn, still love it?").
+- On-device AI (FoundationModels, iOS 26, already used by `LookExplanationService`): weekly
+  cached "style portrait" and natural-language gap explanations. No server, no per-tap calls.
+- Smarter stats: optional purchase price → cost per wear; owned vs actually worn per
+  category/style; items to donate; too-cold/too-warm trends; most swapped-out items.
+- Trip packing list: dates + destination forecast → planned looks.
 - Packing list for a trip: dates + destination forecast → planned looks.
 - Split `OutfitPlannerView.swift` into smaller files (variety, persistence, drag & drop).
 - Replace or remove the `.mlmodel` placeholders in `AI/`.

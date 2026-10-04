@@ -815,3 +815,33 @@
 "thermal_breathability_4" = "Airy";
 "thermal_breathability_5" = "Very airy";
 "edit_details_and_options" = "Item details and more options";
+
+/* Wardrobe gaps (Stats) */
+"stats_gaps_title" = "Wardrobe gaps";
+"stats_gaps_subtitle" = "Based on your forecast, calendar and what you actually wear.";
+"gap_title_missing_core_format" = "Missing: %@";
+"gap_title_rain_shoes" = "Shoes for rain";
+"gap_title_rain_outer" = "A rain jacket";
+"gap_title_warm_outer" = "A warm coat";
+"gap_title_hot_tops" = "Light tops for the heat";
+"gap_title_formal_top" = "A formal top";
+"gap_title_formal_bottom" = "Formal trousers";
+"gap_title_formal_shoes" = "Formal shoes";
+"gap_title_backup_format" = "A backup for %@";
+"gap_reason_no_items" = "Outfits can't be completed without them.";
+"gap_reason_upcoming_rain_format" = "Rainy days in the forecast: %d. Nothing you own is made for rain.";
+"gap_reason_rainy_climate_format" = "About %d%% of the days you planned were rainy.";
+"gap_reason_upcoming_cold_format" = "Days at 10° or colder coming up: %d.";
+"gap_reason_cold_climate_format" = "About %d%% of the days you planned were cold.";
+"gap_reason_upcoming_heat_format" = "Days at 28° or hotter coming up: %d.";
+"gap_reason_hot_climate_format" = "About %d%% of the days you planned were hot.";
+"gap_reason_upcoming_formal_format" = "Formal events in your calendar this week: %d.";
+"gap_reason_formal_habit_format" = "About %d%% of your plans call for a formal look.";
+"gap_reason_heavy_rotation_format" = "Worn on %d%% of your days, with nothing to swap in.";
+"gap_suggestion_prefix" = "Look for:";
+"gap_action_find" = "Find";
+"gap_action_dismiss" = "Not needed";
+"gap_tag_waterproof" = "waterproof";
+"gap_tag_insulated" = "warm";
+"gap_tag_breathable" = "breathable";
+"gap_tag_formal" = "formal";

@@ -3298,6 +3298,14 @@ struct OutfitPlannerView: View {
             } else {
                 boardState.days[dayIndex].setGarment(replacement.id, for: slot)
             }
+            if !replacingUnavailable, let currentID {
+                recordReplacement(
+                    dayIndex: dayIndex,
+                    replacedID: currentID,
+                    replacementID: replacement.id,
+                    lookTime: lookTime
+                )
+            }
             persistDayPlan(dayIndex)
             DS.haptic(0.3)
             #if DEBUG
@@ -3316,6 +3324,23 @@ struct OutfitPlannerView: View {
             boardState.showUnavailableAlert = true
             DS.haptic(0.8)
         }
+    }
+
+    /// Swapping a suggested piece away is a weak "not this" signal for user
+    /// understanding (gaps, stats). Logged only, no model update, and saved with
+    /// the next debounced planner persist instead of its own CloudKit push.
+    private func recordReplacement(dayIndex: Int, replacedID: UUID, replacementID: UUID, lookTime: LookTime) {
+        guard dayIndex < boardState.days.count else { return }
+        let plan = DayPlanService.shared.planFor(date: boardState.days[dayIndex].date, context: context)
+        RecommendationEventStore.record(
+            kind: .replaced,
+            selectedGarmentIDs: [replacedID],
+            shownGarmentIDs: [replacementID],
+            dayPlanID: plan.id,
+            context: recoContext(for: dayIndex, isEvening: lookTime == .evening),
+            modelContext: context,
+            save: false
+        )
     }
 
     private func findAssignment(for garmentID: UUID) -> (dayIndex: Int, slot: OutfitSlot)? {
