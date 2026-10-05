@@ -121,6 +121,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Day card header: forecast (and rain %) plus the dress-relevant
+  calendar event are plain subtitle lines under the day title instead of a glass chip; ⋯ is a plain
+  glyph; the card glass gets a light `systemBackground` tint so text stays readable on any backdrop.
 - 2026-10-05 · Claude Code · Look card gestures fixed: swipe-to-replace now uses a UIKit pan
   (`UI/HorizontalSwipeGesture`) that fails on vertical movement; tile double-tap removed so a tap
   opens quick swaps instantly; "Love" moved to the day ⋯ menu (plus the reaction strip / status mark).

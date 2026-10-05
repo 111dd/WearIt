@@ -2,6 +2,12 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Text on glass was hard to read
+
+- **Did:** Removed glass-on-glass inside the planner day card (forecast chip, ⋯ circle, gesture hint). Weather and the calendar event are plain subtitle lines. The card glass gets `tint: Color(.systemBackground).opacity(0.35)`.
+- **Why:** Small glass shapes on top of the card's glass, with `.secondary`/`.tertiary` text, washed out on the light backdrop presets. Liquid Glass only flips small standalone controls between light and dark, not content inside a big card.
+- **Watch:** Inside cards prefer plain text with `.primary`/`.secondary`; keep glass for the card itself and for standalone controls. Avoid `.tertiary` on glass.
+
 ## 2026-10-05 — Swipe in a ScrollView and double-tap delay
 
 - **Did:** Swipe-to-replace is a `UIGestureRecognizerRepresentable` pan (`HorizontalSwipeGesture`) that fails as soon as movement is more vertical than horizontal. Removed the tile double-tap.

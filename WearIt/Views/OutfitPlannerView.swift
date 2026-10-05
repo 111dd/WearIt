@@ -533,6 +533,7 @@ struct OutfitPlannerView: View {
             aiExplanation: aiExplanationText(for: dayIndex),
             reasons: reasons,
             showsGestureHint: showsGestureHint(for: dayIndex),
+            eventLine: dayEventLine(for: dayIndex)?.text,
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
             }
@@ -575,7 +576,12 @@ struct OutfitPlannerView: View {
 
             }
             .padding(DS.Spacing.md)
-            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+            .liquidGlassSurface(
+                cornerRadius: DS.Radius.card,
+                tint: Color(.systemBackground).opacity(0.35),
+                fallbackMaterial: .regularMaterial,
+                castsShadow: true
+            )
         }
         .equatable()
         // Generate explanations only when their details are requested, not for
@@ -757,20 +763,39 @@ struct OutfitPlannerView: View {
     
     // MARK: - Day Top Bar
     
+    /// Day title with the forecast and any dress-relevant calendar event as
+    /// plain subtitle lines (no glass, so they stay readable on any backdrop).
     private func dayTopBar(for state: PlannerDayState, dayIndex: Int) -> some View {
         let dayLabel = dayName(for: state.id)
         let dateText = formattedDate(state.date)
         let header = "\(dayLabel) · \(dateText)"
+        let event = dayEventLine(for: dayIndex)
 
-        return HStack(alignment: .center, spacing: DS.Spacing.sm) {
-            Text(header)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(dayIndex == selectedDayIndex ? Color.accentColor : .primary)
-                .lineLimit(1)
+        return HStack(alignment: .top, spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(header)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(dayIndex == selectedDayIndex ? Color.accentColor : .primary)
+                    .lineLimit(1)
 
-            Spacer()
+                if let forecast = state.forecast {
+                    dayWeatherLine(forecast)
+                }
 
-            forecastChip(for: dayIndex)
+                if let event {
+                    Label {
+                        Text(event.text)
+                            .lineLimit(1)
+                    } icon: {
+                        Image(systemName: event.icon)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .labelStyle(DayLineLabelStyle())
+                }
+            }
+
+            Spacer(minLength: DS.Spacing.xs)
 
             dayActionMenu(for: dayIndex)
         }
@@ -841,10 +866,10 @@ struct OutfitPlannerView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .liquidGlassCircle(interactive: true)
+                .font(.body.weight(.bold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 32)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "planner_day_options"))
     }
@@ -986,26 +1011,33 @@ struct OutfitPlannerView: View {
         }
     }
 
-    @ViewBuilder
-    private func forecastChip(for dayIndex: Int) -> some View {
-        if dayIndex < boardState.days.count, let forecast = boardState.days[dayIndex].forecast {
-            let tempRange = "\(Int(forecast.lowTempC))°–\(Int(forecast.highTempC))°"
-            let summary = "\(forecast.condition.description) · \(tempRange)"
-            HStack(spacing: DS.Spacing.xxs) {
-                Image(systemName: forecast.condition.icon)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(weatherIconColor(for: forecast.condition))
-                Text(summary)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+    private func dayWeatherLine(_ forecast: DayForecast) -> some View {
+        let low = Int(forecast.lowTempC.rounded())
+        let high = Int(forecast.highTempC.rounded())
+        let rain = Int((forecast.rainProbability * 100).rounded())
+        return HStack(spacing: DS.Spacing.xxs) {
+            Image(systemName: forecast.condition.icon)
+                .foregroundStyle(weatherIconColor(for: forecast.condition))
+            Text("\(forecast.condition.description) · \(low)°–\(high)°")
+                .lineLimit(1)
+            if rain >= 30 {
+                Image(systemName: "umbrella.fill")
+                    .foregroundStyle(.blue)
+                    .padding(.leading, DS.Spacing.xxs)
+                Text("\(rain)%")
             }
-            .padding(.horizontal, DS.Spacing.xs)
-            .padding(.vertical, 4)
-            .liquidGlassPill()
-        } else {
-            EmptyView()
         }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The calendar event (or Jewish holiday) that changes what to wear today, if any.
+    private func dayEventLine(for dayIndex: Int) -> (text: String, icon: String)? {
+        let context = calendarContext(for: dayIndex)
+        guard let text = context.primaryReason, !text.isEmpty else { return nil }
+        let icon = context.hints.first(where: { $0.text == text })?.iconName ?? "calendar"
+        return (text, icon)
     }
 
     /// One quiet, tappable line under the look: its strongest reason (falling
@@ -1589,7 +1621,7 @@ struct OutfitPlannerView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -1597,7 +1629,7 @@ struct OutfitPlannerView: View {
             .accessibilityLabel(Text(String(localized: "micro_question_skip")))
         }
         .padding(DS.Spacing.sm)
-        .liquidGlassSurface(cornerRadius: DS.Radius.md)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
     }
 
     private func toggleQuickSwap(_ target: SlotTarget) {
@@ -4817,6 +4849,15 @@ struct OutfitPlannerView: View {
     }
 }
 
+private struct DayLineLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: DS.Spacing.xxs) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
 private struct DayCardSignature: Equatable {
     let dayIndex: Int
     let state: PlannerDayState
@@ -4831,6 +4872,7 @@ private struct DayCardSignature: Equatable {
     let aiExplanation: String?
     let reasons: [LookReasonBuilder.Reason]
     let showsGestureHint: Bool
+    let eventLine: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
 }

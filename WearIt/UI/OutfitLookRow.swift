@@ -133,7 +133,7 @@ struct OutfitLookRow<Content: View>: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .frame(width: 40, height: 40)
                         .liquidGlassCircle(interactive: true)
                         .contentShape(Circle())
@@ -261,7 +261,7 @@ struct OutfitLookRow<Content: View>: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .frame(width: 28, height: 44)
                     .contentShape(Rectangle())
             }
