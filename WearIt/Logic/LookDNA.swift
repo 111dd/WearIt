@@ -129,8 +129,8 @@ struct LookDNA: Equatable {
 
     /// Fixed-order features for the look-level preference model.
     var vector: [Double] {
-        var v: [Double] = Palette.allCases.map { $0 == scheme ? 1 : 0 }
-        v += Silhouette.allCases.map { $0 == silhouette ? 1 : 0 }
+        var v: [Double] = Palette.allCases.map { $0 == scheme ? 1.0 : 0.0 }
+        v += Silhouette.allCases.map { $0 == silhouette ? 1.0 : 0.0 }
         v.append(contrast)
         v.append(colorfulness)
         v.append(Double(min(patternLoad, 2)) / 2)

@@ -121,6 +121,14 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Smarter recommendations (plans in the project's `plans/` folder):
+  pairwise learning from swaps/picks/calendar corrections, locks as soft positives, choice-based
+  taste, weekday/weekend formality features (RecoState v5); Look DNA (`Logic/LookDNA`,
+  `ColorHarmony`) and whole-look ranking (`AIRecommender.rankLooks`, used by `suggestOutfit`);
+  Style Swipe (`Views/StyleSwipe`, planner entry card + profile row, `StyleInsights`); "More like
+  this" / "Something different" in the day ⋯ menu; "Your formulas" on the profile; on-device
+  visual similarity (`Services/GarmentVisualSimilarity`, Vision feature prints, local cache).
+
 - 2026-10-05 · Claude Code · Day card header: forecast (and rain %) plus the dress-relevant
   calendar event are plain subtitle lines under the day title instead of a glass chip; ⋯ is a plain
   glyph; the card glass gets a light `systemBackground` tint so text stays readable on any backdrop.

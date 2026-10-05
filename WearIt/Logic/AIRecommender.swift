@@ -664,7 +664,7 @@ final class AIRecommender {
             excludedIDs: excludedIDs,
             penalizedIDs: penalizedIDs,
             pairedWith: pairedWith
-        ).map(\.garment)
+        ).map { $0.garment }
     }
 
     /// Same as `suggest`, keeping each garment's score for look-level ranking.
@@ -864,7 +864,7 @@ final class AIRecommender {
                 modelContext: modelContext,
                 excludedIDs: excludeSet,
                 penalizedIDs: penalizedIDs,
-                pairedWith: base.map(\.garment)
+                pairedWith: base.map { $0.garment }
             )
             if !candidates.isEmpty {
                 slotCandidates.append(candidates)
@@ -884,16 +884,16 @@ final class AIRecommender {
             combos = next
         }
 
-        var looks: [ScoredLook] = combos.compactMap { combo in
+        var looks: [ScoredLook] = combos.compactMap { (combo) -> ScoredLook? in
             guard !combo.isEmpty else { return nil }
-            let pieces = combo.map(\.garment)
+            let pieces = combo.map { $0.garment }
             if let target, !target.avoidSharingWith.isEmpty {
                 let shared = pieces.filter { target.avoidSharingWith.contains($0.id) }.count
                 if shared > target.maxShared { return nil }
             }
             let result = lookScore(
                 garments: pieces,
-                itemScores: combo.map(\.score),
+                itemScores: combo.map { $0.score },
                 ctx: ctx,
                 state: state,
                 target: target
@@ -918,12 +918,12 @@ final class AIRecommender {
         guard includeOptionalLayers else { return picked }
         if picked.isEmpty {
             // No core pieces available: still offer outer / accessory around the lock.
-            let pieces = base.map(\.garment)
+            let pieces = base.map { $0.garment }
             picked = [ScoredLook(garments: pieces, score: 0, dna: LookDNA(garments: pieces))]
         }
 
         // Outer / accessory: add the candidate that makes the whole look score best.
-        return picked.map { look in
+        return picked.map { (look) -> ScoredLook in
             var pieces = look.garments
             var current = look
             for category in [Category.outer, .accessory] where category != lockedCategory {

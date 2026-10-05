@@ -96,8 +96,8 @@ enum CombinationAffinityBuilder {
             let ids = Array(Set(event.selectedGarmentIDs))
             guard ids.count >= 2 else { continue }
             switch event.kind {
-            case .swipeLiked: addPairs(ids: ids, delta: 0.6, into: &raw)
-            case .swipeDisliked: addPairs(ids: ids, delta: -0.4, into: &raw)
+            case .swipeLiked?: addPairs(ids: ids, delta: 0.6, into: &raw)
+            case .swipeDisliked?: addPairs(ids: ids, delta: -0.4, into: &raw)
             default: continue
             }
         }

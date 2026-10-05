@@ -102,7 +102,7 @@ enum StyleSwipeDeckBuilder {
                 let l = uncertainty(lhs.element), r = uncertainty(rhs.element)
                 return l != r ? l > r : lhs.offset > rhs.offset
             }
-            .map(\.element)
+            .map { $0.element }
 
         var deck: [Card] = []
         var usedKeys = recentlySwiped
