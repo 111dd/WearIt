@@ -22,6 +22,7 @@ struct ProfileView: View {
     @Query private var dailyLooks: [DailyLook]
     @Query private var tasteProfiles: [TasteProfile]
     @Query private var recoStates: [RecoState]
+    @Query private var wearEvents: [WearEvent]
 
     @State private var displayName: String = ""
     @State private var bio: String = ""
@@ -48,6 +49,12 @@ struct ProfileView: View {
         )
         looks.fetchLimit = 30
         _dailyLooks = Query(looks)
+
+        var wears = FetchDescriptor<WearEvent>(
+            sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)]
+        )
+        wears.fetchLimit = 300
+        _wearEvents = Query(wears)
     }
 
     var body: some View {
@@ -56,6 +63,7 @@ struct ProfileView: View {
                 heroCard
                 statsRow
                 styleIdentitySection
+                formulasSection
                 styleSwipeRow
                 myLooksSection
             }
@@ -312,6 +320,35 @@ struct ProfileView: View {
     private var styleInsights: [StyleInsights.Insight] {
         guard let state = activeRecoState else { return [] }
         return StyleInsights.insights(from: state)
+    }
+
+    // MARK: - Formulas
+
+    @ViewBuilder
+    private var formulasSection: some View {
+        let formulas = LookFormulas.compute(
+            wearEvents: wearEvents,
+            garmentsByID: Dictionary(garments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        )
+        if !formulas.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                DSSectionHeader(String(localized: "profile_formulas_title"), icon: "square.stack.3d.up")
+                ForEach(formulas) { formula in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formula.parts.joined(separator: " + "))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(String(format: NSLocalizedString("profile_formula_worn_format", comment: ""), formula.timesWorn))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(DS.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+        }
     }
 
     // MARK: - Style Swipe

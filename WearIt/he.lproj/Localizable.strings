@@ -422,6 +422,8 @@
 // MARK: - Planner Board
 "planner_board_title" = "מתכנן 3 ימים";
 "planner_refresh_day" = "רענן";
+"planner_more_like_this" = "עוד כמו זה";
+"planner_something_different" = "משהו אחר";
 "planner_clear_day" = "נקה";
 "planner_drop_here" = "שחרר כאן";
 "planner_empty_slot" = "ריק";
@@ -932,3 +934,5 @@
 "style_insight_muted" = "צבעים שקטים ומעומעמים";
 "style_insight_patterns" = "דוגמאות והדפסים";
 "style_insight_plain" = "פריטים חלקים יותר מדוגמאות";
+"profile_formulas_title" = "הנוסחאות שלך";
+"profile_formula_worn_format" = "נלבש %d פעמים";

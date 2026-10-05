@@ -493,6 +493,8 @@
 // MARK: - Planner Board
 "planner_board_title" = "3-Day Planner";
 "planner_refresh_day" = "Refresh";
+"planner_more_like_this" = "More like this";
+"planner_something_different" = "Something different";
 "planner_clear_day" = "Clear";
 "planner_drop_here" = "Drop here";
 "planner_empty_slot" = "Empty";
@@ -913,3 +915,5 @@
 "style_insight_muted" = "Muted, quiet colors";
 "style_insight_patterns" = "Patterns and prints";
 "style_insight_plain" = "Plain pieces over patterns";
+"profile_formulas_title" = "Your formulas";
+"profile_formula_worn_format" = "Worn %d times";

@@ -846,6 +846,18 @@ struct OutfitPlannerView: View {
             } label: {
                 Label(String(localized: "planner_refresh_day"), systemImage: "arrow.clockwise")
             }
+            if boardState.days[dayIndex].assignedGarmentIDs.count >= 2 {
+                Button {
+                    refreshDayLook(dayIndex, variation: .similar)
+                } label: {
+                    Label(String(localized: "planner_more_like_this"), systemImage: "square.on.square")
+                }
+                Button {
+                    refreshDayLook(dayIndex, variation: .different)
+                } label: {
+                    Label(String(localized: "planner_something_different"), systemImage: "shuffle")
+                }
+            }
             // Future looks have no wear prompt on the card; planning lives here.
             if dayTiming(for: dayIndex) == .future,
                !boardState.days[dayIndex].assignedGarmentIDs.isEmpty,
@@ -2809,9 +2821,16 @@ struct OutfitPlannerView: View {
         }
     }
 
+    /// "More like this" keeps the look's fingerprint with other pieces;
+    /// "Something different" turns its most distinctive trait around.
+    private enum LookVariation {
+        case similar
+        case different
+    }
+
     /// Regenerates the day look only. No taste / affinity / recommendation feedback.
     @discardableResult
-    private func refreshDayLook(_ dayIndex: Int) -> Bool {
+    private func refreshDayLook(_ dayIndex: Int, variation: LookVariation? = nil) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
         let referenceDate = boardState.days[dayIndex].date
         let previousIDsBySlot: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
@@ -2858,13 +2877,31 @@ struct OutfitPlannerView: View {
         )
         let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs).union(rotationExcludedIDs)
         
-        let outfit = AIRecommender.shared.suggestOutfit(
-            from: pool,
-            ctx: ctx,
-            modelContext: context,
-            excludedIDs: excludedMerged,
-            penalizedIDs: crossDay.soft
-        )
+        let currentLook = previousIDsBySlot.values.compactMap { garment(for: $0) }
+        let outfit: [Garment]
+        if let variation, currentLook.count >= 2 {
+            let dna = LookDNA(garments: currentLook)
+            let target = AIRecommender.LookTarget(
+                dna: variation == .similar ? dna : dna.contrasting,
+                weight: variation == .similar ? 0.45 : 0.6
+            )
+            outfit = AIRecommender.shared.rankLooks(
+                from: pool,
+                ctx: ctx,
+                modelContext: context,
+                excludedIDs: excludedMerged,
+                penalizedIDs: crossDay.soft,
+                target: target
+            ).first?.garments ?? []
+        } else {
+            outfit = AIRecommender.shared.suggestOutfit(
+                from: pool,
+                ctx: ctx,
+                modelContext: context,
+                excludedIDs: excludedMerged,
+                penalizedIDs: crossDay.soft
+            )
+        }
         
         boardState.setOutfit(forDay: dayIndex, garments: outfit, overwriteExisting: true)
         var didChange = false
