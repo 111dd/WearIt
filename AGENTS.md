@@ -121,6 +121,11 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Style Swipe polish: opaque full-screen layer of its own (no app
+  backdrop, nothing behind takes taps), bigger "worn" flat-lay card on a light studio surface with
+  a palette/silhouette footer and color swatches, deck mixes the model's looks with random closet
+  combinations and picks for palette/silhouette variety. Deck-size constants are `nonisolated`.
+
 - 2026-10-05 · Claude Code · Smarter recommendations (plans in the project's `plans/` folder):
   pairwise learning from swaps/picks/calendar corrections, locks as soft positives, choice-based
   taste, weekday/weekend formality features (RecoState v5); Look DNA (`Logic/LookDNA`,
