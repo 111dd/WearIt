@@ -860,6 +860,12 @@
 "look_reason_favorite_format" = "Includes a favorite: %@";
 "look_reason_rotation_format" = "Brings back %@ (not worn for %d days)";
 "look_reason_proven_pair" = "A pairing you've worn before";
+"look_reason_palette_pop" = "Neutral base with one pop of color";
+"look_reason_palette_tonal" = "Tone-on-tone colors";
+"look_reason_palette_analogous" = "Neighboring colors that blend";
+"look_reason_palette_complementary" = "Complementary colors";
+"look_reason_palette_neutral" = "Calm neutral palette";
+"look_reason_balanced_proportions" = "Balanced proportions: loose with fitted";
 "look_reason_favorite_color_format" = "Built around %@, one of your favorite colors";
 "look_reason_weather_range_format" = "Planned for %d°–%d°";
 "look_occasion_shabbat" = "Shabbat";

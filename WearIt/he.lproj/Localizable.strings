@@ -879,6 +879,12 @@
 "look_reason_favorite_format" = "כולל פריט אהוב: %@";
 "look_reason_rotation_format" = "מחזיר את %@ (לא נלבש %d ימים)";
 "look_reason_proven_pair" = "שילוב שכבר לבשת בעבר";
+"look_reason_palette_pop" = "בסיס ניטרלי עם נגיעת צבע";
+"look_reason_palette_tonal" = "צבעים בטון־על־טון";
+"look_reason_palette_analogous" = "צבעים שכנים שמתמזגים יחד";
+"look_reason_palette_complementary" = "צבעים משלימים";
+"look_reason_palette_neutral" = "פלטה ניטרלית ורגועה";
+"look_reason_balanced_proportions" = "פרופורציות מאוזנות: רחב עם צמוד";
 "look_reason_favorite_color_format" = "בנוי סביב %@, אחד הצבעים האהובים שלך";
 "look_reason_weather_range_format" = "מתוכנן ל-%d°–%d°";
 "look_occasion_shabbat" = "שבת";

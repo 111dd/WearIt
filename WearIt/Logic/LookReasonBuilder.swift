@@ -24,6 +24,10 @@ enum LookReasonBuilder {
         case rotation(garmentID: UUID, days: Int)
         /// Two pieces the user has worn together before.
         case provenPair
+        /// The colors follow a classic rule (one accent, tone-on-tone, neighbors, opposites).
+        case palette(LookDNA.Palette)
+        /// Loose piece with a fitted one.
+        case balancedProportions
         /// Built around the user's most-loved color.
         case favoriteColor(ColorTag)
         /// Neutral fallback: the temperature range it was planned for.
@@ -96,6 +100,19 @@ enum LookReasonBuilder {
 
         if hasProvenPair(garments, combination: input.combination) {
             result.append(.provenPair)
+        }
+
+        let dna = LookDNA(garments: garments)
+        switch dna.scheme {
+        case .neutralPlusPop, .tonal, .analogous:
+            result.append(.palette(dna.scheme))
+        case .complementary where dna.priorScore >= 0.6:
+            result.append(.palette(dna.scheme))
+        default:
+            break
+        }
+        if dna.silhouette == .balanced {
+            result.append(.balancedProportions)
         }
 
         if let color = input.favoriteColors.first(where: { color in

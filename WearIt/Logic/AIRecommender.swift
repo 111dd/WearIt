@@ -649,6 +649,27 @@ final class AIRecommender {
         penalizedIDs: Set<UUID> = [],
         pairedWith: [Garment] = []
     ) -> [Garment] {
+        rankedSuggestions(
+            from: garments,
+            k: k,
+            ctx: ctx,
+            modelContext: modelContext,
+            excludedIDs: excludedIDs,
+            penalizedIDs: penalizedIDs,
+            pairedWith: pairedWith
+        ).map(\.garment)
+    }
+
+    /// Same as `suggest`, keeping each garment's score for look-level ranking.
+    func rankedSuggestions(
+        from garments: [Garment],
+        k: Int,
+        ctx: RecoContext,
+        modelContext: ModelContext,
+        excludedIDs: Set<UUID> = [],
+        penalizedIDs: Set<UUID> = [],
+        pairedWith: [Garment] = []
+    ) -> [(garment: Garment, score: Double)] {
         // Filter out blocked and excluded garments
         let pool = garments.filter { g in
             !g.isBlocked && !excludedIDs.contains(g.id)
@@ -658,7 +679,7 @@ final class AIRecommender {
         let state = ensureState(context: modelContext, profileID: ctx.profileID)
 
         // Score all garments
-        var scored: [(Garment, Double)] = pool.map { g in
+        var scored: [(garment: Garment, score: Double)] = pool.map { g in
             var score = combinedScore(g: g, ctx: ctx, state: state)
             
             // Apply penalty for items used recently (in previous days)
@@ -675,23 +696,23 @@ final class AIRecommender {
                 score += pairAffinity * 0.12
             }
             
-            return (g, score)
+            return (garment: g, score: score)
         }
 
         // Stable sort by score (descending) - NO shuffling for MVP stability
-        scored.sort { $0.1 > $1.1 }
+        scored.sort { $0.score > $1.score }
 
         // Add light diversity: avoid recommending 3+ of same category in top K
-        var result: [Garment] = []
+        var result: [(garment: Garment, score: Double)] = []
         var categoryCounts: [Category: Int] = [:]
         
-        for (garment, _) in scored {
-            let cat = garment.category
+        for entry in scored {
+            let cat = entry.garment.category
             let count = categoryCounts[cat, default: 0]
             
             // Allow max 2 of same category in suggestions
             if count < 2 {
-                result.append(garment)
+                result.append(entry)
                 categoryCounts[cat] = count + 1
             }
             
@@ -702,9 +723,9 @@ final class AIRecommender {
         
         // If diversity rules limited us, fill with remaining top scores
         if result.count < k {
-            for (garment, _) in scored {
-                if !result.contains(where: { $0.id == garment.id }) {
-                    result.append(garment)
+            for entry in scored {
+                if !result.contains(where: { $0.garment.id == entry.garment.id }) {
+                    result.append(entry)
                     if result.count >= k { break }
                 }
             }
@@ -712,46 +733,109 @@ final class AIRecommender {
 
         return result
     }
-    
-    /// Suggest a complete outfit with category diversity
-    func suggestOutfit(
+
+    // MARK: - Whole-look ranking (Look DNA)
+
+    /// A candidate look (core pieces, optionally with outer / accessory) and its score.
+    struct ScoredLook {
+        let garments: [Garment]
+        let score: Double
+        let dna: LookDNA
+    }
+
+    /// Optional steering toward (or away from) a look fingerprint, used for
+    /// "more like this" / "something different" and Style Swipe decks.
+    struct LookTarget {
+        let dna: LookDNA
+        /// Bonus weight for similarity to `dna`.
+        let weight: Double
+        /// Max pieces a candidate may share with `avoidSharingWith`.
+        let maxShared: Int
+        let avoidSharingWith: Set<UUID>
+
+        init(dna: LookDNA, weight: Double = 0.35, maxShared: Int = 1, avoidSharingWith: Set<UUID> = []) {
+            self.dna = dna
+            self.weight = weight
+            self.maxShared = maxShared
+            self.avoidSharingWith = avoidSharingWith
+        }
+    }
+
+    /// Learned look-level preference, 0...1 (0.5 = no opinion yet).
+    func lookPreference(_ dna: LookDNA, state: RecoState) -> Double {
+        let w = paddedLookWeights(state)
+        let x = dna.vector
+        var s = state.lookBias
+        for i in 0..<min(w.count, x.count) {
+            s += w[i] * x[i]
+        }
+        return 1.0 / (1.0 + exp(-s))
+    }
+
+    func lookPreference(_ dna: LookDNA, profileID: UUID?, modelContext: ModelContext) -> Double {
+        lookPreference(dna, state: ensureState(context: modelContext, profileID: profileID))
+    }
+
+    /// Whole-look score: piece scores + color/proportion rules + learned look taste
+    /// + how well the pieces have gone together before.
+    func lookScore(
+        garments: [Garment],
+        itemScores: [Double],
+        ctx: RecoContext,
+        state: RecoState,
+        target: LookTarget? = nil
+    ) -> (score: Double, dna: LookDNA) {
+        let dna = LookDNA(garments: garments)
+        let itemMean = itemScores.isEmpty ? 0 : itemScores.reduce(0, +) / Double(itemScores.count)
+
+        // Trust the learned look taste more as look signals accumulate.
+        let learnedShare = 0.2 + 0.6 * min(1.0, Double(state.lookInteractionCount) / 20.0)
+        let lookPart = (1 - learnedShare) * dna.priorScore + learnedShare * lookPreference(dna, state: state)
+
+        var pairTotal = 0.0
+        var pairCount = 0
+        for i in 0..<garments.count {
+            for j in (i + 1)..<garments.count {
+                pairTotal += ctx.combination.score(between: garments[i].id, and: garments[j].id)
+                pairCount += 1
+            }
+        }
+        let pairMean = pairCount > 0 ? pairTotal / Double(pairCount) : 0
+
+        var score = 0.6 * itemMean + 0.4 * lookPart + 0.12 * pairMean
+        if let target {
+            score += target.weight * dna.similarity(to: target.dna)
+        }
+        return (score, dna)
+    }
+
+    /// Ranks whole looks instead of picking piece by piece: takes the best
+    /// `perSlot` candidates for top / bottom / shoes, scores every combination
+    /// as a look, then adds outer / accessory where they improve the look.
+    func rankLooks(
         from garments: [Garment],
         ctx: RecoContext,
         modelContext: ModelContext,
         excludedIDs: Set<UUID> = [],
         penalizedIDs: Set<UUID> = [],
-        locked: Garment? = nil
-    ) -> [Garment] {
-        var result: [Garment] = []
-        var usedCategories: Set<Category> = []
+        locked: Garment? = nil,
+        perSlot: Int = 6,
+        limit: Int = 1,
+        includeOptionalLayers: Bool = true,
+        target: LookTarget? = nil
+    ) -> [ScoredLook] {
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
         var excludeSet = excludedIDs
-        
-        // If we have a locked garment, start with it
-        if let locked = locked {
-            result.append(locked)
-            usedCategories.insert(locked.category)
+        var base: [(garment: Garment, score: Double)] = []
+        if let locked {
+            let lockedScore = combinedScore(g: locked, ctx: ctx, state: state)
+            base.append((garment: locked, score: lockedScore))
             excludeSet.insert(locked.id)
         }
-        
-        // Define desired outfit composition
-        let desiredCategories: [Category] = [.top, .bottom, .shoes, .outer, .accessory]
-        
-        for category in desiredCategories {
-            // Skip if already covered by locked item
-            guard !usedCategories.contains(category) else { continue }
-            
-            // Outer layers follow temperature policy (suppress / light-only / prefer)
-            if category == .outer {
-                switch ctx.outerLayerPolicy {
-                case .suppress:
-                    continue
-                case .lightOnly, .prefer:
-                    break
-                }
-            }
-            
-            // Filter pool for this category
-            let categoryPool = garments.filter { g in
+        let lockedCategory = locked?.category
+
+        func pool(for category: Category) -> [Garment] {
+            garments.filter { g in
                 guard g.category == category,
                       !g.isBlocked,
                       !excludeSet.contains(g.id),
@@ -761,28 +845,196 @@ final class AIRecommender {
                 }
                 return true
             }
-            
-            guard !categoryPool.isEmpty else { continue }
-            
-            // Get top suggestion for this category, biased by already-picked pieces
-            let suggestions = suggest(
-                from: categoryPool,
-                k: 1,
+        }
+
+        // Candidate lists for the core slots.
+        var slotCandidates: [[(garment: Garment, score: Double)]] = []
+        for category in [Category.top, .bottom, .shoes] where category != lockedCategory {
+            let candidates = rankedSuggestions(
+                from: pool(for: category),
+                k: perSlot,
                 ctx: ctx,
                 modelContext: modelContext,
                 excludedIDs: excludeSet,
                 penalizedIDs: penalizedIDs,
-                pairedWith: result
+                pairedWith: base.map(\.garment)
             )
-            
-            if let item = suggestions.first {
-                result.append(item)
-                usedCategories.insert(category)
-                excludeSet.insert(item.id)
+            if !candidates.isEmpty {
+                slotCandidates.append(candidates)
             }
         }
-        
-        return result
+
+        // Every combination of the core candidates.
+        var combos: [[(garment: Garment, score: Double)]] = [base]
+        for candidates in slotCandidates {
+            var next: [[(garment: Garment, score: Double)]] = []
+            next.reserveCapacity(combos.count * candidates.count)
+            for combo in combos {
+                for candidate in candidates {
+                    next.append(combo + [candidate])
+                }
+            }
+            combos = next
+        }
+
+        var looks: [ScoredLook] = combos.compactMap { combo in
+            guard !combo.isEmpty else { return nil }
+            let pieces = combo.map(\.garment)
+            if let target, !target.avoidSharingWith.isEmpty {
+                let shared = pieces.filter { target.avoidSharingWith.contains($0.id) }.count
+                if shared > target.maxShared { return nil }
+            }
+            let result = lookScore(
+                garments: pieces,
+                itemScores: combo.map(\.score),
+                ctx: ctx,
+                state: state,
+                target: target
+            )
+            return ScoredLook(garments: pieces, score: result.score, dna: result.dna)
+        }
+        looks.sort { $0.score > $1.score }
+
+        // Keep looks that differ by at least two pieces, so "the next best" is a real alternative.
+        var picked: [ScoredLook] = []
+        for look in looks {
+            let ids = Set(look.garments.map(\.id))
+            let distinct = picked.allSatisfy { other in
+                ids.subtracting(other.garments.map(\.id)).count >= min(2, ids.count)
+            }
+            if distinct {
+                picked.append(look)
+            }
+            if picked.count >= limit { break }
+        }
+
+        guard includeOptionalLayers else { return picked }
+        if picked.isEmpty {
+            // No core pieces available: still offer outer / accessory around the lock.
+            let pieces = base.map(\.garment)
+            picked = [ScoredLook(garments: pieces, score: 0, dna: LookDNA(garments: pieces))]
+        }
+
+        // Outer / accessory: add the candidate that makes the whole look score best.
+        return picked.map { look in
+            var pieces = look.garments
+            var current = look
+            for category in [Category.outer, .accessory] where category != lockedCategory {
+                if category == .outer, ctx.outerLayerPolicy == .suppress { continue }
+                let used = excludeSet.union(pieces.map(\.id))
+                let candidates = rankedSuggestions(
+                    from: pool(for: category),
+                    k: 4,
+                    ctx: ctx,
+                    modelContext: modelContext,
+                    excludedIDs: used,
+                    penalizedIDs: penalizedIDs,
+                    pairedWith: pieces
+                )
+                var best: ScoredLook?
+                for candidate in candidates {
+                    let withCandidate = pieces + [candidate.garment]
+                    let scores = withCandidate.map { g in
+                        g.id == candidate.garment.id ? candidate.score : combinedScore(g: g, ctx: ctx, state: state)
+                    }
+                    let result = lookScore(garments: withCandidate, itemScores: scores, ctx: ctx, state: state, target: target)
+                    if best == nil || result.score > best!.score {
+                        best = ScoredLook(garments: withCandidate, score: result.score, dna: result.dna)
+                    }
+                }
+                // Outer layers are weather-driven: add the best one whenever allowed.
+                // Accessories only when they don't drag the look down.
+                if let best, category == .outer || best.score >= current.score - 0.02 {
+                    pieces = best.garments
+                    current = best
+                }
+            }
+            return current
+        }
+        .filter { !$0.garments.isEmpty }
+    }
+
+    /// Suggest a complete outfit, ranked as a whole look (see `rankLooks`).
+    func suggestOutfit(
+        from garments: [Garment],
+        ctx: RecoContext,
+        modelContext: ModelContext,
+        excludedIDs: Set<UUID> = [],
+        penalizedIDs: Set<UUID> = [],
+        locked: Garment? = nil
+    ) -> [Garment] {
+        rankLooks(
+            from: garments,
+            ctx: ctx,
+            modelContext: modelContext,
+            excludedIDs: excludedIDs,
+            penalizedIDs: penalizedIDs,
+            locked: locked
+        ).first?.garments ?? (locked.map { [$0] } ?? [])
+    }
+
+    private func paddedLookWeights(_ state: RecoState) -> [Double] {
+        var w = state.lookWeights
+        if w.count < LookDNA.vectorSize {
+            w.append(contentsOf: repeatElement(0.0, count: LookDNA.vectorSize - w.count))
+        } else if w.count > LookDNA.vectorSize {
+            w = Array(w.prefix(LookDNA.vectorSize))
+        }
+        return w
+    }
+
+    /// Look-level learning: `reward` 0...1 for the whole look (swipe, worn, loved, rejected).
+    func learnLook(
+        _ garments: [Garment],
+        reward: Double,
+        learningRate: Double = 0.08,
+        profileID: UUID?,
+        modelContext: ModelContext,
+        save: Bool = true
+    ) {
+        guard garments.count >= 2 else { return }
+        let state = ensureState(context: modelContext, profileID: profileID)
+        var w = paddedLookWeights(state)
+        let x = LookDNA(garments: garments).vector
+        var s = state.lookBias
+        for i in 0..<min(w.count, x.count) { s += w[i] * x[i] }
+        let err = reward - 1.0 / (1.0 + exp(-s))
+        for i in 0..<min(w.count, x.count) {
+            w[i] += learningRate * err * x[i]
+        }
+        state.lookWeights = w
+        state.lookBias += learningRate * err * 0.5
+        state.lookInteractionCount += 1
+        if save {
+            try? modelContext.save()
+        }
+    }
+
+    /// Pairwise look update: the look after a user's swap beats the look before it.
+    func learnLookPreference(
+        chosen: [Garment],
+        over rejected: [Garment],
+        learningRate: Double = 0.08,
+        profileID: UUID?,
+        modelContext: ModelContext,
+        save: Bool = true
+    ) {
+        guard chosen.count >= 2, rejected.count >= 2 else { return }
+        let state = ensureState(context: modelContext, profileID: profileID)
+        var w = paddedLookWeights(state)
+        let xChosen = LookDNA(garments: chosen).vector
+        let xRejected = LookDNA(garments: rejected).vector
+        var margin = 0.0
+        for i in 0..<min(w.count, xChosen.count) { margin += w[i] * (xChosen[i] - xRejected[i]) }
+        let gradient = 1.0 - 1.0 / (1.0 + exp(-margin))
+        for i in 0..<min(w.count, xChosen.count) {
+            w[i] += learningRate * gradient * (xChosen[i] - xRejected[i])
+        }
+        state.lookWeights = w
+        state.lookInteractionCount += 1
+        if save {
+            try? modelContext.save()
+        }
     }
 
     // MARK: - Learning

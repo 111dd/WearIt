@@ -1138,6 +1138,16 @@ struct OutfitPlannerView: View {
             return format("look_reason_rotation_format", title(id), days)
         case .provenPair:
             return String(localized: "look_reason_proven_pair")
+        case .palette(let palette):
+            switch palette {
+            case .neutralPlusPop: return String(localized: "look_reason_palette_pop")
+            case .tonal: return String(localized: "look_reason_palette_tonal")
+            case .analogous: return String(localized: "look_reason_palette_analogous")
+            case .complementary: return String(localized: "look_reason_palette_complementary")
+            case .neutral, .bold: return String(localized: "look_reason_palette_neutral")
+            }
+        case .balancedProportions:
+            return String(localized: "look_reason_balanced_proportions")
         case .favoriteColor(let color):
             return format("look_reason_favorite_color_format", color.title)
         case .weatherRange(let low, let high):
@@ -1155,6 +1165,8 @@ struct OutfitPlannerView: View {
         case .favorite: return "star"
         case .rotation: return "arrow.counterclockwise"
         case .provenPair: return "link"
+        case .palette: return "swatchpalette"
+        case .balancedProportions: return "figure.stand"
         case .favoriteColor: return "paintpalette"
         case .weatherRange: return "thermometer.medium"
         }
@@ -1735,13 +1747,28 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count,
               replacedID != chosen.id,
               let replaced = garment(for: replacedID) else { return }
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         AIRecommender.shared.learnPreference(
             chosen: chosen,
             over: replaced,
-            ctx: recoContext(for: dayIndex, isEvening: lookTime == .evening),
+            ctx: ctx,
             modelContext: context,
             save: false
         )
+        // Look level: the look after the swap beats the look before it.
+        let day = boardState.days[dayIndex]
+        let after = (lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs)
+            .compactMap { garment(for: $0) }
+        if after.contains(where: { $0.id == chosen.id }) {
+            let before = after.map { $0.id == chosen.id ? replaced : $0 }
+            AIRecommender.shared.learnLookPreference(
+                chosen: after,
+                over: before,
+                profileID: ctx.profileID,
+                modelContext: context,
+                save: false
+            )
+        }
     }
 
     /// Day-look rating hooks for the look control bar (heart + fine-tune menu).
@@ -4185,6 +4212,13 @@ struct OutfitPlannerView: View {
         ) else { return }
 
         let ctx = recoContext(for: dayIndex)
+        AIRecommender.shared.learnLook(
+            selected,
+            reward: reward,
+            profileID: ctx.profileID,
+            modelContext: context,
+            save: false
+        )
         AIRecommender.shared.learn(
             from: selected,
             shown: shown,
