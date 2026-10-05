@@ -241,7 +241,14 @@ struct WardrobeView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if let garment = microQuestionGarment {
+                if let garment = sleeveQuestionGarment {
+                    SleeveQuestionCard(garment: garment) {
+                        completeMicroQuestion()
+                    }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.sm)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if let garment = microQuestionGarment {
                     MicroQuestionCard(garment: garment) {
                         completeMicroQuestion()
                     }
@@ -302,6 +309,15 @@ struct WardrobeView: View {
             .filter { ($0.brand ?? "").isEmpty && !$0.isCurrentlyUnavailable }
             .max { $0.timesWorn < $1.timesWorn }
             .flatMap { $0.timesWorn > 0 ? $0 : nil }
+    }
+
+    /// A worn shirt or blouse whose sleeve length is unknown; asked before the brand
+    /// because it changes what the planner picks on in-between days.
+    private var sleeveQuestionGarment: Garment? {
+        guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
+        return allGarments
+            .filter { $0.needsSleeveAnswer && !$0.isCurrentlyUnavailable && $0.timesWorn > 0 }
+            .max { $0.timesWorn < $1.timesWorn }
     }
 
     private func completeMicroQuestion() {

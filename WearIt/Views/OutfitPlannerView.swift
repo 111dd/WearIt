@@ -72,6 +72,10 @@ struct OutfitPlannerView: View {
     @State private var pendingCalendarReplan: Set<Int> = []
     @State private var calendarConnectDismissed = UserDefaults.standard.bool(forKey: "calendar.connectCardDismissed")
     @State private var workQuestionDismissedDay = UserDefaults.standard.double(forKey: "calendar.workQuestionDismissedDay")
+    /// Answers to "short with a jacket, or long?", for the learned thresholds.
+    @State private var comfortSamples = ComfortPreferences.samples()
+    /// Day (start-of-day stamp) a planner question was last answered or closed: one a day.
+    @State private var plannerQuestionDay = UserDefaults.standard.double(forKey: "planner.questionDay")
     @State private var calendarRefreshTask: Task<Void, Never>?
     /// In-flight chunked outfit generation; cancelled when a newer request arrives.
     @State private var outfitGenerationTask: Task<Void, Never>?
@@ -631,6 +635,7 @@ struct OutfitPlannerView: View {
             reminderLine: calendarReminder(for: dayIndex).map { reminder in
                 ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
             },
+            question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
             }
@@ -642,6 +647,11 @@ struct OutfitPlannerView: View {
 
                 if let reminder = calendarReminder(for: dayIndex) {
                     calendarReminderRow(reminder)
+                }
+
+                if let question = plannerQuestion, question.dayIndex == dayIndex {
+                    plannerQuestionCard(question)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if state.assignedGarmentIDs.isEmpty {
@@ -1185,6 +1195,119 @@ struct OutfitPlannerView: View {
         OccasionMemory.forgetRecentTags(context: context)
         learnOccasionsFromHistory()
         calendarUnderstandingDidChange(replanning: [dayIndex])
+    }
+
+    // MARK: - Planner questions
+
+    /// At most one question a day, asked only when the answer changes the look.
+    private enum PlannerQuestion: Equatable {
+        case layer(dayIndex: Int, temperatureC: Double, morning: Int, midday: Int)
+        case event(dayIndex: Int, title: String)
+
+        var dayIndex: Int {
+            switch self {
+            case .layer(let dayIndex, _, _, _), .event(let dayIndex, _): return dayIndex
+            }
+        }
+
+        var key: String {
+            switch self {
+            case .layer(_, _, let morning, let midday): return "layer|\(morning)|\(midday)"
+            case .event(_, let title): return "event|\(title)"
+            }
+        }
+    }
+
+    private static let dismissedEventQuestionsKey = "planner.dismissedEventQuestions"
+
+    private var plannerQuestion: PlannerQuestion? {
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        guard plannerQuestionDay != today, !boardState.days.isEmpty else { return nil }
+        let nearDays = Array(boardState.days.indices.prefix(3))
+
+        // Today or tomorrow: is it short with a jacket, long, or short?
+        for index in nearDays.prefix(2) where canReplanForCalendar(index) {
+            let state = boardState.days[index]
+            guard state.overrides.temperatureC == nil,
+                  ComfortPreferences.answer(for: state.date) == nil,
+                  let forecast = state.forecast else { continue }
+            let profile = DayTemperatureProfile(from: forecast)
+            // Rain decides the layer on its own.
+            guard profile.rainProbability <= 0.5,
+                  ComfortPreferences.isBorderline(
+                    temperatureC: profile.effectiveTemp,
+                    low: profile.lowTemp,
+                    high: profile.highTemp,
+                    samples: comfortSamples
+                  ) else { continue }
+            return .layer(
+                dayIndex: index,
+                temperatureC: profile.effectiveTemp,
+                morning: Int(profile.morningTemp.rounded()),
+                midday: Int(profile.afternoonTemp.rounded())
+            )
+        }
+
+        // An event in the next days the app could not read.
+        let dismissed = Set(UserDefaults.standard.stringArray(forKey: Self.dismissedEventQuestionsKey) ?? [])
+        for index in nearDays where canReplanForCalendar(index) {
+            let unknown = calendarContext(for: index).events.first { event in
+                let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !event.isAllDay
+                    && event.kind == .none
+                    && title.count >= 2
+                    && CalendarEventCorrections.kind(forTitle: title) == nil
+                    && !dismissed.contains(title.lowercased())
+            }
+            if let unknown {
+                return .event(dayIndex: index, title: unknown.title.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func plannerQuestionCard(_ question: PlannerQuestion) -> some View {
+        switch question {
+        case .layer(let dayIndex, let temperatureC, let morning, let midday):
+            LayerQuestionCard(
+                morningTemp: morning,
+                middayTemp: midday,
+                onPick: { answerLayerQuestion($0, dayIndex: dayIndex, temperatureC: temperatureC) },
+                onDismiss: { closePlannerQuestion() }
+            )
+        case .event(let dayIndex, let title):
+            EventQuestionCard(
+                title: title,
+                onPick: { kind in
+                    closePlannerQuestion()
+                    correctCalendarEvent(title: title, as: kind, dayIndex: dayIndex)
+                },
+                onDismiss: {
+                    var dismissed = UserDefaults.standard.stringArray(forKey: Self.dismissedEventQuestionsKey) ?? []
+                    dismissed.append(title.lowercased())
+                    UserDefaults.standard.set(Array(dismissed.suffix(100)), forKey: Self.dismissedEventQuestionsKey)
+                    closePlannerQuestion()
+                }
+            )
+        }
+    }
+
+    private func answerLayerQuestion(_ choice: DayLayerChoice, dayIndex: Int, temperatureC: Double) {
+        guard dayIndex < boardState.days.count else { return }
+        ComfortPreferences.setAnswer(choice, for: boardState.days[dayIndex].date, temperatureC: temperatureC)
+        comfortSamples = ComfortPreferences.samples()
+        closePlannerQuestion()
+        // A fresh look for that day with the answer applied (locked pieces stay).
+        calendarUnderstandingDidChange(replanning: [dayIndex])
+    }
+
+    private func closePlannerQuestion() {
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        UserDefaults.standard.set(today, forKey: "planner.questionDay")
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            plannerQuestionDay = today
+        }
     }
 
     private struct CalendarReminder {
@@ -2339,6 +2462,13 @@ struct OutfitPlannerView: View {
             }
         } else if state.garmentID(for: .outer) != nil {
             return true
+        }
+
+        // The user's answer for the day ("short with a jacket" / "short, no jacket").
+        if lookTime == .day, let choice = ComfortPreferences.answer(for: state.date) {
+            let rainy = state.forecast.map { DayTemperatureProfile(from: $0).rainProbability > 0.35 } ?? false
+            if choice == .shortWithLayer { return true }
+            if choice == .shortNoLayer, !rainy { return false }
         }
 
         if let forecast = state.forecast {
@@ -3571,7 +3701,9 @@ struct OutfitPlannerView: View {
                 } ?? []) : [],
             allowRepeatedItems: allowRepeatedItems,
             occasionStyle: cachedOccasionStyle,
-            habitOccasion: habitOccasion
+            habitOccasion: habitOccasion,
+            layerChoice: isEvening ? nil : ComfortPreferences.answer(for: state.date),
+            shortSleeveFromC: ComfortPreferences.shortSleeveFromC(comfortSamples)
         )
     }
 
@@ -5315,6 +5447,8 @@ private struct DayCardSignature: Equatable {
     let eventLine: String?
     /// Workout / work-clothes reminder text plus the suggested items.
     let reminderLine: String?
+    /// The question shown on this card ("short with a jacket?" / "what is this event?").
+    let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
 }

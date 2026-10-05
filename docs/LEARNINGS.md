@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Planner questions: ask only when the answer changes the look
+- **Did:** `ComfortPreferences` (day answers + samples in UserDefaults, learned thresholds, `isBorderline`), `LayerQuestionCard` / `EventQuestionCard` in the day card, `SleeveQuestionCard` in the wardrobe, `RecoContext.layerChoice` / `shortSleeveFromC`.
+- **Why:** the jacket and sleeve call on 17–23° days was a guess, and unreadable events silently counted as nothing.
+- **Watch:** the day answer must reach both `RecoContext.outerLayerPolicy` and the planner's `shouldShowSlot(.outer)`, or the outer slot hides while the score wants a jacket. One question a day (`planner.questionDay`); the card is part of `DayCardSignature`.
+
 ## 2026-10-05 — Occasion memory learns per-occasion looks from wear history
 - **Did:** `WearEvent.occasionRaw` + `OccasionMemory.tagUntagged` (reads the calendar for past wear days) + `OccasionStyleProfile` used by `AIRecommender.occasionFit` and the planner's formality target.
 - **Why:** wear events never recorded what they were worn for, so "your work look" could not be learned.

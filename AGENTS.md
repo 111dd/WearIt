@@ -124,6 +124,12 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Ask when in doubt: one planner question a day inside the day card, either
+  "short + jacket / long / short?" on in-between days (`Logic/ComfortPreferences`, learns the user's
+  short-sleeve and jacket temperatures and asks less) or "what is this event?" for unreadable events
+  (answers become `CalendarEventCorrections`). `Garment.sleeveLengthRaw` + `sleeveLength` (derived from
+  type, asked once in the wardrobe for shirts/blouses, editable on the item).
+
 - 2026-10-05 · Claude Code · Occasion memory: confirmed looks are tagged with their calendar occasion
   (`WearEvent.occasionRaw`, filled after the fact by `Services/OccasionMemory`, incl. 180 days of
   history), `Logic/OccasionStyleProfile` learns the user's own look per occasion; from 3 looks it

@@ -980,3 +980,14 @@
 "work_dress_not_set" = "לא נבחר";
 "edit_for_workouts" = "לאימונים";
 "edit_for_work" = "לעבודה";
+
+/* Situation questions */
+"sleeve_short" = "שרוול קצר";
+"sleeve_long" = "שרוול ארוך";
+"garment_sleeve" = "שרוולים";
+"micro_question_sleeve_format" = "%@: שרוול קצר או ארוך?";
+"comfort_question_format" = "%1$d° בבוקר, %2$d° בצהריים. מה מתאים לך?";
+"comfort_choice_short_layer" = "קצר + ג׳קט";
+"comfort_choice_long" = "שרוול ארוך";
+"comfort_choice_short" = "שרוול קצר";
+"event_question_format" = "מה זה „%@”?";

@@ -728,6 +728,24 @@ struct EditGarmentView: View {
             occasionToggle(.gym, title: String(localized: "edit_for_workouts"), icon: "figure.run")
             occasionToggle(.work, title: String(localized: "edit_for_work"), icon: "briefcase.fill")
 
+            if garment.category == .top {
+                HStack {
+                    Label(String(localized: "garment_sleeve"), systemImage: "tshirt")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Picker(String(localized: "garment_sleeve"), selection: Binding<SleeveLength?>(
+                        get: { garment.sleeveLength },
+                        set: { garment.sleeveLength = $0; hasUnsavedChanges = true }
+                    )) {
+                        ForEach(SleeveLength.allCases) { sleeve in
+                            Text(sleeve.title).tag(Optional(sleeve))
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+            }
+
             HStack {
                 Image(systemName: "calendar").foregroundStyle(.secondary)
                 Text(String(localized: "edit_last_worn")).font(.subheadline.weight(.medium))
