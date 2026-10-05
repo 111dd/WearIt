@@ -613,8 +613,8 @@
 				INFOPLIST_KEY_CFBundleVersion = 1;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
-				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt קורא את לוח השנה שלך כדי להציע לוק ערב ופורמליות מתאימים לאירועים כמו חתונות וערבי חג.";
-				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt קורא את לוח השנה שלך כדי להציע לוק ערב ופורמליות מתאימים לאירועים כמו חתונות וערבי חג.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה משתמשת במצלמה כדי לסרוק ברקודים ולהוסיף פריטים.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "אנחנו משתמשים במיקום שלך כדי להביא תחזית מזג אוויר מקומית ולהמליץ על לבוש מתאים.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי להוסיף פריטים לארון הבגדים.";
@@ -666,8 +666,8 @@
 				INFOPLIST_KEY_CFBundleVersion = 1;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
-				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt קורא את לוח השנה שלך כדי להציע לוק ערב ופורמליות מתאימים לאירועים כמו חתונות וערבי חג.";
-				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt קורא את לוח השנה שלך כדי להציע לוק ערב ופורמליות מתאימים לאירועים כמו חתונות וערבי חג.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "האפליקציה משתמשת במצלמה כדי לסרוק ברקודים ולהוסיף פריטים.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "אנחנו משתמשים במיקום שלך כדי להביא תחזית מזג אוויר מקומית ולהמליץ על לבוש מתאים.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "האפליקציה צריכה גישה לתמונות כדי להוסיף פריטים לארון הבגדים.";

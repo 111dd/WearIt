@@ -49,41 +49,131 @@ enum CalendarOccasionKind: String, Equatable {
     case formal
     case blackTie
     case socialEvening
+    /// Brunch, a daytime birthday: no evening look, no formality change.
+    case socialDay
+    /// Funeral, shiva, memorial: modest and dark.
+    case mourning
     case work
     case sport
     case travel
     case outdoor
 }
 
+/// One calendar event the app understood, with the part of the day it shapes.
+struct CalendarDayEvent: Equatable {
+    let title: String
+    let start: Date
+    let isAllDay: Bool
+    let kind: CalendarEventUnderstanding.Kind
+    /// Starts at 16:30 or later (or an all-day formal event): shapes the evening look.
+    let isEvening: Bool
+
+    var occasion: CalendarOccasionKind {
+        switch kind {
+        case .work: return .work
+        case .sport: return .sport
+        case .travel: return .travel
+        case .outdoor: return .outdoor
+        case .social: return isEvening ? .socialEvening : .socialDay
+        case .formal: return .formal
+        case .blackTie: return .blackTie
+        case .mourning: return .mourning
+        case .none, .personal: return .none
+        }
+    }
+
+    /// "Gym · 18:00", or just the title for all-day events.
+    var label: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isAllDay else { return trimmed }
+        let time = start.formatted(date: .omitted, time: .shortened)
+        return trimmed.isEmpty ? time : "\(trimmed) · \(time)"
+    }
+}
+
 struct DayCalendarContext: Equatable {
     var suggestEveningLook: Bool
-    /// Added to daytime formality (-1...2).
+    /// Added to daytime formality (-1...2), not counting work (see `formalityBump`).
     var dayFormalityBoost: Int
-    /// Added to evening formality (0...2). Evening looks always get at least +1 unless sport.
+    /// Added to evening formality (0...2). Evening looks always get at least +1.
     var eveningFormalityBoost: Int
-    /// Shift effective temperature for scoring (°C). Positive = dress cooler.
-    var temperatureBiasC: Double
+    /// Shift of the effective temperature for scoring (°C). Positive = dress cooler.
+    var dayTemperatureBiasC: Double
+    var eveningTemperatureBiasC: Double
+    /// What the day look is dressed for (daytime events only).
+    var dayOccasion: CalendarOccasionKind
+    /// What the evening look is dressed for (events from 16:30, Shabbat, holiday eves).
+    var eveningOccasion: CalendarOccasionKind
+    /// The day's most important occasion, for stats and summaries.
     var occasionKind: CalendarOccasionKind
     var hints: [PlannerHint]
+    /// The headline line under the day title ("Wedding · 19:30").
     var primaryReason: String?
+    var headlineIcon: String
+    /// Title of the calendar event behind the headline, so the user can correct it.
+    var headlineEventTitle: String?
+    /// A workout that doesn't decide the look: remind the user to pack gym clothes.
+    var sportReminder: CalendarDayEvent?
+    /// A daytime work event (the user's dress code decides what it means).
+    var workEvent: CalendarDayEvent?
+    var events: [CalendarDayEvent]
 
     static let empty = DayCalendarContext(
         suggestEveningLook: false,
         dayFormalityBoost: 0,
         eveningFormalityBoost: 0,
-        temperatureBiasC: 0,
+        dayTemperatureBiasC: 0,
+        eveningTemperatureBiasC: 0,
+        dayOccasion: .none,
+        eveningOccasion: .none,
         occasionKind: .none,
         hints: [],
-        primaryReason: nil
+        primaryReason: nil,
+        headlineIcon: "calendar",
+        headlineEventTitle: nil,
+        sportReminder: nil,
+        workEvent: nil,
+        events: []
     )
 
-    func formalityBump(isEvening: Bool) -> Int {
+    /// The occasion a look is dressed for. A uniform or free work day leaves the look free.
+    func occasion(isEvening: Bool, workDressCode: WorkDressCode?) -> CalendarOccasionKind {
+        if isEvening { return eveningOccasion }
+        if dayOccasion == .work, workDressCode == .uniform || workDressCode == .free { return .none }
+        return dayOccasion
+    }
+
+    func formalityBump(isEvening: Bool, workDressCode: WorkDressCode?) -> Int {
         if isEvening {
-            if occasionKind == .sport { return eveningFormalityBoost }
             return max(1, eveningFormalityBoost)
         }
-        return dayFormalityBoost
+        var boost = dayFormalityBoost
+        if dayOccasion == .work {
+            // Not answered yet: a little more polished, as before.
+            boost += workDressCode?.formalityBoost ?? 1
+        }
+        return min(2, max(-1, boost))
     }
+
+    func temperatureBias(isEvening: Bool) -> Double {
+        isEvening ? eveningTemperatureBiasC : dayTemperatureBiasC
+    }
+
+    /// Changes whenever the calendar would change a planned look.
+    var signature: String {
+        [
+            dayOccasion.rawValue, eveningOccasion.rawValue,
+            String(dayFormalityBoost), String(eveningFormalityBoost),
+            String(dayTemperatureBiasC), String(eveningTemperatureBiasC),
+            String(suggestEveningLook)
+        ].joined(separator: "|")
+    }
+}
+
+extension Notification.Name {
+    /// Posted when calendar settings, permission or a user correction change
+    /// how events are understood. The planner re-reads and re-plans.
+    static let calendarUnderstandingChanged = Notification.Name("WearIt.calendarUnderstandingChanged")
 }
 
 // MARK: - Service
@@ -99,79 +189,179 @@ final class CalendarContextService {
         cache.removeAll()
     }
 
+    var authorizationStatus: EKAuthorizationStatus {
+        EKEventStore.authorizationStatus(for: .event)
+    }
+
+    /// True when the user hasn't connected the calendar and can still be asked.
+    var canOfferConnection: Bool {
+        !CalendarContextPreferences.deviceCalendarEnabled && authorizationStatus == .notDetermined
+    }
+
+    /// Turns calendar reading on and asks for access. Returns whether events can be read.
+    func connect() async -> Bool {
+        CalendarContextPreferences.deviceCalendarEnabled = true
+        let granted = await requestDeviceCalendarAccessIfNeeded()
+        if !granted {
+            CalendarContextPreferences.deviceCalendarEnabled = false
+        }
+        invalidateCache()
+        NotificationCenter.default.post(name: .calendarUnderstandingChanged, object: nil)
+        return granted
+    }
+
     func context(for date: Date) -> DayCalendarContext {
         let day = Calendar.current.startOfDay(for: date)
         let key = day.timeIntervalSince1970
         if let cached = cache[key] { return cached }
 
-        var suggestEvening = false
-        var dayBoost = 0
-        var eveningBoost = 0
-        var tempBias = 0.0
-        var occasion: CalendarOccasionKind = .none
-        var hints: [PlannerHint] = []
-        var reason: String?
-
-        if CalendarContextPreferences.hebrewEnabled {
-            let hebrew = HebrewCalendarRules.signals(for: day)
-            if hebrew.suggestEvening {
-                suggestEvening = true
-                eveningBoost = max(eveningBoost, hebrew.eveningFormalityBoost)
-                dayBoost = max(dayBoost, hebrew.dayFormalityBoost)
-                occasion = hebrew.occasionKind
-                if let title = hebrew.hintTitle {
-                    hints.append(
-                        PlannerHint(text: title, iconName: hebrew.iconName, style: .calendar)
-                    )
-                    reason = title
-                }
-            }
-        }
-
-        if CalendarContextPreferences.deviceCalendarEnabled {
-            let events = deviceEventSignals(for: day)
-            if events.suggestEvening {
-                suggestEvening = true
-            }
-            dayBoost = max(dayBoost, events.dayFormalityBoost)
-            // Allow sport to pull formality down
-            if events.dayFormalityBoost < 0 {
-                dayBoost = min(dayBoost, events.dayFormalityBoost)
-            }
-            eveningBoost = max(eveningBoost, events.eveningFormalityBoost)
-            tempBias += events.temperatureBiasC
-            if events.occasionKind != .none,
-               occasion == .none || events.occasionKind.priority >= occasion.priority {
-                occasion = events.occasionKind
-            }
-            hints.append(contentsOf: events.hints)
-            if reason == nil {
-                reason = events.hints.first?.text
-            }
-        }
-
-        let result = DayCalendarContext(
-            suggestEveningLook: suggestEvening,
-            dayFormalityBoost: min(2, max(-1, dayBoost)),
-            eveningFormalityBoost: min(2, max(0, eveningBoost)),
-            temperatureBiasC: max(-4, min(6, tempBias)),
-            occasionKind: occasion,
-            hints: Array(hints.prefix(4)),
-            primaryReason: reason
-        )
+        let events = CalendarContextPreferences.deviceCalendarEnabled ? deviceEvents(for: day) : []
+        let hebrew = CalendarContextPreferences.hebrewEnabled ? HebrewCalendarRules.signals(for: day) : nil
+        let result = Self.build(events: events, hebrew: hebrew)
         cache[key] = result
         return result
     }
 
+    /// Combines understood events (and Shabbat / holiday eves) into what each look needs.
+    static func build(events: [CalendarDayEvent], hebrew: HebrewCalendarRules.Signals?) -> DayCalendarContext {
+        let relevant = events.filter { $0.occasion != .none }
+        func top(_ list: [CalendarDayEvent]) -> CalendarDayEvent? {
+            list.max { lhs, rhs in
+                lhs.occasion.priority != rhs.occasion.priority
+                    ? lhs.occasion.priority < rhs.occasion.priority
+                    : lhs.start > rhs.start
+            }
+        }
+
+        // Daytime: a workout sets the look only when nothing else happens that day.
+        let dayEvents = relevant.filter { !$0.isEvening }
+        let dayNonSport = dayEvents.filter { $0.kind != .sport }
+        let dayEvent = top(dayNonSport) ?? dayEvents.first { $0.kind == .sport }
+        let dayOccasion = dayEvent?.occasion ?? CalendarOccasionKind.none
+
+        // Evening: a workout never asks for an evening look.
+        let eveningEvent = top(relevant.filter { $0.isEvening && $0.kind != .sport })
+        var eveningOccasion = eveningEvent?.occasion ?? CalendarOccasionKind.none
+
+        let sportReminder = events.first { event in
+            event.kind == .sport && !(dayOccasion == .sport && !event.isEvening)
+        }
+        let workEvent = dayEvents.first { $0.kind == .work }
+
+        var dayBoost: Int = {
+            switch dayOccasion {
+            case .formal, .mourning: return 1
+            case .blackTie: return 2
+            case .sport: return -1
+            default: return 0
+            }
+        }()
+        var eveningBoost: Int = {
+            switch eveningOccasion {
+            case .socialEvening, .mourning: return 1
+            case .formal, .blackTie: return 2
+            default: return 0
+            }
+        }()
+        let dayTemperatureBias: Double = {
+            switch dayOccasion {
+            case .sport: return 2
+            case .outdoor: return 1
+            default: return 0
+            }
+        }()
+        var suggestEvening = [CalendarOccasionKind.socialEvening, .formal, .blackTie, .mourning].contains(eveningOccasion)
+
+        var hints: [PlannerHint] = []
+        var headline: (text: String, icon: String, eventTitle: String?, priority: Int)?
+        let headlineEvent = [eveningEvent, dayEvent].compactMap { $0 }
+            .max { $0.occasion.priority < $1.occasion.priority }
+        if let headlineEvent {
+            let symbol = icon(for: headlineEvent.occasion)
+            headline = (headlineEvent.label, symbol, headlineEvent.title, headlineEvent.occasion.priority)
+            if let guidance = guidance(for: headlineEvent.occasion) {
+                hints.append(PlannerHint(text: guidance, iconName: symbol, style: .calendar))
+            }
+        }
+
+        if let hebrew, hebrew.suggestEvening {
+            suggestEvening = true
+            eveningBoost = max(eveningBoost, hebrew.eveningFormalityBoost)
+            dayBoost = max(dayBoost, hebrew.dayFormalityBoost)
+            if hebrew.occasionKind.priority >= eveningOccasion.priority {
+                eveningOccasion = hebrew.occasionKind
+            }
+            if let title = hebrew.hintTitle {
+                hints.insert(PlannerHint(text: title, iconName: hebrew.iconName, style: .calendar), at: 0)
+                // A calendar wedding on a Friday still leads; Erev Shabbat alone shows itself.
+                if headline == nil || hebrew.occasionKind.priority > (headline?.priority ?? 0) {
+                    headline = (title, hebrew.iconName, nil, hebrew.occasionKind.priority)
+                }
+            }
+        }
+
+        let occasionKind = [dayOccasion, eveningOccasion].max { $0.priority < $1.priority } ?? CalendarOccasionKind.none
+
+        return DayCalendarContext(
+            suggestEveningLook: suggestEvening,
+            dayFormalityBoost: min(2, max(-1, dayBoost)),
+            eveningFormalityBoost: min(2, max(0, eveningBoost)),
+            dayTemperatureBiasC: dayTemperatureBias,
+            eveningTemperatureBiasC: 0,
+            dayOccasion: dayOccasion,
+            eveningOccasion: eveningOccasion,
+            occasionKind: occasionKind,
+            hints: Array(hints.prefix(3)),
+            primaryReason: headline?.text,
+            headlineIcon: headline?.icon ?? "calendar",
+            headlineEventTitle: headline?.eventTitle,
+            sportReminder: sportReminder,
+            workEvent: workEvent,
+            events: events
+        )
+    }
+
+    static func icon(for occasion: CalendarOccasionKind) -> String {
+        switch occasion {
+        case .work: return "briefcase"
+        case .sport: return "figure.run"
+        case .travel: return "airplane"
+        case .outdoor: return "sun.max"
+        case .socialEvening: return "moon.stars"
+        case .socialDay: return "cup.and.saucer"
+        case .formal: return "heart.circle"
+        case .blackTie: return "sparkles"
+        case .mourning: return "leaf"
+        case .shabbat: return "flame"
+        case .holiday: return "sparkles"
+        case .none: return "calendar"
+        }
+    }
+
+    private static func guidance(for occasion: CalendarOccasionKind) -> String? {
+        switch occasion {
+        case .work: return String(localized: "calendar_hint_work")
+        case .sport: return String(localized: "calendar_hint_sport")
+        case .travel: return String(localized: "calendar_hint_travel")
+        case .outdoor: return String(localized: "calendar_hint_outdoor")
+        case .socialEvening: return String(localized: "calendar_hint_event_generic")
+        case .formal: return String(localized: "calendar_hint_formal")
+        case .blackTie: return String(localized: "calendar_hint_black_tie")
+        case .mourning: return String(localized: "calendar_hint_mourning")
+        case .socialDay, .shabbat, .holiday, .none: return nil
+        }
+    }
+
     func requestDeviceCalendarAccessIfNeeded() async -> Bool {
         guard CalendarContextPreferences.deviceCalendarEnabled else { return false }
-        let status = EKEventStore.authorizationStatus(for: .event)
-        switch status {
+        switch authorizationStatus {
         case .fullAccess:
             return true
         case .notDetermined:
             do {
-                return try await store.requestFullAccessToEvents()
+                let granted = try await store.requestFullAccessToEvents()
+                if granted { store.reset() }
+                return granted
             } catch {
                 return false
             }
@@ -180,71 +370,54 @@ final class CalendarContextService {
         }
     }
 
-    private func deviceEventSignals(for day: Date) -> (
-        suggestEvening: Bool,
-        dayFormalityBoost: Int,
-        eveningFormalityBoost: Int,
-        temperatureBiasC: Double,
-        occasionKind: CalendarOccasionKind,
-        hints: [PlannerHint]
-    ) {
-        let status = EKEventStore.authorizationStatus(for: .event)
-        let allowed = status == .fullAccess
-        guard allowed else {
-            return (false, 0, 0, 0, .none, [])
+    /// The day's events, understood. Skips cancelled and declined events,
+    /// birthday and subscribed calendars (holidays, sports fixtures).
+    private func deviceEvents(for day: Date) -> [CalendarDayEvent] {
+        guard authorizationStatus == .fullAccess,
+              let end = Calendar.current.date(byAdding: .day, value: 1, to: day) else {
+            return []
         }
-
-        let cal = Calendar.current
-        guard let end = cal.date(byAdding: .day, value: 1, to: day) else {
-            return (false, 0, 0, 0, .none, [])
-        }
-
         let predicate = store.predicateForEvents(withStart: day, end: end, calendars: nil)
-        let events = store.events(matching: predicate)
-
-        var suggestEvening = false
-        var dayBoost = 0
-        var eveningBoost = 0
-        var tempBias = 0.0
-        var occasion: CalendarOccasionKind = .none
-        var hints: [PlannerHint] = []
-
-        let ranked = events
-            .map { ($0, CalendarEventClassifier.classify($0)) }
-            .filter { $0.1.relevance != .none }
-            .sorted { $0.1.relevance.rank > $1.1.relevance.rank }
-
-        for (event, signal) in ranked.prefix(5) {
-            if signal.suggestEvening { suggestEvening = true }
-            dayBoost = signal.dayFormalityBoost < 0
-                ? min(dayBoost, signal.dayFormalityBoost)
-                : max(dayBoost, signal.dayFormalityBoost)
-            eveningBoost = max(eveningBoost, signal.eveningFormalityBoost)
-            tempBias += signal.temperatureBiasC
-            if signal.occasionKind.priority >= occasion.priority {
-                occasion = signal.occasionKind
+        let calendar = Calendar.current
+        return store.events(matching: predicate).compactMap { event -> CalendarDayEvent? in
+            if event.status == .canceled { return nil }
+            if let me = event.attendees?.first(where: \.isCurrentUser), me.participantStatus == .declined {
+                return nil
             }
+            if let type = event.calendar?.type, type == .birthday || type == .subscription { return nil }
 
-            let title = event.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let label: String
-            if let title, !title.isEmpty {
-                label = String(
-                    format: NSLocalizedString("calendar_hint_event_format", comment: ""),
-                    title
-                )
-            } else {
-                label = signal.hintFallback
-            }
-            hints.append(
-                PlannerHint(
-                    text: label,
-                    iconName: signal.iconName,
-                    style: .calendar
+            let kind = CalendarEventUnderstanding.classify(
+                CalendarEventUnderstanding.EventInput(
+                    title: event.title ?? "",
+                    location: event.location ?? "",
+                    notes: event.notes ?? "",
+                    calendarTitle: event.calendar?.title ?? ""
                 )
             )
+            let isEvening: Bool
+            if event.isAllDay {
+                // All-day entries matter only for trips, outings, celebrations (evening)
+                // and mourning (daytime); birthdays, deadlines and the like don't.
+                switch kind {
+                case .formal, .blackTie: isEvening = true
+                case .travel, .outdoor, .mourning: isEvening = false
+                default: return nil
+                }
+            } else {
+                let start = event.startDate ?? day
+                // Started yesterday (multi-day): treat as daytime.
+                let minutes = start < day ? 0 : calendar.component(.hour, from: start) * 60 + calendar.component(.minute, from: start)
+                isEvening = minutes >= 16 * 60 + 30
+            }
+            return CalendarDayEvent(
+                title: event.title ?? "",
+                start: event.startDate ?? day,
+                isAllDay: event.isAllDay,
+                kind: kind,
+                isEvening: isEvening
+            )
         }
-
-        return (suggestEvening, dayBoost, eveningBoost, tempBias, occasion, Array(hints.prefix(3)))
+        .sorted { $0.start < $1.start }
     }
 }
 
@@ -260,23 +433,8 @@ enum HebrewCalendarRules {
         var occasionKind: CalendarOccasionKind
     }
 
-    /// Foundation Hebrew calendar months (Nisan = 1 … Tishrei = 7).
+    /// Holiday eves win over Friday (Erev Rosh Hashanah on a Friday is the holiday).
     static func signals(for date: Date) -> Signals {
-        let gregorian = Calendar.current
-        let weekday = gregorian.component(.weekday, from: date) // Sunday = 1 … Friday = 6
-
-        // Erev Shabbat — Friday always gets an evening look.
-        if weekday == 6 {
-            return Signals(
-                suggestEvening: true,
-                dayFormalityBoost: 0,
-                eveningFormalityBoost: 1,
-                hintTitle: String(localized: "calendar_hint_erev_shabbat"),
-                iconName: "flame",
-                occasionKind: .shabbat
-            )
-        }
-
         let hebrew = Calendar(identifier: .hebrew)
         let month = hebrew.component(.month, from: date)
         let day = hebrew.component(.day, from: date)
@@ -289,6 +447,19 @@ enum HebrewCalendarRules {
                 hintTitle: holiday.title,
                 iconName: holiday.icon,
                 occasionKind: .holiday
+            )
+        }
+
+        // Erev Shabbat: Friday always gets an evening look.
+        let weekday = Calendar.current.component(.weekday, from: date) // Sunday = 1 … Friday = 6
+        if weekday == 6 {
+            return Signals(
+                suggestEvening: true,
+                dayFormalityBoost: 0,
+                eveningFormalityBoost: 1,
+                hintTitle: String(localized: "calendar_hint_erev_shabbat"),
+                iconName: "flame",
+                occasionKind: .shabbat
             )
         }
 
@@ -310,44 +481,45 @@ enum HebrewCalendarRules {
     }
 
     private static func holidayEve(month: Int, day: Int) -> HolidayEve? {
-        // month: 1 Nisan … 7 Tishrei … 12/13 Adar
+        // Foundation numbering: 1 Tishrei … 6 Adar I (leap years only),
+        // 7 Adar / Adar II, 8 Nisan, 9 Iyar, 10 Sivan … 13 Elul.
         switch (month, day) {
-        case (6, 29): // Elul 29 — Erev Rosh Hashanah
+        case (13, 29): // Elul 29 — Erev Rosh Hashanah
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_rosh_hashanah"),
                 dayBoost: 1,
                 eveningBoost: 2,
                 icon: "sparkles"
             )
-        case (7, 9): // Tishrei 9 — Erev Yom Kippur
+        case (1, 9): // Tishrei 9 — Erev Yom Kippur
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_yom_kippur"),
                 dayBoost: 1,
                 eveningBoost: 2,
                 icon: "moon.stars"
             )
-        case (7, 14): // Tishrei 14 — Erev Sukkot
+        case (1, 14): // Tishrei 14 — Erev Sukkot
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_sukkot"),
                 dayBoost: 0,
                 eveningBoost: 1,
                 icon: "leaf"
             )
-        case (7, 21): // Tishrei 21 — Erev Shemini Atzeret / Simchat Torah
+        case (1, 21): // Tishrei 21 — Erev Shemini Atzeret / Simchat Torah
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_simchat_torah"),
                 dayBoost: 0,
                 eveningBoost: 1,
                 icon: "book"
             )
-        case (1, 14): // Nisan 14 — Erev Pesach (Seder night)
+        case (8, 14): // Nisan 14 — Erev Pesach (Seder night)
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_pesach"),
                 dayBoost: 1,
                 eveningBoost: 2,
                 icon: "fork.knife"
             )
-        case (3, 5): // Sivan 5 — Erev Shavuot
+        case (10, 5): // Sivan 5 — Erev Shavuot
             return HolidayEve(
                 title: String(localized: "calendar_hint_erev_shavuot"),
                 dayBoost: 0,
@@ -360,217 +532,23 @@ enum HebrewCalendarRules {
     }
 }
 
-// MARK: - Device event classification
+// MARK: - Priority
 
 extension CalendarOccasionKind {
     var priority: Int {
         switch self {
         case .none: return 0
         case .work: return 1
+        case .socialDay: return 2
         case .travel: return 2
         case .outdoor: return 2
         case .sport: return 3
         case .socialEvening: return 4
         case .shabbat: return 5
         case .holiday: return 6
+        case .mourning: return 6
         case .formal: return 7
         case .blackTie: return 8
         }
     }
-}
-
-enum CalendarEventClassifier {
-    enum Relevance {
-        case none
-        case work
-        case sport
-        case travel
-        case outdoor
-        case socialEvening
-        case formal
-        case blackTie
-
-        var rank: Int {
-            switch self {
-            case .none: return 0
-            case .work: return 1
-            case .travel: return 2
-            case .outdoor: return 2
-            case .sport: return 3
-            case .socialEvening: return 4
-            case .formal: return 5
-            case .blackTie: return 6
-            }
-        }
-    }
-
-    struct Signal {
-        var relevance: Relevance
-        var suggestEvening: Bool
-        var dayFormalityBoost: Int
-        var eveningFormalityBoost: Int
-        var temperatureBiasC: Double
-        var occasionKind: CalendarOccasionKind
-        var iconName: String
-        var hintFallback: String
-    }
-
-    static func classify(_ event: EKEvent) -> Signal {
-        let title = event.title?.lowercased() ?? ""
-        let notes = event.notes?.lowercased() ?? ""
-        let location = event.location?.lowercased() ?? ""
-        let calendarName = event.calendar?.title.lowercased() ?? ""
-        let text = [title, notes, location, calendarName].joined(separator: " ")
-
-        guard !text.isEmpty else { return .none }
-
-        let blackTieKeys = ["black tie", "black-tie", "גאלה", "gala", "white tie"]
-        let formalKeys = [
-            "wedding", "חתונה", "נישואין", "נישואים",
-            "בר מצווה", "בת מצווה", "bar mitzvah", "bat mitzvah",
-            "ברית", "הצעת נישואין", "engagement",
-            "cocktail", "reception", "אירוע רשמי", "שמלה",
-            "graduation", "סיום", "premiere", "opera", "תיאטרון"
-        ]
-        let eveningKeys = [
-            "dinner", "ארוחת ערב", "date night", "party", "מסיבה",
-            "evening", "ערב", "nightlife", "show", "concert", "הופעה"
-        ]
-        let sportKeys = [
-            "gym", "workout", "run", "ריצה", "כושר", "אימון", "yoga", "יוגה",
-            "football", "כדורגל", "basketball", "tennis", "swim", "שחייה", "hiit", "crossfit"
-        ]
-        let workKeys = [
-            "meeting", "פגישה", "interview", "ראיון", "office", "משרד",
-            "standup", "1:1", "client", "לקוח", "conference", "כנס", "work"
-        ]
-        let travelKeys = [
-            "flight", "טיסה", "airport", "נמל תעופה", "train", "רכבת",
-            "travel", "נסיעה", "hotel", "מלון", "trip", "טיול"
-        ]
-        let outdoorKeys = [
-            "park", "פארק", "beach", "חוף", "hike", "טיול רגלי", "picnic", "פיקניק",
-            "outdoor", "בחוץ", "camping"
-        ]
-
-        let eveningLikely = isLikelyEveningEvent(event)
-        let outdoorLocation = locationContainsOutdoor(location)
-
-        if blackTieKeys.contains(where: { text.contains($0) }) {
-            return Signal(
-                relevance: .blackTie,
-                suggestEvening: true,
-                dayFormalityBoost: 1,
-                eveningFormalityBoost: 2,
-                temperatureBiasC: 0,
-                occasionKind: .blackTie,
-                iconName: "sparkles",
-                hintFallback: String(localized: "calendar_hint_black_tie")
-            )
-        }
-
-        if formalKeys.contains(where: { text.contains($0) }) {
-            return Signal(
-                relevance: .formal,
-                suggestEvening: true,
-                dayFormalityBoost: eveningLikely ? 0 : 1,
-                eveningFormalityBoost: 2,
-                temperatureBiasC: 0,
-                occasionKind: .formal,
-                iconName: "heart.circle",
-                hintFallback: String(localized: "calendar_hint_formal")
-            )
-        }
-
-        if sportKeys.contains(where: { text.contains($0) }) {
-            return Signal(
-                relevance: .sport,
-                suggestEvening: false,
-                dayFormalityBoost: -1,
-                eveningFormalityBoost: 0,
-                temperatureBiasC: outdoorLocation ? 4 : 2,
-                occasionKind: .sport,
-                iconName: "figure.run",
-                hintFallback: String(localized: "calendar_hint_sport")
-            )
-        }
-
-        if travelKeys.contains(where: { text.contains($0) }) {
-            return Signal(
-                relevance: .travel,
-                suggestEvening: eveningLikely,
-                dayFormalityBoost: 0,
-                eveningFormalityBoost: eveningLikely ? 1 : 0,
-                temperatureBiasC: 1,
-                occasionKind: .travel,
-                iconName: "airplane",
-                hintFallback: String(localized: "calendar_hint_travel")
-            )
-        }
-
-        if workKeys.contains(where: { text.contains($0) }) {
-            return Signal(
-                relevance: .work,
-                suggestEvening: false,
-                dayFormalityBoost: 1,
-                eveningFormalityBoost: 0,
-                temperatureBiasC: 0,
-                occasionKind: .work,
-                iconName: "briefcase",
-                hintFallback: String(localized: "calendar_hint_work")
-            )
-        }
-
-        if outdoorKeys.contains(where: { text.contains($0) }) || outdoorLocation {
-            return Signal(
-                relevance: .outdoor,
-                suggestEvening: eveningLikely,
-                dayFormalityBoost: 0,
-                eveningFormalityBoost: eveningLikely ? 1 : 0,
-                temperatureBiasC: 2,
-                occasionKind: .outdoor,
-                iconName: "sun.max",
-                hintFallback: String(localized: "calendar_hint_outdoor")
-            )
-        }
-
-        if eveningKeys.contains(where: { text.contains($0) }) || eveningLikely {
-            return Signal(
-                relevance: .socialEvening,
-                suggestEvening: true,
-                dayFormalityBoost: 0,
-                eveningFormalityBoost: 1,
-                temperatureBiasC: 0,
-                occasionKind: .socialEvening,
-                iconName: "moon.stars",
-                hintFallback: String(localized: "calendar_hint_event_generic")
-            )
-        }
-
-        return .none
-    }
-
-    private static func isLikelyEveningEvent(_ event: EKEvent) -> Bool {
-        if event.isAllDay { return false }
-        let hour = Calendar.current.component(.hour, from: event.startDate)
-        return hour >= 16
-    }
-
-    private static func locationContainsOutdoor(_ location: String) -> Bool {
-        let keys = ["park", "beach", "חוף", "פארק", "outdoor", "stadium", "אצטדיון"]
-        return keys.contains(where: { location.contains($0) })
-    }
-}
-
-private extension CalendarEventClassifier.Signal {
-    static let none = CalendarEventClassifier.Signal(
-        relevance: .none,
-        suggestEvening: false,
-        dayFormalityBoost: 0,
-        eveningFormalityBoost: 0,
-        temperatureBiasC: 0,
-        occasionKind: .none,
-        iconName: "calendar",
-        hintFallback: String(localized: "calendar_hint_event_generic")
-    )
 }

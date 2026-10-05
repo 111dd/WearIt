@@ -17,10 +17,17 @@ final class UserProfile {
     var bio: String?
     /// ImageStore-relative path for a photo avatar; falls back to `avatarEmoji`.
     var avatarImagePath: String?
+    /// `WorkDressCode` raw value; nil until the user answers the work question.
+    var workDressCodeRaw: String?
     var garmentIDs: [UUID] = []
     var outfitIDs: [UUID] = []
     var dayPlanIDs: [UUID] = []
     var dailyLookIDs: [UUID] = []
+
+    var workDressCode: WorkDressCode? {
+        get { workDressCodeRaw.flatMap(WorkDressCode.init(rawValue:)) }
+        set { workDressCodeRaw = newValue?.rawValue }
+    }
 
     init(
         id: UUID? = nil,
@@ -44,5 +51,44 @@ final class UserProfile {
         self.rainTolerance = rainTolerance
         self.email = email
         self.phone = phone
+    }
+}
+
+/// What the user wears to work, so a work day on the calendar is dressed right.
+enum WorkDressCode: String, CaseIterable, Identifiable {
+    /// A uniform or the same work clothes every day: the app plans around it.
+    case uniform
+    case business
+    case smartCasual
+    /// No dress code: work changes nothing.
+    case free
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .uniform: return String(localized: "work_dress_uniform")
+        case .business: return String(localized: "work_dress_business")
+        case .smartCasual: return String(localized: "work_dress_smart_casual")
+        case .free: return String(localized: "work_dress_free")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .uniform: return "lanyardcard.fill"
+        case .business: return "briefcase.fill"
+        case .smartCasual: return "tshirt.fill"
+        case .free: return "figure.walk"
+        }
+    }
+
+    /// Added to the day's formality on a work day.
+    var formalityBoost: Int {
+        switch self {
+        case .uniform, .free: return 0
+        case .business: return 2
+        case .smartCasual: return 1
+        }
     }
 }

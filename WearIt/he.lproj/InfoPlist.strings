@@ -1,0 +1,3 @@
+/* Calendar permission prompt */
+"NSCalendarsFullAccessUsageDescription" = "WearIt קורא את היומן כדי להתאים לוקים ליום שלך: אימונים, עבודה, ארוחות ערב, חתונות וערבי חג. האירועים לא יוצאים מהמכשיר.";
+"NSCalendarsUsageDescription" = "WearIt קורא את היומן כדי להתאים לוקים ליום שלך: אימונים, עבודה, ארוחות ערב, חתונות וערבי חג. האירועים לא יוצאים מהמכשיר.";

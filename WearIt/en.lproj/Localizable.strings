@@ -931,3 +931,32 @@
 "style_insight_plain" = "Plain pieces over patterns";
 "profile_formulas_title" = "Your formulas";
 "profile_formula_worn_format" = "Worn %d times";
+
+/* Calendar understanding */
+"calendar_hint_mourning" = "Mourning — modest, muted colors";
+"look_occasion_mourning" = "a time of mourning";
+"calendar_correct_title" = "What is this event?";
+"calendar_kind_sport" = "A workout";
+"calendar_kind_work" = "Work";
+"calendar_kind_social" = "Going out / meeting friends";
+"calendar_kind_formal" = "A celebration or formal event";
+"calendar_kind_outdoor" = "Outdoors";
+"calendar_kind_travel" = "Travel";
+"calendar_kind_mourning" = "Mourning";
+"calendar_kind_none" = "Doesn't change what I wear";
+"calendar_reminder_sport_format" = "%@ · pack your gym clothes";
+"calendar_reminder_uniform" = "Work day · your usual work clothes";
+"calendar_connect_title" = "Connect your calendar";
+"calendar_connect_subtitle" = "I'll match looks to your workouts, work and events";
+"calendar_access_denied" = "Calendar access is off in iOS Settings, so events can't be read.";
+"calendar_open_settings" = "Open Settings";
+"work_dress_question" = "What do you wear to work?";
+"work_dress_question_subtitle" = "I saw work on your calendar. I'll dress work days to match.";
+"work_dress_uniform" = "Uniform / fixed work clothes";
+"work_dress_business" = "Business / formal";
+"work_dress_smart_casual" = "Smart casual";
+"work_dress_free" = "Anything goes";
+"work_dress_setting" = "Work dress code";
+"work_dress_not_set" = "Not set";
+"edit_for_workouts" = "For workouts";
+"edit_for_work" = "For work";
