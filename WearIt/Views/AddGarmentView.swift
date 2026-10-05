@@ -36,6 +36,10 @@ struct AddGarmentView: View {
         var colorTags: [ColorTag] = []
         var aiConfidence: Float = 0
         var usedAI = false
+        /// The user picked the category on the card; AI refinement keeps it.
+        var categoryConfirmed = false
+        var pattern: PatternTag?
+        var sleeveLength: SleeveLength?
     }
 
     @State private var batchItems: [BatchItem] = []
@@ -98,6 +102,15 @@ struct AddGarmentView: View {
     @State private var aiSuggestedCategory: Category?
     @State private var aiSuggestedItemType: ItemType?
     @State private var aiSuggestedColors: [ColorTag] = []
+    @State private var aiSuggestedPattern: PatternTag?
+    @State private var aiSuggestedFit: FitTag?
+    /// Seen by on-device AI; saved for tops so the sleeve question isn't asked.
+    @State private var sleeveLength: SleeveLength?
+    /// Cutout choices + photo problems from the last analysis.
+    @State private var cutoutSuggestion: AutoFillSuggestion?
+    /// Drops late AI results after the photo or cutout choice changed.
+    @State private var aiGeneration = UUID()
+    @State private var isRefining = false
 
     // UI
     @State private var showCamera = false
@@ -803,6 +816,7 @@ struct AddGarmentView: View {
     private func setBatchCategory(_ category: Category, for id: UUID) {
         guard let index = batchItems.firstIndex(where: { $0.id == id }) else { return }
         batchItems[index].category = category
+        batchItems[index].categoryConfirmed = true
         if let type = batchItems[index].itemType, !category.itemTypes.contains(type) {
             batchItems[index].itemType = nil
         }
@@ -833,6 +847,33 @@ struct AddGarmentView: View {
                     batchItems[index].usedAI = suggestion.category != nil || !suggestion.colorTags.isEmpty
                     batchItems[index].status = suggestion.category == nil ? .needsCategory : .ready
                 }
+            }
+            await refineBatch()
+        }
+    }
+
+    /// Second pass once every card is reviewable: on-device Foundation Models
+    /// improves type and adds pattern / sleeve. Never overrides a user's pick.
+    private func refineBatch() async {
+        for item in batchItems {
+            guard flowState == .batchReview, !isSavingBatch else { return }
+            guard let refinement = await AutoFillService.refine(item.display ?? item.original, categoryHint: nil),
+                  let index = batchItems.firstIndex(where: { $0.id == item.id }) else { continue }
+            var current = batchItems[index]
+            if !current.categoryConfirmed, let category = refinement.category {
+                current.category = category
+                current.itemType = refinement.itemType
+                current.usedAI = true
+                if current.status == .needsCategory { current.status = .ready }
+            } else if current.itemType == nil, let type = refinement.itemType,
+                      current.category?.itemTypes.contains(type) == true {
+                current.itemType = type
+            }
+            if current.colorTags.isEmpty { current.colorTags = refinement.colorTags }
+            current.pattern = refinement.pattern
+            current.sleeveLength = refinement.sleeveLength
+            withAnimation(DS.Animation.standard) {
+                batchItems[index] = current
             }
         }
     }
@@ -872,6 +913,7 @@ struct AddGarmentView: View {
                 category: category,
                 itemType: item.itemType,
                 colorTags: item.colorTags,
+                patternTag: item.pattern,
                 imagePath: imagePath,
                 thumbnailPath: thumbnailPath,
                 originalImagePath: originalPath,
@@ -881,6 +923,9 @@ struct AddGarmentView: View {
                 aiConfidence: item.aiConfidence > 0 ? item.aiConfidence : nil,
                 aiProcessedAt: item.usedAI ? Date() : nil
             )
+            if category == .top, let sleeve = item.sleeveLength {
+                garment.sleeveLength = sleeve
+            }
             if let profile {
                 garment.ownerID = profile.id
                 if !profile.garmentIDs.contains(garment.id) {
@@ -1013,7 +1058,17 @@ struct AddGarmentView: View {
             }
             .foregroundStyle(.secondary)
 
-            if didApplyAISuggestions {
+            if let cutoutSuggestion {
+                cutoutChoices(cutoutSuggestion)
+            }
+
+            if isRefining {
+                Label(String(localized: "add_garment_ai_refining"), systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .symbolEffect(.pulse)
+            } else if didApplyAISuggestions {
                 Label(
                     String(localized: barcodeNeedsPhoto && selectedImage == nil
                         ? "barcode_details_filled"
@@ -1429,6 +1484,69 @@ struct AddGarmentView: View {
         }
     }
 
+    /// Cutout picker (several items, or top / bottom / shoes of a selfie) and
+    /// a retake hint when the photo itself is the problem.
+    @ViewBuilder
+    private func cutoutChoices(_ suggestion: AutoFillSuggestion) -> some View {
+        if suggestion.candidates.count > 1 {
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                Text(String(localized: "cutout_choose_title"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        ForEach(Array(suggestion.candidates.enumerated()), id: \.element.id) { index, candidate in
+                            let isSelected = index == suggestion.selectedCandidateIndex
+                            Button {
+                                selectCutout(candidate)
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(uiImage: candidate.image)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 56, height: 64)
+                                        .padding(4)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                                .fill(Color(.secondarySystemBackground).opacity(0.6))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                                        )
+                                    Text(candidate.title)
+                                        .font(.caption2.weight(isSelected ? .semibold : .regular))
+                                        .foregroundStyle(isSelected ? .primary : .secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isAnalyzing)
+                            .accessibilityLabel(candidate.title)
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if let issue = suggestion.qualityIssues.first {
+            HStack(spacing: DS.Spacing.sm) {
+                Label(issue.message, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(String(localized: "add_garment_retake")) {
+                    showCamera = true
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
     private var analyzingOverlay: some View {
         VStack(spacing: DS.Spacing.sm) {
             ProgressView()
@@ -1509,9 +1627,10 @@ struct AddGarmentView: View {
                     isAnalyzing = true
                 }
 
-                let suggestion = await AutoFillService.suggest(from: image)
+                let suggestion = await AutoFillService.suggest(from: image, preferredCategory: category)
                 await MainActor.run {
                     guard barcodeLookupGeneration == generation else { return }
+                    if suggestion.candidates.count > 1 { cutoutSuggestion = suggestion }
                     // Only fill gaps — barcode / page metadata wins for brand/title/category.
                     if colorTags.isEmpty, !suggestion.colorTags.isEmpty {
                         colorTags = suggestion.colorTags
@@ -1530,6 +1649,9 @@ struct AddGarmentView: View {
                     }
                     applyTypeDefaultsToState()
                     isAnalyzing = false
+                    let aiRun = UUID()
+                    aiGeneration = aiRun
+                    startRefinement(for: suggestion, generation: aiRun)
                 }
             } catch {
                 await MainActor.run {
@@ -1569,6 +1691,12 @@ struct AddGarmentView: View {
         aiSuggestedCategory = nil
         aiSuggestedItemType = nil
         aiSuggestedColors = []
+        aiSuggestedPattern = nil
+        aiSuggestedFit = nil
+        sleeveLength = nil
+        cutoutSuggestion = nil
+        isRefining = false
+        aiGeneration = UUID()
         aiConfidence = 0
         // Keep planner pre-selection only until the new product applies its own category.
         category = nil
@@ -1671,6 +1799,9 @@ struct AddGarmentView: View {
             aiSuggestedItemType = nil
             aiSuggestedColors = []
         }
+        cutoutSuggestion = nil
+        let generation = UUID()
+        aiGeneration = generation
 
         persistDisplayImage(cropped, original: original)
         withAnimation(DS.Animation.standard) {
@@ -1678,15 +1809,109 @@ struct AddGarmentView: View {
         }
 
         Task {
-            let suggestion = await AutoFillService.suggest(from: cropped)
+            let suggestion = await AutoFillService.suggest(from: cropped, preferredCategory: category)
             await MainActor.run {
+                guard aiGeneration == generation else { return }
                 applySuggestion(suggestion, original: original)
                 if keepLookupSuggestions {
                     didApplyAISuggestions = true
                 }
                 isAnalyzing = false
+                startRefinement(for: suggestion, generation: generation)
             }
         }
+    }
+
+    /// The user picked another cutout (another item, or top / bottom / shoes of
+    /// a selfie). Guesses that came from the previous cutout are cleared first.
+    private func selectCutout(_ candidate: CutoutCandidate) {
+        guard let base = cutoutSuggestion, !isAnalyzing,
+              base.candidates.indices.contains(base.selectedCandidateIndex),
+              base.candidates[base.selectedCandidateIndex].id != candidate.id else { return }
+        let generation = UUID()
+        aiGeneration = generation
+        isAnalyzing = true
+        isRefining = false
+        if category == aiSuggestedCategory { category = nil }
+        if itemType == aiSuggestedItemType { itemType = nil }
+        if colorTags == aiSuggestedColors { colorTags = [] }
+        if patternTag == aiSuggestedPattern { patternTag = nil }
+        if fitTag == aiSuggestedFit { fitTag = nil }
+        sleeveLength = nil
+        DS.haptic(0.3)
+        let original = originalPickedImage ?? candidate.image
+
+        Task {
+            let suggestion = await AutoFillService.describe(candidate, in: base)
+            await MainActor.run {
+                guard aiGeneration == generation else { return }
+                applySuggestion(suggestion, original: original)
+                isAnalyzing = false
+                startRefinement(for: suggestion, generation: generation)
+            }
+        }
+    }
+
+    /// Slower on-device look (Foundation Models with the image, iOS 27).
+    /// Fills only what the user hasn't set; replaces the instant guesses.
+    private func startRefinement(for suggestion: AutoFillSuggestion, generation: UUID) {
+        guard suggestion.usedCutout || suggestion.category != nil else { return }
+        let hint = suggestion.candidates.indices.contains(suggestion.selectedCandidateIndex)
+            ? suggestion.candidates[suggestion.selectedCandidateIndex].categoryHint : nil
+        isRefining = true
+        Task {
+            let refinement = await AutoFillService.refine(suggestion.displayImage, categoryHint: hint)
+            await MainActor.run {
+                guard aiGeneration == generation else { return }
+                isRefining = false
+                if let refinement { applyRefinement(refinement) }
+            }
+        }
+    }
+
+    private func applyRefinement(_ refinement: AutoFillRefinement) {
+        var applied = false
+        if let suggested = refinement.category, category == nil || category == aiSuggestedCategory {
+            if category != suggested {
+                category = suggested
+                if let type = itemType, !suggested.itemTypes.contains(type) { itemType = nil }
+                applied = true
+            }
+            aiSuggestedCategory = suggested
+        }
+        if let suggested = refinement.itemType, itemType == nil || itemType == aiSuggestedItemType,
+           category?.itemTypes.contains(suggested) == true {
+            if itemType != suggested {
+                itemType = suggested
+                applied = true
+            }
+            aiSuggestedItemType = suggested
+        }
+        if !refinement.colorTags.isEmpty, colorTags.isEmpty || colorTags == aiSuggestedColors {
+            if colorTags != refinement.colorTags {
+                colorTags = refinement.colorTags
+                applied = true
+            }
+            aiSuggestedColors = refinement.colorTags
+        }
+        if let pattern = refinement.pattern, patternTag == nil {
+            patternTag = pattern
+            aiSuggestedPattern = pattern
+            applied = true
+        }
+        if let fit = refinement.fit, fitTag == nil, shouldShowFit {
+            fitTag = fit
+            aiSuggestedFit = fit
+            applied = true
+        }
+        if sleeveLength == nil { sleeveLength = refinement.sleeveLength }
+        guard applied else { return }
+        didApplyAISuggestions = true
+        applyTypeDefaultsToState()
+        if category != nil, focusedSection == .essentials {
+            withAnimation(DS.Animation.standard) { focusedSection = nil }
+        }
+        DS.haptic(0.3)
     }
 
     private func persistDisplayImage(_ display: UIImage, original: UIImage) {
@@ -1707,6 +1932,7 @@ struct AddGarmentView: View {
     }
 
     private func applySuggestion(_ suggestion: AutoFillSuggestion, original: UIImage) {
+        cutoutSuggestion = suggestion.candidates.count > 1 || !suggestion.qualityIssues.isEmpty ? suggestion : nil
         selectedImage = suggestion.displayImage
         persistDisplayImage(suggestion.displayImage, original: original)
 
@@ -1836,6 +2062,10 @@ struct AddGarmentView: View {
             aiProcessedAt: didApplyAISuggestions ? Date() : nil
         )
 
+        if selectedCategory == .top, let sleeveLength {
+            garment.sleeveLength = sleeveLength
+        }
+
         if !scannedMaterials.isEmpty {
             // From care label / product QR — treat as verified so AI enrichment won't overwrite.
             garment.materialTags = scannedMaterials
@@ -1925,6 +2155,12 @@ struct AddGarmentView: View {
         aiSuggestedCategory = nil
         aiSuggestedItemType = nil
         aiSuggestedColors = []
+        aiSuggestedPattern = nil
+        aiSuggestedFit = nil
+        sleeveLength = nil
+        cutoutSuggestion = nil
+        isRefining = false
+        aiGeneration = UUID()
         userEditedFields = []
         focusedSection = nil
         showAllDetails = false
