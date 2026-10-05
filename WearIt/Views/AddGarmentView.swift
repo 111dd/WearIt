@@ -368,7 +368,7 @@ struct AddGarmentView: View {
 
                     Button {
                         DS.haptic(0.5)
-                        productLinkText = UIPasteboard.general.string ?? ""
+                        productLinkText = ""
                         showProductLinkSheet = true
                     } label: {
                         Label(String(localized: "add_garment_paste_link"), systemImage: "link")
@@ -430,14 +430,20 @@ struct AddGarmentView: View {
                 }
 
                 Section {
-                    Button {
-                        if let clipped = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                           !clipped.isEmpty {
-                            productLinkText = clipped
+                    // System paste control: no "allow paste" prompt. A pasted link is fetched right away.
+                    PasteButton(payloadType: String.self) { strings in
+                        Task { @MainActor in
+                            guard let pasted = strings.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !pasted.isEmpty else { return }
+                            productLinkText = pasted
+                            if ProductPageMetadataService.productPageURL(from: pasted) != nil {
+                                showProductLinkSheet = false
+                                lookupProductLink(pasted)
+                            }
                         }
-                    } label: {
-                        Label(String(localized: "add_garment_paste_from_clipboard"), systemImage: "doc.on.clipboard")
                     }
+                    .buttonBorderShape(.capsule)
+                    .labelStyle(.titleAndIcon)
                 }
             }
             .navigationTitle(String(localized: "add_garment_paste_link"))
@@ -1616,10 +1622,8 @@ struct AddGarmentView: View {
                     isFetchingProductPage = false
                 }
 
-                guard let imageURL = product.imageURL else { return }
-
-                let image = try? await BarcodeLookupService.downloadImage(from: imageURL)
-                guard let image else { return }
+                // Shops list several photos; take the item on its own over a model shot.
+                guard let image = await ProductImagePicker.bestImage(from: product.imageURLs) else { return }
 
                 await MainActor.run {
                     guard barcodeLookupGeneration == generation else { return }
@@ -1744,6 +1748,9 @@ struct AddGarmentView: View {
         }
         colorTags = product.colors
         sizeOption = product.size
+        patternTag = product.pattern
+        fitTag = product.fit
+        sleeveLength = product.sleeveLength
         scannedMaterials = product.materials
         if !product.materials.isEmpty {
             userEditedFields.insert(ItemTypeDefaults.FieldKey.materialTags)

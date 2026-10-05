@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Product links: the variant in the URL is the item the user has
+- **Did:** Shopify / Zara adapters, `ProductGroup` variant selection, all photos + `ProductImagePicker`, `WebPageRenderer` fallback, description → fit/sleeve/pattern/material.
+- **Why:** links filled the first color and the first size on the page (usually XS), took the model photo, and failed on text like "Check out… https://…" or `&amp;` in pasted links.
+- **Watch:** the cloud container can't reach shop sites (proxy blocks them), so adapters were written from the shops' known JSON shapes and must stay defensive. `WebPageRenderer` is slow (up to 15 s); it runs only when the plain fetch yields nothing.
+
 ## 2026-10-05 — Add-garment category detection had never worked
 - **Did:** `GarmentCutoutService` + `GarmentVisionClassifier` + `AutoFillService.refine` (Foundation Models image input) replace `ClothingAIPipeline`, whose classifier and segmentation models were stubs that threw.
 - **Why:** only colors and the cutout were auto-filled; `GarmentImageUnderstandingService` existed but was never called.

@@ -9,7 +9,8 @@ protocol ProductURLResolver {
 enum ProductURLResolverRegistry {
     /// Order matters — first match wins. Digimarc/RL before generic scrape.
     static let resolvers: [ProductURLResolver.Type] = [
-        DigimarcProductIDService.self
+        DigimarcProductIDService.self,
+        ZaraProductService.self
     ]
 
     static func resolver(for url: URL) -> ProductURLResolver.Type? {

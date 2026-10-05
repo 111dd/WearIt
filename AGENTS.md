@@ -115,6 +115,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - **Enrichment provenance**: fields auto-filled by AI/defaults are tracked in
   `Garment.aiEnrichedFieldsRaw`; a manual edit removes the key.
 - **Product text → taxonomy** always goes through `ProductFieldMapper`.
+- **Product links**: shop-specific sources go in `Services/ShopProductAdapters` (Zara also registered in
+  `ProductURLResolverRegistry`) and build the result with `ProductPageMetadataService.makeProduct`; they return
+  nil / fall back to the generic reader instead of failing. Never fill size from a product page.
 - **RecoState features**: append new features at the end of `FeatureSpace` so old
   weights migrate by zero-padding, and bump `RecoState.version`.
 - Widget types (`TodaySnapshot`, `WidgetCommand`) are duplicated in
@@ -124,6 +127,13 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 ## Progress log
 
 Newest first. One line per meaningful change: date, tool, what.
+
+- 2026-10-05 · Claude Code · Smarter product links (`plans/add-garment-smarter.md` step A): link found inside any
+  shared text, `&amp;` and tracking params cleaned; Shopify `/products/<handle>.js` and Zara `?ajax=true` adapters
+  (`Services/ShopProductAdapters`) pick the linked color/variant; JSON-LD `ProductGroup` variants; all product
+  photos collected and `ProductImagePicker` chooses the item-alone shot; fit/sleeve/pattern/material (incl.
+  Hebrew) read from title + description; page size no longer auto-filled; hidden `WebPageRenderer` (WKWebView)
+  when a page is blocked or built in JS; `PasteButton` instead of reading the clipboard.
 
 - 2026-10-05 · Claude Code · Garment understanding + smart cutout (plan: project `plans/ai-everywhere.md`
   steps 1–2). Add-garment now classifies with Apple's built-in Vision classifier instantly and refines
