@@ -7,8 +7,8 @@
 //  - Future days: no buttons at all — the plan is the content.
 //  - Once answered: a small status mark on the corner; tapping it undoes or fine-tunes.
 //  - Right after "worn": a one-tap "How was it?" emoji strip, then it disappears.
-//  Gestures carry the rest: swipe the look sideways to replace it, double-tap an
-//  item to love the look (handled by the tile), tap an item for quick swaps.
+//  Gestures carry the rest: swipe the look sideways to replace it, tap an item
+//  for quick swaps (handled by the tile).
 //  Every gesture is mirrored as a VoiceOver action.
 //
 
@@ -63,7 +63,6 @@ struct OutfitLookRow<Content: View>: View {
                 .overlay { heartOverlay }
                 .offset(x: swipeOffset)
                 .opacity(1 - min(0.5, abs(swipeOffset) / 300))
-                .simultaneousGesture(swipeGesture)
 
             if showsWearPrompt {
                 wearPrompt
@@ -74,6 +73,7 @@ struct OutfitLookRow<Content: View>: View {
             }
         }
         .opacity(isBusy ? 0.65 : 1)
+        .gesture(swipeGesture)
         .animation(reduceMotion ? nil : DS.Animation.standard, value: showsWearPrompt)
         .animation(reduceMotion ? nil : DS.Animation.standard, value: showsReactionStrip)
         .onChange(of: feedback?.isLoved ?? false) { _, loved in
@@ -315,27 +315,24 @@ struct OutfitLookRow<Content: View>: View {
 
     // MARK: - Swipe to replace
 
-    private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onChanged { value in
-                guard !isBusy else { return }
-                let dx = value.translation.width
-                let dy = value.translation.height
-                // Only clearly horizontal drags; vertical scrolling keeps working.
-                guard abs(dx) > abs(dy) * 1.6 else { return }
-                swipeOffset = dx * 0.55
-            }
-            .onEnded { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
-                let isHorizontal = abs(dx) > abs(dy) * 1.6
-                let travel = max(abs(dx), abs(value.predictedEndTranslation.width) * 0.6)
-                guard isHorizontal, travel >= Self.swipeCommitDistance, !isBusy else {
+    private var swipeGesture: HorizontalSwipeGesture {
+        HorizontalSwipeGesture(
+            isEnabled: !isBusy,
+            onChanged: { travel in
+                swipeOffset = travel * 0.55
+            },
+            onEnded: { travel, speed in
+                let isFling = abs(travel) >= 30 && speed >= 700
+                guard abs(travel) >= Self.swipeCommitDistance || isFling, !isBusy else {
                     withAnimation(reduceMotion ? nil : DS.Animation.standard) { swipeOffset = 0 }
                     return
                 }
-                commitSwipe(direction: dx >= 0 ? 1 : -1)
+                commitSwipe(direction: travel >= 0 ? 1 : -1)
+            },
+            onCancelled: {
+                withAnimation(reduceMotion ? nil : DS.Animation.standard) { swipeOffset = 0 }
             }
+        )
     }
 
     /// Slide the old look out, replace it, and bring the new one in from the other side.

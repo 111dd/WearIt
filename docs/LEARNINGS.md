@@ -2,6 +2,12 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Swipe in a ScrollView and double-tap delay
+
+- **Did:** Swipe-to-replace is a `UIGestureRecognizerRepresentable` pan (`HorizontalSwipeGesture`) that fails as soon as movement is more vertical than horizontal. Removed the tile double-tap.
+- **Why:** A SwiftUI `DragGesture` on planner content (inside the vertical ScrollView, around tiles with `onDrag`/`contextMenu`) did not fire reliably on iOS 18. A double-tap next to a single tap makes every single tap wait; dor found that delay annoying.
+- **Watch:** Don't add `onTapGesture(count: 2)` on planner tiles. New sideways gestures in scroll content should reuse `HorizontalSwipeGesture`.
+
 ## 2026-10-05 — Look card is gesture-first
 
 - **Did:** `OutfitLookRow` shows only the action that fits the moment (wear prompt today/past, nothing on future days, corner status mark after), a post-wear reaction strip, swipe-to-replace (`DragGesture` via `simultaneousGesture`, horizontal-only), and the planner tile now double-taps to love and single-taps to open `quickSwapStrip`.

@@ -875,4 +875,4 @@
 "planner_did_you_wear_question" = "Did you wear it?";
 "planner_how_was_it" = "How was it?";
 "planner_item_details" = "Item details";
-"planner_gesture_hint" = "Swipe a look for a new one, double-tap an item to love the look, tap an item for alternatives.";
+"planner_gesture_hint" = "Swipe a look sideways for a new one, tap an item for alternatives.";

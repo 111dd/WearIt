@@ -800,6 +800,14 @@ struct OutfitPlannerView: View {
                     Label(String(localized: "planner_swipe_will_wear"), systemImage: "calendar.badge.checkmark")
                 }
             }
+            if !boardState.days[dayIndex].assignedGarmentIDs.isEmpty,
+               boardState.days[dayIndex].feedback != .loved {
+                Button {
+                    loveLook(dayIndex: dayIndex)
+                } label: {
+                    Label(String(localized: "planner_love_it"), systemImage: "heart")
+                }
+            }
             if dayTiming(for: dayIndex) != .future, isConfirmed(dayIndex) {
                 Button {
                     unconfirmDay(dayIndex: dayIndex)
@@ -2110,12 +2118,7 @@ struct OutfitPlannerView: View {
             )) { providers in
                 return handleDrop(providers: providers, targetDay: dayIndex, targetSlot: slot, lookTime: lookTime)
             }
-            // Double-tap loves the look; it is declared first so a single tap
-            // waits for it to fail before opening quick swaps.
-            .onTapGesture(count: 2) {
-                guard lookTime == .day else { return }
-                loveLook(dayIndex: dayIndex)
-            }
+            // Single tap only: a double-tap gesture here would delay every tap.
             .onTapGesture {
                 DS.haptic(0.3)
                 if isLocked || isLinked {

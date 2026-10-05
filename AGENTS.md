@@ -121,6 +121,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Look card gestures fixed: swipe-to-replace now uses a UIKit pan
+  (`UI/HorizontalSwipeGesture`) that fails on vertical movement; tile double-tap removed so a tap
+  opens quick swaps instantly; "Love" moved to the day ⋯ menu (plus the reaction strip / status mark).
 - 2026-10-05 · Claude Code · Flowing look card (`UI/OutfitLookRow`): today/past shows one
   "Did you wear it?" ✓/✕ line, future shows no buttons ("I'll wear this" moved to the day ⋯ menu),
   a corner status mark holds undo + fine-tune, a one-time 😍🥶🥵👎 strip after "worn". Gestures:
