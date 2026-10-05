@@ -27,7 +27,7 @@ enum ProductFieldMapper {
         let bottomScore: Int = {
             let phrases = [
                 "sweatpant", "legging", "trouser", "jogger", "chino", "skirt", "jean", "jeans", "pant", "pants", "bottom", "shorts",
-                "מכנסיים", "ג'ינס", "גינס", "שורט", "חצאית", "טייץ"
+                "מכנסיים", "מכנסי", "ג'ינס", "גינס", "שורט", "חצאית", "טייץ", "טרנינג"
             ]
             if hasStandaloneShorts(haystack) {
                 return max(bestScore(haystack, phrases), 8)
@@ -287,13 +287,64 @@ enum ProductFieldMapper {
     static func mapMaterials(_ raw: String?) -> [MaterialTag] {
         guard let raw, !raw.isEmpty else { return [] }
         let haystack = normalize(raw)
+        // Hebrew shop pages ("92% כותנה, 8% פוליאסטר") and common synonyms.
+        let aliases: [MaterialTag: [String]] = [
+            .cotton: ["כותנה"], .linen: ["פשתן"], .wool: ["צמר"], .cashmere: ["קשמיר"],
+            .silk: ["משי"], .polyester: ["פוליאסטר"], .nylon: ["ניילון", "polyamide", "פוליאמיד"],
+            .spandex: ["elastane", "lycra", "אלסטן", "ספנדקס", "לייקרה"], .suede: ["זמש"],
+            .fleece: ["פליז"], .velvet: ["קטיפה"], .corduroy: ["קורדרוי"]
+        ]
         var result: [MaterialTag] = []
-        for tag in MaterialTag.allCases where haystack.contains(tag.rawValue) {
+        for tag in MaterialTag.allCases
+        where haystack.contains(tag.rawValue) || (aliases[tag] ?? []).contains(where: { haystack.contains($0) }) {
             if !result.contains(tag) {
                 result.append(tag)
             }
         }
         return result
+    }
+
+    // MARK: - Description phrases
+
+    /// "Relaxed fit", "גזרה רחבה"… from a product title or description.
+    static func mapFit(_ raw: String?) -> FitTag? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let pairs: [(FitTag, [String])] = [
+            (.oversized, ["oversize", "אוברסייז"]),
+            (.relaxed, ["relaxed fit", "loose fit", "wide fit", "baggy", "גזרה רחבה", "גזרה רפויה", "גזרה משוחררת"]),
+            (.skinny, ["skinny", "סקיני"]),
+            (.slim, ["slim fit", "slim-fit", "גזרה צרה", "סלים"]),
+            (.regular, ["regular fit", "classic fit", "straight fit", "גזרה רגילה", "גזרה ישרה"])
+        ]
+        let text = normalize(raw)
+        return pairs.first { $0.1.contains(where: { text.contains($0) }) }?.0
+    }
+
+    static func mapSleeve(_ raw: String?) -> SleeveLength? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let text = normalize(raw)
+        if ["long sleeve", "long-sleeve", "שרוול ארוך", "שרוולים ארוכים"].contains(where: { text.contains($0) }) {
+            return .long
+        }
+        if ["short sleeve", "short-sleeve", "שרוול קצר", "שרוולים קצרים"].contains(where: { text.contains($0) }) {
+            return .short
+        }
+        return nil
+    }
+
+    static func mapPattern(_ raw: String?) -> PatternTag? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let pairs: [(PatternTag, [String])] = [
+            (.striped, ["striped", "stripe", "פסים"]),
+            (.plaid, ["plaid", "tartan", "flannel check"]),
+            (.checkered, ["checked", "checkered", "gingham", "משבצות"]),
+            (.floral, ["floral", "flower print", "פרחוני", "פרחים"]),
+            (.polkaDot, ["polka dot", "נקודות"]),
+            (.camouflage, ["camo", "הסוואה"]),
+            (.animalPrint, ["leopard", "zebra", "animal print", "נמר"])
+        ]
+        let text = normalize(raw)
+        return pairs.first { $0.1.contains(where: { text.contains($0) }) }?.0
     }
 
     // MARK: - Apparel gate

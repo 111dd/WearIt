@@ -21,7 +21,12 @@ enum ProductPageMetadataService {
     /// Returns a fetchable page URL when the scanned payload is an http(s) link.
     /// `http` links are upgraded to `https` (ATS blocks plain http anyway).
     static func productPageURL(from raw: String) -> URL? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Shared text ("Check out this item… https://…") and HTML-escaped query strings.
+        let unescaped = raw.replacingOccurrences(of: "&amp;", with: "&")
+        var trimmed = unescaped.trimmingCharacters(in: .whitespacesAndNewlines)
+        if URLComponents(string: trimmed)?.host == nil || trimmed.contains(" ") {
+            trimmed = firstLink(in: unescaped) ?? trimmed
+        }
         guard var components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
@@ -31,44 +36,62 @@ enum ProductPageMetadataService {
         if scheme == "http" {
             components.scheme = "https"
         }
+        // Ad / campaign tracking only makes caching and matching worse.
+        let tracking = ["utm_", "gclid", "gad_", "fbclid", "gbraid", "wbraid", "_ga", "mc_", "igsh", "srsltid"]
+        let kept = components.queryItems?.filter { item in
+            !tracking.contains { item.name.lowercased().hasPrefix($0) }
+        }
+        components.queryItems = (kept?.isEmpty ?? true) ? nil : kept
         return components.url
     }
 
+    private static func firstLink(in text: String) -> String? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        return detector.matches(in: text, range: range)
+            .compactMap(\.url)
+            .first { ["http", "https"].contains($0.scheme?.lowercased() ?? "") }?
+            .absoluteString
+    }
+
+    /// Order: Shopify's product JSON (exact variant, all photos) → page HTML
+    /// (JSON-LD, Open Graph) → the same page rendered in a hidden browser, for
+    /// shops that build the page in JavaScript or block plain requests → URL slug.
     static func fetch(url: URL) async throws -> BarcodeProduct {
-        do {
-            let html = try await downloadHTML(from: url)
-            let breadcrumbs = parseBreadcrumbs(html: html)
-
-            let fromJSONLD = parseJSONLD(html: html, sourceURL: url, breadcrumbs: breadcrumbs)
-            let fromOG = parseOpenGraph(html: html, sourceURL: url, breadcrumbs: breadcrumbs)
-
-            var pageProduct: BarcodeProduct?
-            if let merged = mergeProducts(primary: fromJSONLD, secondary: fromOG) {
-                pageProduct = merged
-            } else {
-                pageProduct = fromJSONLD ?? fromOG
-            }
-
-            if var product = pageProduct {
-                // If JSON-LD exposed a real GTIN, try Barcode Lookup and merge richer fields.
-                if let gtin = extractGTIN(fromBarcodeField: product.barcode),
-                   let apiProduct = try? await BarcodeLookupService.lookup(barcode: gtin) {
-                    product = mergeProducts(primary: apiProduct, secondary: product) ?? apiProduct
-                }
-                return product
-            }
-        } catch ProductPageMetadataError.pageUnavailable {
-            // ASOS and similar often block automated fetches — recover from the URL slug.
-            if let fromSlug = productFromURLSlug(url) {
-                return fromSlug
-            }
-            throw ProductPageMetadataError.pageUnavailable
+        if let shopify = await ShopifyProductService.fetch(url) {
+            return shopify
         }
 
+        var html = try? await downloadHTML(from: url)
+        var product = html.flatMap { parse(html: $0, sourceURL: url) }
+        if product == nil, let rendered = await WebPageRenderer.html(for: url) {
+            html = rendered
+            product = parse(html: rendered, sourceURL: url)
+        }
+
+        if var product {
+            // If JSON-LD exposed a real GTIN, try Barcode Lookup and merge richer fields.
+            if let gtin = extractGTIN(fromBarcodeField: product.barcode),
+               let apiProduct = try? await BarcodeLookupService.lookup(barcode: gtin) {
+                product = mergeProducts(primary: apiProduct, secondary: product) ?? apiProduct
+            }
+            return product
+        }
+
+        // ASOS and similar often block automated fetches — recover from the URL slug.
         if let fromSlug = productFromURLSlug(url) {
             return fromSlug
         }
-        throw ProductPageMetadataError.noMetadataFound
+        throw html == nil ? ProductPageMetadataError.pageUnavailable : ProductPageMetadataError.noMetadataFound
+    }
+
+    static func parse(html: String, sourceURL url: URL) -> BarcodeProduct? {
+        let breadcrumbs = parseBreadcrumbs(html: html)
+        let fromJSONLD = parseJSONLD(html: html, sourceURL: url, breadcrumbs: breadcrumbs)
+        let fromOG = parseOpenGraph(html: html, sourceURL: url, breadcrumbs: breadcrumbs)
+        return mergeProducts(primary: fromJSONLD, secondary: fromOG) ?? fromJSONLD ?? fromOG
     }
 
     /// When HTML is blocked (common on ASOS), recover brand/title/color from SEO-friendly path:
@@ -137,7 +160,8 @@ enum ProductPageMetadataService {
             size: nil,
             material: nil,
             categoryPath: pathHint,
-            imageURL: imageURL,
+            imageURLs: imageURL.map { [$0] } ?? [],
+            description: nil,
             barcodeOverride: nil,
             sourceURL: url
         )
@@ -180,7 +204,7 @@ enum ProductPageMetadataService {
             return primary.barcode
         }()
 
-        return BarcodeProduct(
+        var merged = BarcodeProduct(
             barcode: barcode,
             title: title,
             brand: brand,
@@ -192,6 +216,15 @@ enum ProductPageMetadataService {
             categoryPath: primary.categoryPath ?? secondary.categoryPath,
             materials: primary.materials.isEmpty ? secondary.materials : primary.materials
         )
+        var images: [URL] = []
+        for url in primary.imageURLs + secondary.imageURLs where !images.contains(url) {
+            images.append(url)
+        }
+        merged.imageURLs = images
+        merged.fit = primary.fit ?? secondary.fit
+        merged.sleeveLength = primary.sleeveLength ?? secondary.sleeveLength
+        merged.pattern = primary.pattern ?? secondary.pattern
+        return merged
     }
 
     private static func extractGTIN(fromBarcodeField value: String) -> String? {
@@ -263,7 +296,7 @@ enum ProductPageMetadataService {
     /// Finds the first `@type: Product` object at the top level, inside arrays, or inside `@graph`.
     private static func findProductObject(in node: Any) -> [String: Any]? {
         if let dict = node as? [String: Any] {
-            if isType(dict["@type"], named: "Product") {
+            if isType(dict["@type"], named: "Product") || isType(dict["@type"], named: "ProductGroup") {
                 return dict
             }
             if let graph = dict["@graph"] as? [Any] {
@@ -348,17 +381,22 @@ enum ProductPageMetadataService {
     }
 
     private static func mapJSONLDProduct(
-        _ dict: [String: Any],
+        _ group: [String: Any],
         sourceURL: URL,
         breadcrumbs: String
     ) -> BarcodeProduct? {
-        let name = (dict["name"] as? String).flatMap(cleanText)
+        // ProductGroup: the variant the link points at supplies color, photos and GTIN.
+        let variant = selectedVariant(in: group, sourceURL: sourceURL)
+        let dict = group.merging(variant ?? [:]) { _, fromVariant in fromVariant }
+        let name = (group["name"] as? String).flatMap(cleanText) ?? (dict["name"] as? String).flatMap(cleanText)
         let brand = brandName(from: dict["brand"])
         let color = stringValue(dict["color"])
-        let imageURL = firstImageURL(from: dict["image"], relativeTo: sourceURL)
+        var images = allImageURLs(from: variant?["image"], relativeTo: sourceURL)
+        for url in allImageURLs(from: group["image"], relativeTo: sourceURL) where !images.contains(url) {
+            images.append(url)
+        }
         let material = stringValue(dict["material"]) ?? stringValue(dict["materialExtent"])
-        let size = stringValue(dict["size"])
-            ?? offerString(dict["offers"], key: "size")
+        let description = stringValue(dict["description"])
         let categoryPath = [
             breadcrumbs,
             stringValue(dict["category"]),
@@ -374,18 +412,39 @@ enum ProductPageMetadataService {
             stringValue(dict["sku"])
         ].compactMap { $0?.filter(\.isNumber) }.filter { (8...14).contains($0.count) })
 
-        guard name != nil || imageURL != nil || gtin != nil else { return nil }
+        guard name != nil || !images.isEmpty || gtin != nil else { return nil }
+        // Pages list every size on offer; the user's own size isn't one of them.
         return makeProduct(
             title: name,
             brand: brand,
             color: color,
-            size: size,
+            size: nil,
             material: material,
             categoryPath: categoryPath.isEmpty ? nil : categoryPath,
-            imageURL: imageURL,
+            imageURLs: images,
+            description: description,
             barcodeOverride: gtin,
             sourceURL: sourceURL
         )
+    }
+
+    /// The `hasVariant` entry whose sku / id / GTIN / url matches the link's
+    /// query or path (`?variant=`, `?color=`, `?v1=`…); else the first one.
+    private static func selectedVariant(in group: [String: Any], sourceURL: URL) -> [String: Any]? {
+        let variants = (group["hasVariant"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        guard !variants.isEmpty else { return nil }
+        let components = URLComponents(url: sourceURL, resolvingAgainstBaseURL: false)
+        let keys = Set(((components?.queryItems ?? []).compactMap(\.value) + [sourceURL.lastPathComponent])
+            .map { $0.lowercased() }
+            .filter { $0.count >= 3 })
+        guard !keys.isEmpty else { return variants.first }
+        return variants.first { variant in
+            let ids = ["sku", "productID", "gtin", "gtin13", "gtin12", "gtin14", "@id", "color"]
+                .compactMap { stringValue(variant[$0])?.lowercased() }
+            if ids.contains(where: { keys.contains($0) }) { return true }
+            let link = (stringValue(variant["url"]) ?? offerString(variant["offers"], key: "url"))?.lowercased() ?? ""
+            return keys.contains { link.contains("=\($0)") || link.hasSuffix("/\($0)") }
+        } ?? variants.first
     }
 
     private static func stringValue(_ value: Any?) -> String? {
@@ -442,13 +501,26 @@ enum ProductPageMetadataService {
         return nil
     }
 
+    private static func allImageURLs(from value: Any?, relativeTo sourceURL: URL) -> [URL] {
+        if let array = value as? [Any] {
+            var urls: [URL] = []
+            for item in array {
+                for url in allImageURLs(from: item, relativeTo: sourceURL) where !urls.contains(url) {
+                    urls.append(url)
+                }
+            }
+            return urls
+        }
+        return firstImageURL(from: value, relativeTo: sourceURL).map { [$0] } ?? []
+    }
+
     // MARK: - Open Graph
 
     private static func parseOpenGraph(html: String, sourceURL: URL, breadcrumbs: String) -> BarcodeProduct? {
         var tags: [String: String] = [:]
         for key in [
-            "og:title", "og:image", "og:image:secure_url", "og:site_name",
-            "og:brand", "product:brand", "product:color", "twitter:title", "twitter:image"
+            "og:title", "og:image", "og:image:secure_url", "og:site_name", "og:description",
+            "og:brand", "product:brand", "product:color", "twitter:title", "twitter:image", "description"
         ] {
             if let content = metaContent(for: key, in: html) {
                 tags[key] = content
@@ -463,9 +535,14 @@ enum ProductPageMetadataService {
         let imageString = tags["og:image:secure_url"]
             ?? tags["og:image"]
             ?? tags["twitter:image"]
-        let imageURL = imageString.flatMap { resolveURL($0, relativeTo: sourceURL) }
+        var images = imageString.flatMap { resolveURL($0, relativeTo: sourceURL) }.map { [$0] } ?? []
+        for extra in metaContents(for: "og:image", in: html) {
+            if let url = resolveURL(extra, relativeTo: sourceURL), !images.contains(url) {
+                images.append(url)
+            }
+        }
 
-        guard title != nil || imageURL != nil else { return nil }
+        guard title != nil || !images.isEmpty else { return nil }
 
         let siteName = tags["og:site_name"].flatMap(cleanText)
         let brand = tags["og:brand"].flatMap(cleanText)
@@ -478,10 +555,22 @@ enum ProductPageMetadataService {
             size: nil,
             material: nil,
             categoryPath: breadcrumbs.isEmpty ? nil : breadcrumbs,
-            imageURL: imageURL,
+            imageURLs: images,
+            description: (tags["og:description"] ?? tags["description"]).flatMap(cleanText),
             barcodeOverride: nil,
             sourceURL: sourceURL
         )
+    }
+
+    /// Every `og:image` on the page, in order (galleries often list several).
+    private static func metaContents(for property: String, in html: String) -> [String] {
+        let escaped = NSRegularExpression.escapedPattern(for: property)
+        let pattern = #"<meta[^>]*(?:property|name)\s*=\s*["']"# + escaped + #"["'][^>]*content\s*=\s*["']([^"']*)["']"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        return regex.matches(in: html, range: range).prefix(8).compactMap { match in
+            Range(match.range(at: 1), in: html).map { decodeHTMLEntities(String(html[$0])) }
+        }
     }
 
     /// Extracts `content` of a `<meta>` tag whose `property`/`name` matches, regardless of attribute order.
@@ -544,17 +633,21 @@ enum ProductPageMetadataService {
 
     // MARK: - Mapping to BarcodeProduct
 
-    private static func makeProduct(
-        title: String?,
+    static func makeProduct(
+        title rawTitle: String?,
         brand: String?,
-        color: String?,
+        color rawColor: String?,
         size: String?,
         material: String?,
         categoryPath: String?,
-        imageURL: URL?,
+        imageURLs: [URL],
+        description: String?,
         barcodeOverride: String?,
         sourceURL: URL
     ) -> BarcodeProduct {
+        // "HB Badge Sweater | Black" → title + color.
+        let (title, colorFromTitle) = splitColorSegment(rawTitle)
+        let color = rawColor ?? colorFromTitle
         let path = [categoryPath, urlPathHint(from: sourceURL)]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
@@ -563,9 +656,10 @@ enum ProductPageMetadataService {
         let itemType = ProductFieldMapper.mapItemType(path: path, title: title, category: category)
         let colors = ProductFieldMapper.mapColors(colorField: color, title: title)
         let mappedSize = ProductFieldMapper.mapSize(size, category: category)
-        let materials = ProductFieldMapper.mapMaterials(material)
+        var materials = ProductFieldMapper.mapMaterials(material)
+        if materials.isEmpty { materials = ProductFieldMapper.mapMaterials(description) }
 
-        return BarcodeProduct(
+        var product = BarcodeProduct(
             barcode: barcodeOverride ?? sourceURL.absoluteString,
             title: title,
             brand: brand,
@@ -573,10 +667,37 @@ enum ProductPageMetadataService {
             itemType: itemType,
             colors: colors,
             size: mappedSize,
-            imageURL: imageURL,
+            imageURL: imageURLs.first,
             categoryPath: path.isEmpty ? nil : path,
             materials: materials
         )
+        product.imageURLs = Array(imageURLs.prefix(8))
+        // Title first: descriptions also mention what the item "pairs well with".
+        product.fit = ProductFieldMapper.mapFit(title) ?? ProductFieldMapper.mapFit(description)
+        if category == .top || category == nil {
+            product.sleeveLength = ProductFieldMapper.mapSleeve(title) ?? ProductFieldMapper.mapSleeve(description)
+        }
+        product.pattern = ProductFieldMapper.mapPattern(title) ?? ProductFieldMapper.mapPattern(description)
+        return product
+    }
+
+    /// A short title segment that is only a color ("… | Black", "… - שחור").
+    private static func splitColorSegment(_ title: String?) -> (String?, String?) {
+        guard let title else { return (nil, nil) }
+        for separator in [" | ", " - ", " – "] {
+            let parts = title.components(separatedBy: separator)
+            guard parts.count > 1 else { continue }
+            let kept = parts.filter { part in
+                let trimmed = part.trimmingCharacters(in: .whitespaces)
+                return !(trimmed.count <= 20 && ProductFieldMapper.matchColor(trimmed) != nil
+                    && trimmed.split(separator: " ").count <= 3 && parts.first != part)
+            }
+            if kept.count < parts.count, !kept.isEmpty {
+                let color = parts.first { !kept.contains($0) }?.trimmingCharacters(in: .whitespaces)
+                return (kept.joined(separator: separator), color)
+            }
+        }
+        return (title, nil)
     }
 
     /// `/men/shirts/tshirts/r495…` → useful English taxonomy hints for Israeli fashion sites.

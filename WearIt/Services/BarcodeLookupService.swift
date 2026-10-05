@@ -12,6 +12,12 @@ struct BarcodeProduct: Equatable {
     let imageURL: URL?
     let categoryPath: String?
     let materials: [MaterialTag]
+    /// Every product photo found, best guess first (`imageURL` is the first).
+    var imageURLs: [URL] = []
+    /// Read from the product description, when it says so.
+    var fit: FitTag?
+    var sleeveLength: SleeveLength?
+    var pattern: PatternTag?
 
     init(
         barcode: String,
@@ -35,6 +41,7 @@ struct BarcodeProduct: Equatable {
         self.imageURL = imageURL
         self.categoryPath = categoryPath
         self.materials = materials
+        self.imageURLs = imageURL.map { [$0] } ?? []
     }
 }
 
