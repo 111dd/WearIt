@@ -901,3 +901,34 @@
 "planner_how_was_it" = "איך היה?";
 "planner_item_details" = "פרטי הפריט";
 "planner_gesture_hint" = "החלקה הצידה על לוק מביאה לוק חדש, והקשה על פריט פותחת חלופות.";
+
+/* Style Swipe */
+"style_swipe_title" = "Style Swipe";
+"style_swipe_entry_onboarding_format" = "%d החלקות על לוקים מהארון שלך כדי ללמוד את הסגנון שלך";
+"style_swipe_entry_daily_format" = "%d החלקות קצרות לשיפור הלוקים";
+"style_swipe_progress_format" = "הסטייליסט מכיר אותך %d%%";
+"style_swipe_count_format" = "לוק %1$d מתוך %2$d";
+"style_swipe_hint" = "ימינה אם אהבת, שמאלה אם לא, למעלה אם זה מושלם";
+"style_swipe_like" = "אהבתי";
+"style_swipe_pass" = "לא בשבילי";
+"style_swipe_love" = "מושלם";
+"style_swipe_done" = "זהו להיום";
+"style_swipe_not_enough" = "צריך כמה חולצות, מכנסיים ונעליים (12 פריטים או יותר) כדי להתחיל";
+"style_swipe_card_a11y_format" = "לוק: %@";
+"style_insight_title" = "מה למדתי על הסגנון שלך";
+"style_insight_empty" = "עוד כמה החלקות והתובנות על הסגנון שלך יופיעו כאן";
+"style_insight_palette_neutral" = "לוקים ניטרליים ורגועים מתאימים לך";
+"style_insight_palette_pop" = "בסיס ניטרלי עם נגיעת צבע מתאים לך";
+"style_insight_palette_tonal" = "לוקים בטון־על־טון מתאימים לך";
+"style_insight_palette_analogous" = "צבעים שמתמזגים זה בזה מתאימים לך";
+"style_insight_palette_complementary" = "ניגודי צבעים נועזים מתאימים לך";
+"style_insight_palette_bold" = "שילובי צבעים נועזים מתאימים לך";
+"style_insight_silhouette_balanced" = "פרופורציות מאוזנות: רחב עם צמוד";
+"style_insight_silhouette_relaxed" = "גזרות רחבות ונינוחות";
+"style_insight_silhouette_sleek" = "קווים צמודים ומחויטים";
+"style_insight_high_contrast" = "ניגודיות חזקה בין בהיר לכהה";
+"style_insight_low_contrast" = "לוקים רכים עם ניגודיות נמוכה";
+"style_insight_colorful" = "יותר צבע בלוקים";
+"style_insight_muted" = "צבעים שקטים ומעומעמים";
+"style_insight_patterns" = "דוגמאות והדפסים";
+"style_insight_plain" = "פריטים חלקים יותר מדוגמאות";

@@ -52,6 +52,9 @@ struct OutfitPlannerView: View {
     @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
     /// Brief non-error status after a successful neutral look replacement.
     @State private var statusToast: String?
+    @State private var showStyleSwipe = false
+    @State private var styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+    @State private var styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
     /// Prevents concurrent action commits on the same day/look row.
     @State private var swipeBusyKeys: Set<String> = []
     /// Memoized advisor/availability results — plain class so body-time writes
@@ -217,8 +220,17 @@ struct OutfitPlannerView: View {
                 addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
             }
         }
+        .fullScreenCover(isPresented: $showStyleSwipe) {
+            StyleSwipeView(deckSize: styleSwipeDeckSize) {
+                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                refreshAffinityCaches()
+            }
+            .environmentObject(auth)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshCurrentDate()
+            styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -248,6 +260,26 @@ struct OutfitPlannerView: View {
                     unwornNudgeCard(nudge)
                         .padding(.horizontal, DS.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if styleSwipeOffered, StyleSwipeDeckBuilder.isEligible(allGarments) {
+                    StyleSwipeEntryCard(
+                        deckSize: styleSwipeDeckSize,
+                        isOnboarding: StyleSwipeSchedule.needsOnboarding,
+                        progress: AIRecommender.shared.learningProgress(profileID: activeProfile?.id, modelContext: context),
+                        onOpen: {
+                            styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                            showStyleSwipe = true
+                        },
+                        onDismiss: {
+                            StyleSwipeSchedule.dismissForToday()
+                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                                styleSwipeOffered = false
+                            }
+                        }
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if allGarments.isEmpty {

@@ -21,6 +21,7 @@ struct ProfileView: View {
     @Query private var dayPlans: [DayPlan]
     @Query private var dailyLooks: [DailyLook]
     @Query private var tasteProfiles: [TasteProfile]
+    @Query private var recoStates: [RecoState]
 
     @State private var displayName: String = ""
     @State private var bio: String = ""
@@ -31,6 +32,7 @@ struct ProfileView: View {
     @State private var showAvatarDialog = false
     @State private var showAvatarPicker = false
     @State private var profileSaveDebouncer = Debouncer(interval: 1.5)
+    @State private var showStyleSwipe = false
 
     init() {
         _users = Query(FetchDescriptor<UserProfile>())
@@ -54,6 +56,7 @@ struct ProfileView: View {
                 heroCard
                 statsRow
                 styleIdentitySection
+                styleSwipeRow
                 myLooksSection
             }
             .padding(.horizontal, DS.Spacing.md)
@@ -106,6 +109,10 @@ struct ProfileView: View {
         }
         .task(id: avatarImagePath) {
             await loadAvatarPreview()
+        }
+        .fullScreenCover(isPresented: $showStyleSwipe) {
+            StyleSwipeView(deckSize: StyleSwipeSchedule.nextDeckSize)
+                .environmentObject(auth)
         }
     }
 
@@ -266,18 +273,27 @@ struct ProfileView: View {
     @ViewBuilder
     private var styleIdentitySection: some View {
         let chips = styleIdentityChips
-        if !chips.isEmpty {
+        let insights = styleInsights
+        if !chips.isEmpty || !insights.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 DSSectionHeader(String(localized: "profile_style_identity"), icon: "sparkles")
 
-                LiquidGlassGroup(spacing: DS.Spacing.xs) {
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 110), spacing: DS.Spacing.xs)],
-                        alignment: .leading,
-                        spacing: DS.Spacing.xs
-                    ) {
-                        ForEach(chips) { chip in
-                            StyleIdentityChip(chip: chip)
+                ForEach(insights, id: \.self) { insight in
+                    Label(StyleInsights.text(insight), systemImage: StyleInsights.icon(insight))
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+
+                if !chips.isEmpty {
+                    LiquidGlassGroup(spacing: DS.Spacing.xs) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 110), spacing: DS.Spacing.xs)],
+                            alignment: .leading,
+                            spacing: DS.Spacing.xs
+                        ) {
+                            ForEach(chips) { chip in
+                                StyleIdentityChip(chip: chip)
+                            }
                         }
                     }
                 }
@@ -285,6 +301,50 @@ struct ProfileView: View {
             .padding(DS.Spacing.sm)
             .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
         }
+    }
+
+    private var activeRecoState: RecoState? {
+        let profileID = activeProfile?.id
+        return recoStates.first(where: { $0.profileID == profileID })
+            ?? recoStates.first(where: { $0.profileID == nil && $0.id == "global" })
+    }
+
+    private var styleInsights: [StyleInsights.Insight] {
+        guard let state = activeRecoState else { return [] }
+        return StyleInsights.insights(from: state)
+    }
+
+    // MARK: - Style Swipe
+
+    private var styleSwipeRow: some View {
+        let progress = AIRecommender.shared.learningProgress(profileID: activeProfile?.id, modelContext: context)
+        let percent = Int((progress * 100).rounded())
+        return Button {
+            DS.haptic(0.35)
+            showStyleSwipe = true
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "rectangle.stack.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "style_swipe_title"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(String(format: NSLocalizedString("style_swipe_progress_format", comment: ""), percent))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(DS.Spacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
     }
 
     private var activeTasteProfile: TasteProfile? {

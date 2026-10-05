@@ -882,3 +882,34 @@
 "planner_how_was_it" = "How was it?";
 "planner_item_details" = "Item details";
 "planner_gesture_hint" = "Swipe a look sideways for a new one, tap an item for alternatives.";
+
+/* Style Swipe */
+"style_swipe_title" = "Style Swipe";
+"style_swipe_entry_onboarding_format" = "Swipe %d looks from your closet so I learn your style";
+"style_swipe_entry_daily_format" = "%d quick swipes to sharpen your looks";
+"style_swipe_progress_format" = "Your stylist knows you %d%%";
+"style_swipe_count_format" = "Look %1$d of %2$d";
+"style_swipe_hint" = "Swipe right if you like it, left if not, up if you love it";
+"style_swipe_like" = "Like";
+"style_swipe_pass" = "Not for me";
+"style_swipe_love" = "Love";
+"style_swipe_done" = "That's it for today";
+"style_swipe_not_enough" = "Add a few tops, bottoms and shoes (12 items or more) to start swiping";
+"style_swipe_card_a11y_format" = "Look: %@";
+"style_insight_title" = "What I learned about your style";
+"style_insight_empty" = "A few more swipes and your style insights will show up here";
+"style_insight_palette_neutral" = "Calm, all-neutral looks suit you";
+"style_insight_palette_pop" = "A neutral base with one pop of color suits you";
+"style_insight_palette_tonal" = "Tone-on-tone looks suit you";
+"style_insight_palette_analogous" = "Colors that blend into each other suit you";
+"style_insight_palette_complementary" = "Bold color contrasts suit you";
+"style_insight_palette_bold" = "Daring color mixes suit you";
+"style_insight_silhouette_balanced" = "Balanced proportions: loose with fitted";
+"style_insight_silhouette_relaxed" = "Relaxed, loose fits all over";
+"style_insight_silhouette_sleek" = "Sleek, fitted lines";
+"style_insight_high_contrast" = "Strong light and dark contrast";
+"style_insight_low_contrast" = "Soft, low-contrast looks";
+"style_insight_colorful" = "More color in your looks";
+"style_insight_muted" = "Muted, quiet colors";
+"style_insight_patterns" = "Patterns and prints";
+"style_insight_plain" = "Plain pieces over patterns";
