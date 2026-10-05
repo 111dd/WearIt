@@ -48,7 +48,7 @@ private func downscale(_ image: UIImage, maxSide: CGFloat) -> UIImage {
 struct ImageCutout {
     static func removeBackground(from uiImage: UIImage) throws -> UIImage {
         var img = normalizeImage(uiImage)
-        img = downscale(img, maxSide: 1024)
+        img = downscale(img, maxSide: 2048)
 
         // נסיון Vision (מכשיר אמיתי בלבד)
         #if !targetEnvironment(simulator)

@@ -709,6 +709,11 @@
 "add_garment_chip_warmth_format" = "Warmth %d/5";
 "add_garment_chip_formality_format" = "Formality %d/5";
 "add_garment_chips_hint" = "Looks right? Just save. Tap a chip to adjust.";
+"add_garment_more_photos" = "More photos";
+"add_garment_detected_title" = "Check what we found";
+"add_garment_detected_hint" = "All good? Just save. Tap a line to fix it.";
+"add_garment_detected_auto" = "Filled automatically";
+"add_garment_value_missing" = "Choose";
 "add_garment_chips_hint_missing_category" = "Pick a category to finish — everything else is optional.";
 "add_garment_more_details" = "More details";
 "batch_review_title" = "Review Items";

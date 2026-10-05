@@ -57,6 +57,8 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   → `BootstrapView` (seed, migrations, weather, deferred work) → `RootView`.
 - Secrets: `Config/Secrets.xcconfig` (git-ignored, copy from `Secrets.example.xcconfig`).
   Only `BARCODE_LOOKUP_API_KEY` today; the app degrades gracefully without it.
+  Xcode Cloud creates the file in `ci_scripts/ci_post_clone.sh` (key from a `BARCODE_LOOKUP_API_KEY`
+  secret environment variable in the workflow, else empty).
   API keys come from build settings (`$(BARCODE_LOOKUP_API_KEY)`), never hardcoded.
 - Calendar: `CalendarEventUnderstanding.classify` (pure, tested) → `CalendarContextService.build`
   → `DayCalendarContext` with separate day / evening occasions. Use `occasion(isEvening:workDressCode:)`
@@ -127,6 +129,16 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 ## Progress log
 
 Newest first. One line per meaningful change: date, tool, what.
+
+- 2026-10-05 · Claude Code · Lighter add screen: "Check what we found" card (one row per field, ✨ while a value is
+  still the auto-filled one via `autoValues`, tap opens only that editor, sleeve as an inline menu); weather comfort
+  and season moved under "More details"; links no longer open the full form. Cutouts rendered from a 2048 px copy
+  (Vision still on 1536), shop photos fetched at full size (`ProductImagePicker.highResolution`), a link photo of a
+  model shows only the linked category's part. Item type prefers the product title ("sweatshirts" path read as
+  t-shirt). `ci_scripts/ci_post_clone.sh` creates `Secrets.xcconfig` on Xcode Cloud.
+- 2026-10-05 · Claude Code · Up to 3 photos per item on add: a link keeps two more shop photos
+  (`ProductImagePicker.rankedImages`, duplicate photos skipped), a scanned care label is kept, and "More photos"
+  adds from the library; saved to `Garment.additionalImagePaths` (shown in the item's gallery; not CloudKit-synced).
 
 - 2026-10-05 · Claude Code · Smarter product links (`plans/add-garment-smarter.md` step A): link found inside any
   shared text, `&amp;` and tracking params cleaned; Shopify `/products/<handle>.js` and Zara `?ajax=true` adapters

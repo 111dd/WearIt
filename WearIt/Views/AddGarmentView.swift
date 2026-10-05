@@ -73,7 +73,13 @@ struct AddGarmentView: View {
         case essentials
         case colors
         case attributes
+        case fit
+        case brand
+        case details
     }
+    /// Values as the app filled them (per field key). A field shows the ✨
+    /// "filled for you" mark only while it still holds that value.
+    @State private var autoValues: [String: String] = [:]
     @State private var patternTag: PatternTag? = nil
     @State private var fitTag: FitTag? = nil
     @State private var sizeOption: SizeOption? = nil
@@ -94,6 +100,10 @@ struct AddGarmentView: View {
     @State private var savedImagePath: String?
     @State private var savedThumbnailPath: String?
     @State private var savedOriginalImagePath: String?
+    /// Up to two more photos of the same item (other shop angles, the care label, the user's own).
+    @State private var extraImages: [UIImage] = []
+    @State private var showExtraPhotoPicker = false
+    private static let maxExtraImages = 2
 
     // AI
     @State private var isAnalyzing = false
@@ -237,6 +247,11 @@ struct AddGarmentView: View {
                     } else {
                         startBatch(with: images)
                     }
+                }
+            }
+            .sheet(isPresented: $showExtraPhotoPicker) {
+                MultiPhotoPickerWrapper(selectionLimit: max(1, Self.maxExtraImages - extraImages.count)) { images in
+                    addExtraImages(images)
                 }
             }
             .sheet(isPresented: $showCamera) {
@@ -486,12 +501,7 @@ struct AddGarmentView: View {
                     barcodeNeedsPhotoBanner
                 }
                 heroCard
-                quickChipsCard
-                ThermalProfileEditor(
-                    profile: draftThermalProfile,
-                    warmthOverride: $thermalWarmthOverride,
-                    breathabilityOverride: $thermalBreathabilityOverride
-                )
+                detectedCard
                 if showAllDetails || focusedSection == .essentials {
                     essentialsCard
                 }
@@ -501,13 +511,23 @@ struct AddGarmentView: View {
                 if showAllDetails || focusedSection == .attributes {
                     attributesSection
                 }
-                if showAllDetails {
-                    if shouldShowFit || shouldShowSize {
-                        fitSizeSection
-                    }
+                if (showAllDetails || focusedSection == .fit), shouldShowFit || shouldShowSize {
+                    fitSizeSection
+                }
+                if showAllDetails || focusedSection == .brand {
                     brandSection
-                    seasonSection
+                }
+                if showAllDetails || focusedSection == .details {
                     advancedSection
+                }
+                if showAllDetails {
+                    // Estimated from the item; most people never need to touch it.
+                    ThermalProfileEditor(
+                        profile: draftThermalProfile,
+                        warmthOverride: $thermalWarmthOverride,
+                        breathabilityOverride: $thermalBreathabilityOverride
+                    )
+                    seasonSection
                 } else {
                     moreDetailsButton
                 }
@@ -564,45 +584,67 @@ struct AddGarmentView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Quick confirmation chips
+    // MARK: - What was filled for you
 
-    /// The heart of the frictionless flow: everything AI/defaults filled is
-    /// summarized as tappable chips. If it looks right — just save. Tapping a
-    /// chip expands only that editing card.
-    private var quickChipsCard: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: DS.Spacing.xs) {
-                    quickChip(
-                        icon: category?.icon ?? "square.grid.2x2",
-                        title: itemType?.title ?? category?.title ?? String(localized: "add_garment_chip_choose_category"),
-                        isFocused: focusedSection == .essentials,
-                        needsAttention: category == nil
-                    ) {
-                        toggleFocus(.essentials)
-                    }
-                    quickChip(
-                        icon: "paintpalette",
-                        title: colorChipTitle,
-                        isFocused: focusedSection == .colors,
-                        needsAttention: false
-                    ) {
-                        toggleFocus(.colors)
-                    }
-                    quickChip(
-                        icon: "briefcase",
-                        title: String(format: NSLocalizedString("add_garment_chip_formality_format", comment: ""), formality),
-                        isFocused: focusedSection == .attributes,
-                        needsAttention: false
-                    ) {
-                        toggleFocus(.attributes)
-                    }
+    /// The heart of the frictionless flow: one line per thing the app knows
+    /// about the item, ✨ on what it filled by itself. All good → save. A
+    /// wrong line opens just its editor below.
+    private var detectedCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.xs) {
+                Text(String(localized: "add_garment_detected_title"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if isRefining {
+                    Label(String(localized: "add_garment_ai_refining"), systemImage: "sparkles")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .symbolEffect(.pulse)
                 }
+            }
+
+            VStack(spacing: 0) {
+                detectedRow(
+                    icon: category?.icon ?? "square.grid.2x2",
+                    label: String(localized: "garment_item_type"),
+                    value: itemType?.title ?? category?.title,
+                    key: "type", section: .essentials, needsAttention: category == nil
+                )
+                detectedRow(
+                    icon: "paintpalette", label: String(localized: "garment_colors"),
+                    value: colorTags.isEmpty ? nil : colorTags.prefix(3).map(\.title).joined(separator: ", "),
+                    key: "colors", section: .colors
+                )
+                if let patternTag, patternTag != .solid {
+                    detectedRow(icon: "square.grid.3x3", label: String(localized: "garment_pattern"),
+                                value: patternTag.title, key: "pattern", section: .details)
+                }
+                if category == .top {
+                    sleeveRow
+                }
+                if shouldShowFit, let fitTag {
+                    detectedRow(icon: "ruler", label: String(localized: "fit_label"),
+                                value: fitTag.title, key: "fit", section: .fit)
+                }
+                if !scannedMaterials.isEmpty {
+                    detectedRow(icon: "leaf", label: String(localized: "garment_materials"),
+                                value: scannedMaterials.prefix(2).map(\.title).joined(separator: ", "),
+                                key: "material", section: .details)
+                }
+                if !brand.isEmpty {
+                    detectedRow(icon: "tag", label: String(localized: "garment_brand"),
+                                value: brand, key: "brand", section: .brand)
+                }
+                detectedRow(
+                    icon: "briefcase", label: String(localized: "garment_formality"),
+                    value: "\(formality)/5", key: "formality", section: .attributes,
+                    isAutoOverride: !userEditedFields.contains(ItemTypeDefaults.FieldKey.formality)
+                )
             }
 
             Text(category == nil
                 ? String(localized: "add_garment_chips_hint_missing_category")
-                : String(localized: "add_garment_chips_hint"))
+                : String(localized: "add_garment_detected_hint"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -612,56 +654,124 @@ struct AddGarmentView: View {
         .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
-    private var colorChipTitle: String {
-        if colorTags.isEmpty {
-            return String(localized: "add_garment_chip_colors")
-        }
-        return colorTags.prefix(2).map(\.title).joined(separator: ", ")
-    }
-
-    private func quickChip(
+    private func detectedRow(
         icon: String,
-        title: String,
-        isFocused: Bool,
-        needsAttention: Bool,
-        action: @escaping () -> Void
+        label: String,
+        value: String?,
+        key: String,
+        section: FocusSection,
+        needsAttention: Bool = false,
+        isAutoOverride: Bool? = nil
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.caption)
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                Image(systemName: isFocused ? "chevron.up" : "chevron.down")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, DS.Spacing.sm)
-            .padding(.vertical, DS.Spacing.xs)
-            .foregroundStyle(needsAttention ? Color.accentColor : (isFocused ? Color.accentColor : .primary))
-            .frame(minHeight: 44)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(isFocused || needsAttention
-                        ? Color.accentColor.opacity(0.14)
-                        : Color(.secondarySystemBackground).opacity(0.45))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(
-                        needsAttention || isFocused ? Color.accentColor.opacity(0.55) : Color.white.opacity(0.10),
-                        lineWidth: 1
-                    )
-            )
+        let isFocused = focusedSection == section
+        let isAuto = isAutoOverride ?? isAutoFilled(key)
+        return Button {
+            toggleFocus(section)
+        } label: {
+            detectedRowLabel(icon: icon, label: label, value: value, isAuto: isAuto,
+                             needsAttention: needsAttention, trailingIcon: isFocused ? "chevron.up" : "chevron.down")
         }
         .buttonStyle(.plain)
+    }
+
+    /// Sleeves change the warmth math, so they're one tap away (no editor card).
+    private var sleeveRow: some View {
+        Menu {
+            ForEach(SleeveLength.allCases) { sleeve in
+                Button {
+                    sleeveLength = sleeve
+                    DS.haptic(0.3)
+                } label: {
+                    if sleeveLength == sleeve {
+                        Label(sleeve.title, systemImage: "checkmark")
+                    } else {
+                        Text(sleeve.title)
+                    }
+                }
+            }
+        } label: {
+            detectedRowLabel(icon: "tshirt", label: String(localized: "garment_sleeve"),
+                             value: sleeveLength?.title ?? derivedSleeve?.title,
+                             isAuto: sleeveLength == nil ? derivedSleeve != nil : isAutoFilled("sleeve"),
+                             needsAttention: false, trailingIcon: "chevron.up.chevron.down")
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// What the type implies (t-shirt → short) when nobody said otherwise.
+    private var derivedSleeve: SleeveLength? {
+        switch itemType {
+        case .tshirt?, .polo?, .tank?, .vest?: return .short
+        case .sweater?, .hoodie?, .cardigan?: return .long
+        default: return nil
+        }
+    }
+
+    private func detectedRowLabel(
+        icon: String, label: String, value: String?, isAuto: Bool, needsAttention: Bool, trailingIcon: String
+    ) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: DS.Spacing.sm)
+            if isAuto, value != nil {
+                Image(systemName: "sparkles")
+                    .font(.caption2)
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityLabel(String(localized: "add_garment_detected_auto"))
+            }
+            Text(value ?? String(localized: "add_garment_value_missing"))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(needsAttention || value == nil ? Color.accentColor : .primary)
+                .lineLimit(1)
+            Image(systemName: trailingIcon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    // MARK: Filled-for-you tracking
+
+    private func currentValue(for key: String) -> String {
+        switch key {
+        case "type": return [category?.rawValue, itemType?.rawValue].compactMap { $0 }.joined(separator: "/")
+        case "colors": return colorTags.map(\.rawValue).joined(separator: ",")
+        case "pattern": return patternTag?.rawValue ?? ""
+        case "fit": return fitTag?.rawValue ?? ""
+        case "sleeve": return sleeveLength?.rawValue ?? ""
+        case "material": return scannedMaterials.map(\.rawValue).joined(separator: ",")
+        case "brand": return brand
+        default: return ""
+        }
+    }
+
+    /// Record that the app (not the user) just set these fields.
+    private func markAutoFilled(_ keys: String...) {
+        for key in keys {
+            let value = currentValue(for: key)
+            if value.isEmpty { autoValues[key] = nil } else { autoValues[key] = value }
+        }
+    }
+
+    private func isAutoFilled(_ key: String) -> Bool {
+        guard let value = autoValues[key] else { return false }
+        return value == currentValue(for: key)
     }
 
     private func toggleFocus(_ section: FocusSection) {
         DS.haptic(0.35)
         withAnimation(DS.Animation.standard) {
             focusedSection = (focusedSection == section) ? nil : section
+            if focusedSection == .details { showAdvancedOptions = true }
         }
     }
 
@@ -1068,23 +1178,8 @@ struct AddGarmentView: View {
                 cutoutChoices(cutoutSuggestion)
             }
 
-            if isRefining {
-                Label(String(localized: "add_garment_ai_refining"), systemImage: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .symbolEffect(.pulse)
-            } else if didApplyAISuggestions {
-                Label(
-                    String(localized: barcodeNeedsPhoto && selectedImage == nil
-                        ? "barcode_details_filled"
-                        : "add_garment_ai_filled"),
-                    systemImage: "sparkles"
-                )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+            if selectedImage != nil {
+                extraPhotosRow
             }
 
             titleEditor
@@ -1553,6 +1648,60 @@ struct AddGarmentView: View {
         }
     }
 
+    /// Main photo + up to two more (3 in total).
+    private var extraPhotosRow: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            ForEach(Array(extraImages.enumerated()), id: \.offset) { index, image in
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 48, height: 60)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            withAnimation(DS.Animation.standard) { _ = extraImages.remove(at: index) }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .black.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .offset(x: 6, y: -6)
+                        .accessibilityLabel(String(localized: "batch_item_remove"))
+                    }
+            }
+            if extraImages.count < Self.maxExtraImages {
+                Button {
+                    DS.haptic(0.3)
+                    showExtraPhotoPicker = true
+                } label: {
+                    Label(String(localized: "add_garment_more_photos"), systemImage: "plus.rectangle.on.rectangle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func addExtraImages(_ images: [UIImage]) {
+        let room = Self.maxExtraImages - extraImages.count
+        guard room > 0 else { return }
+        withAnimation(DS.Animation.standard) {
+            extraImages.append(contentsOf: images.prefix(room))
+        }
+    }
+
+    /// Additional photos go next to the main image as plain JPEGs.
+    private func persistExtraImages() -> [String]? {
+        let paths = extraImages.prefix(Self.maxExtraImages).compactMap { image -> String? in
+            guard let jpeg = image.jpegData(compressionQuality: 0.88) else { return nil }
+            return try? ImageStore.save(data: jpeg, preferredExt: "jpg")
+        }
+        return paths.isEmpty ? nil : paths
+    }
+
     private var analyzingOverlay: some View {
         VStack(spacing: DS.Spacing.sm) {
             ProgressView()
@@ -1622,8 +1771,16 @@ struct AddGarmentView: View {
                     isFetchingProductPage = false
                 }
 
-                // Shops list several photos; take the item on its own over a model shot.
-                guard let image = await ProductImagePicker.bestImage(from: product.imageURLs) else { return }
+                // Shops list several photos; the item on its own becomes the main
+                // photo (cut out), two more angles are kept as they are.
+                let images = await ProductImagePicker.rankedImages(
+                    from: product.imageURLs, limit: Self.maxExtraImages + 1
+                )
+                guard let image = images.first else { return }
+                await MainActor.run {
+                    guard barcodeLookupGeneration == generation else { return }
+                    extraImages = Array(images.dropFirst())
+                }
 
                 await MainActor.run {
                     guard barcodeLookupGeneration == generation else { return }
@@ -1652,6 +1809,7 @@ struct AddGarmentView: View {
                         persistDisplayImage(suggestion.displayImage, original: image)
                     }
                     applyTypeDefaultsToState()
+                    markAutoFilled("type", "colors")
                     isAnalyzing = false
                     let aiRun = UUID()
                     aiGeneration = aiRun
@@ -1676,6 +1834,7 @@ struct AddGarmentView: View {
         savedImagePath = nil
         savedThumbnailPath = nil
         savedOriginalImagePath = nil
+        extraImages = []
         barcodeNeedsPhoto = false
         isAnalyzing = false
     }
@@ -1701,6 +1860,7 @@ struct AddGarmentView: View {
         cutoutSuggestion = nil
         isRefining = false
         aiGeneration = UUID()
+        autoValues = [:]
         aiConfidence = 0
         // Keep planner pre-selection only until the new product applies its own category.
         category = nil
@@ -1758,8 +1918,8 @@ struct AddGarmentView: View {
         }
 
         didApplyAISuggestions = true
-        showAllDetails = true
         applyTypeDefaultsToState()
+        markAutoFilled("type", "colors", "pattern", "fit", "sleeve", "material", "brand")
 
         if let image {
             applyProductImage(image)
@@ -1883,6 +2043,7 @@ struct AddGarmentView: View {
                 category = suggested
                 if let type = itemType, !suggested.itemTypes.contains(type) { itemType = nil }
                 applied = true
+                markAutoFilled("type")
             }
             aiSuggestedCategory = suggested
         }
@@ -1891,6 +2052,7 @@ struct AddGarmentView: View {
             if itemType != suggested {
                 itemType = suggested
                 applied = true
+                markAutoFilled("type")
             }
             aiSuggestedItemType = suggested
         }
@@ -1898,6 +2060,7 @@ struct AddGarmentView: View {
             if colorTags != refinement.colorTags {
                 colorTags = refinement.colorTags
                 applied = true
+                markAutoFilled("colors")
             }
             aiSuggestedColors = refinement.colorTags
         }
@@ -1905,13 +2068,18 @@ struct AddGarmentView: View {
             patternTag = pattern
             aiSuggestedPattern = pattern
             applied = true
+            markAutoFilled("pattern")
         }
         if let fit = refinement.fit, fitTag == nil, shouldShowFit {
             fitTag = fit
             aiSuggestedFit = fit
             applied = true
+            markAutoFilled("fit")
         }
-        if sleeveLength == nil { sleeveLength = refinement.sleeveLength }
+        if sleeveLength == nil, let sleeve = refinement.sleeveLength {
+            sleeveLength = sleeve
+            markAutoFilled("sleeve")
+        }
         guard applied else { return }
         didApplyAISuggestions = true
         applyTypeDefaultsToState()
@@ -1959,9 +2127,11 @@ struct AddGarmentView: View {
                 applied = true
             }
         }
+        if applied { markAutoFilled("type") }
         if colorTags.isEmpty, !suggestion.colorTags.isEmpty {
             colorTags = suggestion.colorTags
             applied = true
+            markAutoFilled("colors")
         }
         didApplyAISuggestions = applied || suggestion.usedCutout
         applyTypeDefaultsToState()
@@ -1978,6 +2148,10 @@ struct AddGarmentView: View {
     }
 
     private func handleLabelScan(_ image: UIImage) {
+        // The care label is worth keeping with the item (materials, washing).
+        if selectedImage != nil, extraImages.count < Self.maxExtraImages {
+            extraImages.append(image)
+        }
         isScanningLabel = true
         labelScanMessage = nil
         Task {
@@ -1987,6 +2161,7 @@ struct AddGarmentView: View {
             var found: [String] = []
             if let scannedBrand = result.brand, brand.isEmpty {
                 brand = scannedBrand
+                markAutoFilled("brand")
                 found.append(scannedBrand)
             }
             if let size = result.size, sizeOption == nil, shouldShowSize,
@@ -1996,6 +2171,7 @@ struct AddGarmentView: View {
             }
             if !result.materials.isEmpty, scannedMaterials.isEmpty {
                 scannedMaterials = result.materials
+                markAutoFilled("material")
                 found.append(result.materials.map(\.title).joined(separator: ", "))
             }
 
@@ -2072,6 +2248,7 @@ struct AddGarmentView: View {
         if selectedCategory == .top, let sleeveLength {
             garment.sleeveLength = sleeveLength
         }
+        garment.additionalImagePaths = persistExtraImages()
 
         if !scannedMaterials.isEmpty {
             // From care label / product QR — treat as verified so AI enrichment won't overwrite.
@@ -2168,6 +2345,8 @@ struct AddGarmentView: View {
         cutoutSuggestion = nil
         isRefining = false
         aiGeneration = UUID()
+        autoValues = [:]
+        extraImages = []
         userEditedFields = []
         focusedSection = nil
         showAllDetails = false
