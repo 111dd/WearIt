@@ -15,15 +15,21 @@ enum ProductImagePicker {
 
     /// The best photo, or nil when none could be downloaded.
     static func bestImage(from urls: [URL]) async -> UIImage? {
+        await rankedImages(from: urls, limit: 1).first
+    }
+
+    /// Up to `limit` different photos, best for the wardrobe first; the rest
+    /// keep the shop's order (other angles, details).
+    static func rankedImages(from urls: [URL], limit: Int) async -> [UIImage] {
         let candidates = Array(urls.prefix(maxCandidates))
-        guard !candidates.isEmpty else { return nil }
+        guard !candidates.isEmpty, limit > 0 else { return [] }
         if candidates.count == 1 {
-            return try? await BarcodeLookupService.downloadImage(from: candidates[0])
+            return await download(candidates[0]).map { [$0] } ?? []
         }
 
         let downloaded: [(index: Int, image: UIImage)] = await withTaskGroup(of: (Int, UIImage?).self) { group in
             for (index, url) in candidates.enumerated() {
-                group.addTask { (index, try? await BarcodeLookupService.downloadImage(from: url)) }
+                group.addTask { (index, await download(url)) }
             }
             var results: [(index: Int, image: UIImage)] = []
             for await (index, image) in group {
@@ -31,14 +37,91 @@ enum ProductImagePicker {
             }
             return results
         }
-        guard !downloaded.isEmpty else { return nil }
+        guard !downloaded.isEmpty else { return [] }
 
         return await Task.detached(priority: .userInitiated) {
-            downloaded
-                .map { (image: $0.image, score: score($0.image) - Double($0.index) * 0.05) }
-                .max { $0.score < $1.score }?
-                .image
+            let ordered = downloaded.sorted { $0.index < $1.index }
+            let scored = ordered.map { (image: $0.image, score: score($0.image) - Double($0.index) * 0.05) }
+            guard let best = scored.max(by: { $0.score < $1.score })?.image else { return [] }
+            var picked = [best]
+            var signatures = [signature(best)]
+            for candidate in ordered where picked.count < limit {
+                let sig = signature(candidate.image)
+                // Same photo at another size or crop → skip.
+                guard !signatures.contains(where: { isSimilar($0, sig) }) else { continue }
+                picked.append(candidate.image)
+                signatures.append(sig)
+            }
+            return picked
         }.value
+    }
+
+    /// 16×16 grayscale fingerprint for spotting the same photo twice.
+    private static func signature(_ image: UIImage) -> [UInt8] {
+        let side = 16
+        guard let cg = thumbnail(image),
+              let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                                      space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)
+        else { return [] }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else { return [] }
+        return Array(UnsafeBufferPointer(start: data.bindMemory(to: UInt8.self, capacity: side * side), count: side * side))
+    }
+
+    private static func isSimilar(_ a: [UInt8], _ b: [UInt8]) -> Bool {
+        guard a.count == b.count, !a.isEmpty else { return false }
+        let difference = zip(a, b).reduce(0) { $0 + abs(Int($1.0) - Int($1.1)) }
+        return Double(difference) / Double(a.count) < 8
+    }
+
+    /// The large version of a shop photo, else the link as given.
+    private static func download(_ url: URL) async -> UIImage? {
+        let large = highResolution(url)
+        if large != url, let image = try? await BarcodeLookupService.downloadImage(from: large) {
+            return image
+        }
+        return try? await BarcodeLookupService.downloadImage(from: url)
+    }
+
+    /// Shops link small previews (`og:image` is often ~600 px). Ask their image
+    /// CDNs for a large rendition: Cloudinary `h_630,w_…`, Shopify `_600x` /
+    /// `width=`, Magento `/cache/<hash>/`, and `w=` / `width=` / `h=` queries.
+    static func highResolution(_ url: URL, target: Double = 2000) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var path = components.path
+
+        // Magento: /pub/media/catalog/product/cache/<hash>/a/b/file.jpg → the original upload.
+        path = path.replacingOccurrences(of: #"/catalog/product/cache/[0-9a-f]{16,}/"#,
+                                         with: "/catalog/product/", options: .regularExpression)
+        // Shopify: file_600x800.jpg / file_600x.jpg → file.jpg
+        if url.host?.contains("shopify") == true || path.contains("/cdn/shop/") {
+            path = path.replacingOccurrences(of: #"_(?:\d+x\d*|x\d+)(?=\.[A-Za-z]+$)"#, with: "", options: .regularExpression)
+        }
+        // Cloudinary-style segment: c_fill,f_auto,h_630,q_80 — scale w_/h_ together.
+        path = path.split(separator: "/", omittingEmptySubsequences: false).map { segment -> String in
+            let text = String(segment)
+            let sizes = text.matches(of: #/(?:^|,)([wh])_(\d+)/#).compactMap { Double($0.output.2) }
+            guard let largest = sizes.max(), largest > 0, largest < target else { return text }
+            let factor = target / largest
+            return text.replacing(#/(^|,)([wh])_(\d+)/#) { match in
+                "\(match.output.1)\(match.output.2)_\(Int((Double(match.output.3) ?? 0) * factor))"
+            }
+        }.joined(separator: "/")
+        components.path = path
+
+        if var items = components.queryItems {
+            let keys: Set<String> = ["w", "width", "h", "height", "wid", "hei"]
+            let sizes = items.filter { keys.contains($0.name.lowercased()) }.compactMap { $0.value.flatMap(Double.init) }
+            if let largest = sizes.max(), largest > 0, largest < target {
+                let factor = target / largest
+                items = items.map { item in
+                    guard keys.contains(item.name.lowercased()), let value = item.value.flatMap(Double.init) else { return item }
+                    return URLQueryItem(name: item.name, value: String(Int(value * factor)))
+                }
+                components.queryItems = items
+            }
+        }
+        return components.url ?? url
     }
 
     /// Higher is better: no person, plain background, a garment-shaped frame.

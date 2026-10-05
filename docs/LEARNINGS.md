@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Substring keywords: "sweatshirts" contains "tshirts"
+- **Did:** `mapItemType` scores the product title alone first; added "sweatshirt"/"סווטשירט" to sweater.
+- **Why:** a G-Star sweater (path `sweatshirts-hoodies`) became a T-shirt; ties go to the first type in the list.
+- **Watch:** add a longer keyword for any word that contains another type's keyword. The add screen's ✨ marks compare against `autoValues`; call `markAutoFilled` right after any automatic write, per field.
+
 ## 2026-10-05 — Product links: the variant in the URL is the item the user has
 - **Did:** Shopify / Zara adapters, `ProductGroup` variant selection, all photos + `ProductImagePicker`, `WebPageRenderer` fallback, description → fit/sleeve/pattern/material.
 - **Why:** links filled the first color and the first size on the page (usually XS), took the model photo, and failed on text like "Check out… https://…" or `&amp;` in pasted links.

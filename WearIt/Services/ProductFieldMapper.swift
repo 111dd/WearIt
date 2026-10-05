@@ -68,6 +68,12 @@ enum ProductFieldMapper {
     // MARK: - Item type
 
     static func mapItemType(path: String, title: String?, category: Category?) -> ItemType? {
+        // The product's own name says what it is; shop paths are broad
+        // ("sweatshirts-hoodies" contains "tshirts"). Title first, then everything.
+        if let title, !path.isEmpty,
+           let fromTitle = mapItemType(path: "", title: title, category: category) {
+            return fromTitle
+        }
         let haystack = normalize("\(path) \(title ?? "")")
         guard !haystack.isEmpty else { return nil }
 
@@ -79,7 +85,7 @@ enum ProductFieldMapper {
             (.tank, ["tank", "sleeveless", "גופיה"]),
             (.hoodie, ["hoodie", "hooded", "קפוצון"]),
             (.cardigan, ["cardigan", "קרדיגן"]),
-            (.sweater, ["sweater", "jumper", "pullover", "סוודר", "סריג"]),
+            (.sweater, ["sweater", "sweatshirt", "jumper", "pullover", "סוודר", "סריג", "סווטשירט", "סווטשרט"]),
             (.vest, ["vest"]),
             (.jeans, ["jean", "jeans", "denim pant", "ג'ינס", "גינס"]),
             (.chinos, ["chino"]),

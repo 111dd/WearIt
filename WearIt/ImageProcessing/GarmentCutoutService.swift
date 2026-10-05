@@ -69,15 +69,19 @@ struct CutoutResult {
 }
 
 enum GarmentCutoutService {
-    private static let maxSide: CGFloat = 1536
+    /// Vision runs on a smaller copy; the cutout itself is cut from the sharp
+    /// full-size photo (capped to keep memory bounded).
+    private static let analysisSide: CGFloat = 1536
+    private static let renderSide: CGFloat = 2048
     /// Instances smaller than this share of the largest one are clutter.
     private static let clutterRatio = 0.25
     private static let maxItemChoices = 4
     private static let ciContext = CIContext(options: [.cacheIntermediates: false])
 
     static func analyze(_ source: UIImage, preferredCategory: Category? = nil) -> CutoutResult? {
-        guard let cg = normalizedCGImage(source) else { return nil }
-        let width = CGFloat(cg.width), height = CGFloat(cg.height)
+        guard let full = normalizedCGImage(source, maxSide: renderSide),
+              let cg = scaled(full, maxSide: analysisSide) else { return nil }
+        let width = CGFloat(full.width), height = CGFloat(full.height)
 
         let foreground = VNGenerateForegroundInstanceMaskRequest()
         let humans = VNDetectHumanRectanglesRequest()
@@ -93,7 +97,7 @@ enum GarmentCutoutService {
                 forInstances: observation.allInstances, from: handler
               ) else { return nil }
 
-        let input = CIImage(cgImage: cg)
+        let input = CIImage(cgImage: full)
         var candidates: [CutoutCandidate] = []
         var selectedIndex = 0
         var issues: [CutoutQualityIssue] = []
@@ -110,9 +114,11 @@ enum GarmentCutoutService {
                                          size: CGSize(width: width, height: height)) else { continue }
                 candidates.append(CutoutCandidate(kind: .worn(band.category), image: image))
             }
-            if !candidates.isEmpty {
-                selectedIndex = candidates.firstIndex { $0.categoryHint == preferredCategory }
-                    ?? candidates.firstIndex { $0.categoryHint == .top } ?? 0
+            if let preferredCategory, let match = candidates.first(where: { $0.categoryHint == preferredCategory }) {
+                // A product photo of a known item (from a link): only that part of the model.
+                candidates = [match]
+            } else if !candidates.isEmpty {
+                selectedIndex = candidates.firstIndex { $0.categoryHint == .top } ?? 0
             }
         }
 
@@ -197,7 +203,7 @@ enum GarmentCutoutService {
                                band: CGRect?, size: CGSize) -> UIImage? {
         var mask = rawMask
         if mask.extent.size != input.extent.size {
-            mask = mask.transformed(by: CGAffineTransform(
+            mask = mask.samplingLinear().transformed(by: CGAffineTransform(
                 scaleX: input.extent.width / mask.extent.width,
                 y: input.extent.height / mask.extent.height
             ))
@@ -255,15 +261,33 @@ enum GarmentCutoutService {
         return (0.299 * Double(pixel[0]) + 0.587 * Double(pixel[1]) + 0.114 * Double(pixel[2])) / 255
     }
 
+    private static func scaled(_ image: CGImage, maxSide: CGFloat) -> CGImage? {
+        let longSide = CGFloat(max(image.width, image.height))
+        guard longSide > maxSide else { return image }
+        let scale = maxSide / longSide
+        let width = Int((CGFloat(image.width) * scale).rounded())
+        let height = Int((CGFloat(image.height) * scale).rounded())
+        guard let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+
     /// Orientation-correct, bounded-size bitmap so masks and pose share coordinates.
-    private static func normalizedCGImage(_ image: UIImage) -> CGImage? {
-        let longSide = max(image.size.width, image.size.height)
+    private static func normalizedCGImage(_ image: UIImage, maxSide: CGFloat) -> CGImage? {
+        // Work in pixels: a 3x image's `size` is in points.
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        let longSide = max(pixels.width, pixels.height)
         guard longSide > 0 else { return nil }
         let scale = min(1, maxSide / longSide)
-        let size = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+        let size = CGSize(width: (pixels.width * scale).rounded(), height: (pixels.height * scale).rounded())
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = false
+        format.preferredRange = .standard
         return UIGraphicsImageRenderer(size: size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: size))
         }.cgImage

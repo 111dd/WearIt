@@ -728,6 +728,11 @@
 "add_garment_chip_warmth_format" = "חום %d/5";
 "add_garment_chip_formality_format" = "רשמיות %d/5";
 "add_garment_chips_hint" = "נראה נכון? פשוט לשמור. הקשה על צ׳יפ מאפשרת התאמה.";
+"add_garment_more_photos" = "עוד תמונות";
+"add_garment_detected_title" = "בדוק מה זיהינו";
+"add_garment_detected_hint" = "הכל נכון? פשוט שומרים. לחיצה על שורה פותחת תיקון.";
+"add_garment_detected_auto" = "מולא אוטומטית";
+"add_garment_value_missing" = "לבחור";
 "add_garment_chips_hint_missing_category" = "נותר רק לבחור קטגוריה — כל השאר אופציונלי.";
 "add_garment_more_details" = "פרטים נוספים";
 "batch_review_title" = "בדיקת פריטים";
