@@ -17,7 +17,9 @@ import CoreGraphics
 
 @Model final class RecoState {
     var id: String = "global"
-    /// 2 = original feature set; 3 = + color/brand affinity features
+    /// 2 = original feature set; 3 = + color/brand affinity features;
+    /// 4 = + weekday/weekend formality features; 5 = + look-level (Look DNA) weights
+    static let currentVersion = 5
     var version: Int = 3
     var profileID: UUID?
     var weights: [Double] = []
@@ -30,9 +32,16 @@ import CoreGraphics
     /// Track how many times user has given feedback. Optional for migration compatibility.
     var totalInteractions: Int?
 
+    /// Look-level preference weights over `LookDNA.vector` (v5). Empty until the
+    /// first look signal; padded/truncated to `LookDNA.vectorSize` on use.
+    var lookWeights: [Double] = []
+    var lookBias: Double = 0.0
+    /// Number of look-level signals (swipes, rated/worn looks). Optional for migration.
+    var lookInteractions: Int?
+
     init(size: Int, profileID: UUID? = nil) {
         self.id = profileID.map { "profile-\($0.uuidString)" } ?? "global"
-        self.version = 3
+        self.version = RecoState.currentVersion
         self.profileID = profileID
         self.weights = Array(repeating: 0.0, count: size)
         self.bias = 0.0
@@ -47,6 +56,11 @@ import CoreGraphics
     var interactionCount: Int {
         get { totalInteractions ?? 0 }
         set { totalInteractions = newValue }
+    }
+
+    var lookInteractionCount: Int {
+        get { lookInteractions ?? 0 }
+        set { lookInteractions = newValue }
     }
 }
 
@@ -90,7 +104,12 @@ enum FeatureSpace {
     static let iColorAffinity = iEvening + 1     // 0..1 from wardrobe color taste
     static let iBrandAffinity = iColorAffinity + 1 // 0..1 from wardrobe brand taste
 
-    static let total          = iBrandAffinity + 1
+    // Routine (v4): formality split by weekday vs weekend, so the model can learn
+    // "dressier on workdays, casual on weekends" per garment.
+    static let iWeekdayFormality = iBrandAffinity + 1
+    static let iWeekendFormality = iWeekdayFormality + 1
+
+    static let total          = iWeekendFormality + 1
 }
 
 // MARK: - Recommendation Context
@@ -197,6 +216,11 @@ struct RecoContext {
     var rainAvoidance: Double {
         Double(rainTolerance - 1) / 4.0
     }
+
+    /// Locale-aware weekend (Fri/Sat in Israel, Sat/Sun elsewhere).
+    var isWeekend: Bool {
+        Calendar.current.isDateInWeekend(now)
+    }
 }
 
 // MARK: - AI Recommender
@@ -268,7 +292,7 @@ final class AIRecommender {
         } else if state.weights.count > FeatureSpace.total {
             state.weights = Array(state.weights.prefix(FeatureSpace.total))
         }
-        state.version = 3
+        state.version = RecoState.currentVersion
     }
 
     // MARK: - Feature Extraction
@@ -362,6 +386,14 @@ final class AIRecommender {
         // 12) Taste affinities (color / brand) — 0 when taste profile is empty
         x[FeatureSpace.iColorAffinity] = ctx.taste.colorScore(for: g)
         x[FeatureSpace.iBrandAffinity] = ctx.taste.brandScore(for: g)
+
+        // 13) Routine: centered formality, routed to the weekday or weekend slot
+        let centeredFormality = Double(g.formality - 3) / 2.0
+        if ctx.isWeekend {
+            x[FeatureSpace.iWeekendFormality] = centeredFormality
+        } else {
+            x[FeatureSpace.iWeekdayFormality] = centeredFormality
+        }
 
         return x
     }
@@ -761,12 +793,14 @@ final class AIRecommender {
         shown: [Garment]? = nil,  // Other options that were shown but not selected
         ctx: RecoContext,
         reward: Double,
-        modelContext: ModelContext
+        weight: Double = 1.0,
+        modelContext: ModelContext,
+        save: Bool = true
     ) {
         let state = ensureState(context: modelContext, profileID: ctx.profileID)
         var w = state.weights
         var b = state.bias
-        let lr = state.lr
+        let lr = state.lr * max(0, weight)
 
         // Per-item learning for selected items (reward)
         for g in selected {
@@ -815,7 +849,60 @@ final class AIRecommender {
         state.weights = w
         state.bias = b
         state.interactionCount += 1
-        try? modelContext.save()
+        if save {
+            try? modelContext.save()
+        }
+    }
+
+    /// Pairwise (RankNet-style) update: the user picked `chosen` over `rejected`
+    /// in the same slot and context. Moves weights along the feature difference,
+    /// which is far more informative than an absolute reward on either item.
+    /// Pass `save: false` when the caller persists through the planner debounce.
+    func learnPreference(
+        chosen: Garment,
+        over rejected: Garment,
+        ctx: RecoContext,
+        weight: Double = 1.0,
+        modelContext: ModelContext,
+        save: Bool = true
+    ) {
+        guard chosen.id != rejected.id else { return }
+        let state = ensureState(context: modelContext, profileID: ctx.profileID)
+        var w = state.weights
+        let xChosen = features(
+            for: chosen,
+            ctx: ctx,
+            warmthOffset: state.learnedWarmthOffset,
+            formalityOffset: state.learnedFormalityOffset
+        )
+        let xRejected = features(
+            for: rejected,
+            ctx: ctx,
+            warmthOffset: state.learnedWarmthOffset,
+            formalityOffset: state.learnedFormalityOffset
+        )
+        var margin = 0.0
+        for i in 0..<min(w.count, xChosen.count, xRejected.count) {
+            margin += w[i] * (xChosen[i] - xRejected[i])
+        }
+        // Gradient of log σ(margin): large when the model ranked them the wrong way.
+        let gradient = 1.0 - 1.0 / (1.0 + exp(-margin))
+        let lr = state.lr * max(0, weight)
+        for i in 0..<min(w.count, xChosen.count, xRejected.count) {
+            w[i] += lr * gradient * (xChosen[i] - xRejected[i])
+        }
+        state.weights = w
+        state.interactionCount += 1
+        if save {
+            try? modelContext.save()
+        }
+    }
+
+    /// 0...0.95 estimate of how much has been learned, for the "stylist knows you" ring.
+    func learningProgress(profileID: UUID?, modelContext: ModelContext) -> Double {
+        let state = ensureState(context: modelContext, profileID: profileID)
+        let signals = Double(state.interactionCount) + Double(state.lookInteractionCount) * 1.5
+        return min(0.95, 1.0 - exp(-signals / 40.0))
     }
 
     func applyDirectionalFeedback(
@@ -835,7 +922,7 @@ final class AIRecommender {
             state.learnedFormalityOffset = max(-1.5, state.learnedFormalityOffset - step)
         case .tooCasual:
             state.learnedFormalityOffset = min(1.5, state.learnedFormalityOffset + step)
-        case .loved, .notMyStyle, .justRight, .worn, .replaced:
+        case .loved, .notMyStyle, .justRight, .worn, .replaced, .swipeLiked, .swipeDisliked:
             return
         }
 
@@ -857,6 +944,9 @@ final class AIRecommender {
         let state = ensureState(context: modelContext, profileID: profileID)
         state.weights = Array(repeating: 0.0, count: FeatureSpace.total)
         state.bias = 0.0
+        state.lookWeights = []
+        state.lookBias = 0.0
+        state.lookInteractionCount = 0
         state.learnedWarmthOffset = 0
         state.learnedFormalityOffset = 0
         state.interactionCount = 0

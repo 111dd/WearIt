@@ -1723,8 +1723,25 @@ struct OutfitPlannerView: View {
                 replacementID: garment.id,
                 lookTime: target.lookTime
             )
+            learnUserChoice(garment, over: replacedID, dayIndex: target.dayIndex, lookTime: target.lookTime)
         }
         persistDayPlan(target.dayIndex)
+    }
+
+    /// The user picked `chosen` instead of the piece that was in the slot: the
+    /// strongest implicit signal we get. Pairwise model update, saved with the
+    /// planner's own persist (no extra CloudKit push).
+    private func learnUserChoice(_ chosen: Garment, over replacedID: UUID, dayIndex: Int, lookTime: LookTime) {
+        guard dayIndex < boardState.days.count,
+              replacedID != chosen.id,
+              let replaced = garment(for: replacedID) else { return }
+        AIRecommender.shared.learnPreference(
+            chosen: chosen,
+            over: replaced,
+            ctx: recoContext(for: dayIndex, isEvening: lookTime == .evening),
+            modelContext: context,
+            save: false
+        )
     }
 
     /// Day-look rating hooks for the look control bar (heart + fine-tune menu).
@@ -3309,15 +3326,26 @@ struct OutfitPlannerView: View {
         let signature = "\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
         guard signature != affinityCacheSignature else { return }
         affinityCacheSignature = signature
-        cachedTaste = TasteAffinityBuilder.build(from: allGarments)
+        cachedTaste = TasteAffinityBuilder.build(
+            from: allGarments,
+            choiceSignals: TasteAffinityBuilder.choiceSignals(
+                wearEvents: wearEvents,
+                recommendationEvents: Array(recommendationEvents.prefix(400))
+            )
+        )
         let recentRejections = recommendationEvents
             .filter { $0.kind == .notMyStyle }
             .prefix(40)
             .map { $0 }
+        let recentSwipes = recommendationEvents
+            .filter { $0.kind == .swipeLiked || $0.kind == .swipeDisliked }
+            .prefix(120)
+            .map { $0 }
         cachedCombination = CombinationAffinityBuilder.build(
             wearEvents: wearEvents,
             dismissed: dismissedOutfits,
-            rejectedEvents: Array(recentRejections)
+            rejectedEvents: Array(recentRejections),
+            swipeEvents: Array(recentSwipes)
         )
         cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
         TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
@@ -3340,6 +3368,12 @@ struct OutfitPlannerView: View {
             }
         }
 
+        let previousID: UUID? = dayIndex < boardState.days.count
+            ? (lookTime == .evening
+                ? boardState.days[dayIndex].eveningGarmentID(for: slot)
+                : boardState.days[dayIndex].garmentID(for: slot))
+            : nil
+
         let success: Bool
         if lookTime == .evening {
             success = assignEveningGarment(garment, to: slot, dayIndex: dayIndex, allowUnavailable: allowUnavailable)
@@ -3356,6 +3390,9 @@ struct OutfitPlannerView: View {
         if success {
             if lookTime == .day && isEveningLinked(dayIndex: dayIndex, slot: slot) {
                 boardState.days[dayIndex].setEveningGarment(garment.id, for: slot, locked: true)
+            }
+            if let previousID, previousID != garment.id {
+                learnUserChoice(garment, over: previousID, dayIndex: dayIndex, lookTime: lookTime)
             }
             DS.haptic(0.3)
             persistAllPlans()
@@ -3412,6 +3449,17 @@ struct OutfitPlannerView: View {
         let isLocked = boardState.days[dayIndex].isLocked(slot)
         let garmentID = boardState.days[dayIndex].garmentID(for: slot)
         boardState.days[dayIndex].setGarment(garmentID, for: slot, locked: !isLocked)
+        // Locking a piece means "keep this": a soft positive in this context.
+        if !isLocked, let garmentID, let locked = garment(for: garmentID) {
+            AIRecommender.shared.learn(
+                from: [locked],
+                ctx: recoContext(for: dayIndex),
+                reward: 0.85,
+                weight: 0.5,
+                modelContext: context,
+                save: false
+            )
+        }
         persistDayPlan(dayIndex)
     }
 
@@ -3556,6 +3604,17 @@ struct OutfitPlannerView: View {
                     replacementID: replacement.id,
                     lookTime: lookTime
                 )
+                // The app picked the replacement, so only "not this one" is known.
+                if let replaced = garment(for: currentID) {
+                    AIRecommender.shared.learn(
+                        from: [replaced],
+                        ctx: ctx,
+                        reward: 0.3,
+                        weight: 0.5,
+                        modelContext: context,
+                        save: false
+                    )
+                }
             }
             persistDayPlan(dayIndex)
             DS.haptic(0.3)

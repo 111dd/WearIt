@@ -165,8 +165,13 @@ enum TasteAffinityBuilder {
     /// Builds preference mass from love, wears, and favorites.
     /// Multi-color items split their contribution across tags so one accent
     /// color on a mostly-black wardrobe cannot dominate Stats.
-    static func build(from garments: [Garment]) -> Profile {
+    ///
+    /// `choiceSignals` (from `choiceSignals(...)`) shifts the weight from what is
+    /// owned to what is actually chosen: worn, loved, kept vs swapped away. With
+    /// no signals the result is ownership-based, exactly as before.
+    static func build(from garments: [Garment], choiceSignals: [UUID: Double] = [:]) -> Profile {
         guard !garments.isEmpty else { return .empty }
+        let usesChoices = !choiceSignals.isEmpty
 
         var colorMass: [ColorTag: Double] = [:]
         var brandMass: [String: Double] = [:]
@@ -184,7 +189,8 @@ enum TasteAffinityBuilder {
         var formalitySquares = 0.0
 
         for garment in garments {
-            let contribution = itemContribution(garment)
+            let choice: Double? = usesChoices ? (choiceSignals[garment.id] ?? 0) : nil
+            let contribution = itemContribution(garment, choice: choice)
             let tags = garment.safeColorTags
             if !tags.isEmpty {
                 let perTag = contribution / Double(tags.count)
@@ -226,7 +232,7 @@ enum TasteAffinityBuilder {
             }
 
             // Negative taste: low love after real exposure.
-            let dislike = dislikeContribution(garment)
+            let dislike = dislikeContribution(garment, choice: choice)
             if dislike > 0 {
                 if !tags.isEmpty {
                     let perTag = dislike / Double(tags.count)
@@ -241,7 +247,7 @@ enum TasteAffinityBuilder {
                 }
             }
 
-            let w = itemWeight(garment)
+            let w = itemWeight(garment, choice: choice)
             formalityWeighted += Double(garment.formality) * w
             warmthWeighted += Double(garment.warmth) * w
             formalitySquares += Double(garment.formality * garment.formality) * w
@@ -271,13 +277,16 @@ enum TasteAffinityBuilder {
         )
     }
 
-    private static func itemContribution(_ garment: Garment) -> Double {
+    private static func itemContribution(_ garment: Garment, choice: Double? = nil) -> Double {
         let signal = Double(garment.loveScore) / 100.0
-        return max(0.05, signal * itemWeight(garment))
+        return max(0.05, signal * itemWeight(garment, choice: choice))
     }
 
-    /// Stronger when the user has worn / rated an item poorly.
-    private static func dislikeContribution(_ garment: Garment) -> Double {
+    /// Stronger when the user has worn / rated an item poorly, or keeps swapping it away.
+    private static func dislikeContribution(_ garment: Garment, choice: Double? = nil) -> Double {
+        if let choice, choice < -0.3 {
+            return min(1.0, -choice * 0.5) * max(0.1, itemWeight(garment, choice: 0))
+        }
         guard garment.loveScore <= 35 else { return 0 }
         let exposed = garment.timesWorn > 0 || garment.lastWorn != nil
         // Never-worn low-love is a weak signal unless extremely low.
@@ -286,11 +295,62 @@ enum TasteAffinityBuilder {
         return max(0.05, intensity * itemWeight(garment))
     }
 
-    private static func itemWeight(_ garment: Garment) -> Double {
+    private static func itemWeight(_ garment: Garment, choice: Double? = nil) -> Double {
+        if let choice {
+            // Choice mode: owning an item counts little, choosing it counts most.
+            var weight = 0.15
+            weight += Double(garment.loveScore) / 200.0
+            if garment.isFavorite { weight += 0.3 }
+            weight += max(0, choice)
+            return max(0.05, weight)
+        }
         var weight = 0.35
         weight += Double(garment.loveScore) / 100.0
         weight += min(1.0, Double(garment.timesWorn) * 0.08)
         if garment.isFavorite { weight += 0.35 }
         return max(0.1, weight)
+    }
+
+    /// Per-garment "chosen" signal in roughly -1.5...1.5 from recent behavior:
+    /// wears (+), loves and swipe-likes (+), swaps away, rejections and swipe-dislikes (−).
+    /// Recency-weighted over `windowDays`.
+    static func choiceSignals(
+        wearEvents: [WearEvent],
+        recommendationEvents: [RecommendationEvent],
+        now: Date = Date(),
+        windowDays: Double = 120
+    ) -> [UUID: Double] {
+        var raw: [UUID: Double] = [:]
+
+        func recency(_ date: Date) -> Double? {
+            let days = now.timeIntervalSince(date) / 86_400
+            guard days <= windowDays else { return nil }
+            return max(0.2, 1.0 - max(0, days) / windowDays)
+        }
+
+        for event in wearEvents where event.source != .calendarBlock && event.source != .migration {
+            guard let weight = recency(event.date) else { continue }
+            for id in Set(event.garmentIDs) {
+                raw[id, default: 0] += 0.25 * weight
+            }
+        }
+
+        for event in recommendationEvents {
+            guard let kind = event.kind, let weight = recency(event.createdAt) else { continue }
+            let delta: Double
+            switch kind {
+            case .loved: delta = 0.3
+            case .swipeLiked: delta = 0.15
+            case .notMyStyle: delta = -0.3
+            case .swipeDisliked: delta = -0.15
+            case .replaced: delta = -0.2
+            default: continue
+            }
+            for id in Set(event.selectedGarmentIDs) {
+                raw[id, default: 0] += delta * weight
+            }
+        }
+
+        return raw.mapValues { 1.5 * tanh($0 / 1.5) }
     }
 }

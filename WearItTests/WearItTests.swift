@@ -200,7 +200,7 @@ struct WearItTests {
         let state = AIRecommender.shared.ensureState(context: context, profileID: profileID)
         #expect(state.interactionCount == 1)
         #expect(state.weights.count == FeatureSpace.total)
-        #expect(state.version == 3)
+        #expect(state.version == RecoState.currentVersion)
     }
 
     @Test

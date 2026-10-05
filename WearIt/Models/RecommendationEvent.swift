@@ -12,6 +12,9 @@ enum RecommendationFeedbackKind: String, Codable, Sendable {
     case worn
     /// The user swapped this suggested piece for another. A weak, implicit "not this".
     case replaced
+    /// Style Swipe: the user liked / passed on a whole look (`selectedGarmentIDs` = the look).
+    case swipeLiked
+    case swipeDisliked
 }
 
 @Model
