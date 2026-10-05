@@ -133,6 +133,15 @@ struct RecoContext {
     let diurnal: DiurnalTemps?
     let thermalSamples: [ThermalWeatherSample]
     let allowRepeatedItems: Bool
+    /// What the user actually wears per occasion (learned from tagged wear history).
+    let occasionStyle: OccasionStyleProfile
+    /// The occasion to look up in `occasionStyle`. Unlike `occasionKind`, a free
+    /// dress-code work day stays `.work` so the user's own work look is learned.
+    let habitOccasion: CalendarOccasionKind
+    /// The user's answer for this day ("short with a jacket" / "long" / "short").
+    let layerChoice: DayLayerChoice?
+    /// Learned temperature from which the user wears short sleeves.
+    let shortSleeveFromC: Double?
 
     init(
         desiredFormality: Int,
@@ -148,7 +157,11 @@ struct RecoContext {
         occasionKind: CalendarOccasionKind = .none,
         diurnal: DiurnalTemps? = nil,
         thermalSamples: [ThermalWeatherSample] = [],
-        allowRepeatedItems: Bool = false
+        allowRepeatedItems: Bool = false,
+        occasionStyle: OccasionStyleProfile = .empty,
+        habitOccasion: CalendarOccasionKind? = nil,
+        layerChoice: DayLayerChoice? = nil,
+        shortSleeveFromC: Double? = nil
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -164,6 +177,10 @@ struct RecoContext {
         self.diurnal = diurnal
         self.thermalSamples = thermalSamples
         self.allowRepeatedItems = allowRepeatedItems
+        self.occasionStyle = occasionStyle
+        self.habitOccasion = habitOccasion ?? occasionKind
+        self.layerChoice = layerChoice
+        self.shortSleeveFromC = shortSleeveFromC
     }
     
     // Temperature bucket helpers
@@ -176,12 +193,16 @@ struct RecoContext {
     static let outerLayerTempThresholdC: Double = 20
 
     var outerLayerPolicy: OuterLayerPolicy {
-        TemperatureComfort.outerLayerPolicy(
+        let policy = TemperatureComfort.outerLayerPolicy(
             temperatureC: temperatureC,
             isRaining: isRaining,
             lookTime: lookTime,
             diurnal: diurnal
         )
+        // The day's answer is about the daytime look; evenings keep their own call.
+        return lookTime == .day
+            ? ComfortPreferences.adjusted(policy, choice: layerChoice, isRaining: isRaining)
+            : policy
     }
 
     /// True when an outer layer is appropriate (cool weather, rain, or light packable).
@@ -632,13 +653,31 @@ final class AIRecommender {
         let heuristicWeight = 1.0 - learnedWeight
         
         let blended = (learned * learnedWeight) + (heuristic * heuristicWeight)
-        return max(0, min(1, blended + occasionFit(g, ctx: ctx)))
+        return max(0, min(1, blended + occasionFit(g, ctx: ctx) + sleeveFit(g, ctx: ctx)))
     }
 
     /// Calendar occasion fit that doesn't fade as the model learns: the learned
     /// model has no occasion features, so a workout look needs workout clothes
     /// and a funeral needs muted colors no matter how much was learned.
     private func occasionFit(_ g: Garment, ctx: RecoContext) -> Double {
+        // The user's own habit for this occasion gradually takes over from the rules.
+        let habitConfidence = ctx.occasionStyle.confidence(for: ctx.habitOccasion)
+        let habit = ctx.occasionStyle.fit(g, occasion: ctx.habitOccasion)
+        return habit + ruleOccasionFit(g, ctx: ctx) * (1 - 0.6 * habitConfidence)
+    }
+
+    /// Short or long sleeves: the day's answer decides, else the learned threshold nudges.
+    private func sleeveFit(_ g: Garment, ctx: RecoContext) -> Double {
+        guard let sleeve = g.sleeveLength else { return 0 }
+        if ctx.lookTime == .day, let choice = ctx.layerChoice {
+            return sleeve == choice.sleeve ? 0.10 : -0.10
+        }
+        guard let threshold = ctx.shortSleeveFromC else { return 0 }
+        let wanted: SleeveLength = ctx.temperatureC >= threshold ? .short : .long
+        return sleeve == wanted ? 0.05 : -0.05
+    }
+
+    private func ruleOccasionFit(_ g: Garment, ctx: RecoContext) -> Double {
         switch ctx.occasionKind {
         case .sport:
             if g.isActivewear { return 0.12 }

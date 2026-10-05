@@ -18,6 +18,8 @@ enum LookReasonBuilder {
         case warmForCold(temp: Int)
         /// The look matches a calendar occasion that changed the formality.
         case occasion(CalendarOccasionKind)
+        /// Follows what the user usually wears for this occasion (learned).
+        case habit(CalendarOccasionKind)
         /// Includes a garment the user marked as a favorite.
         case favorite(garmentID: UUID)
         /// Brings back a piece that has not been worn for a while.
@@ -45,6 +47,8 @@ enum LookReasonBuilder {
         var garments: [Garment]
         var profile: DayTemperatureProfile?
         var occasion: CalendarOccasionKind = .none
+        /// Set when the look follows the user's learned habit for this occasion.
+        var habitOccasion: CalendarOccasionKind?
         var lastWorn: [UUID: Date] = [:]
         var combination: CombinationAffinity = .empty
         /// Colors that carry a real share of the user's taste (most-loved first).
@@ -80,7 +84,9 @@ enum LookReasonBuilder {
             }
         }
 
-        if occasionShapesLook(input.occasion) {
+        if let habit = input.habitOccasion {
+            result.append(.habit(habit))
+        } else if occasionShapesLook(input.occasion) {
             result.append(.occasion(input.occasion))
         }
 

@@ -21,6 +21,9 @@ final class WearEvent {
     var slotRaw: String?
     var outfitID: UUID?
     var notes: String?
+    /// The calendar occasion this look was worn for (`CalendarOccasionKind` raw value),
+    /// filled in by `OccasionMemory`. nil = not looked up yet; "none" = a plain day.
+    var occasionRaw: String?
 
     init(
         date: Date,
@@ -53,6 +56,11 @@ final class WearEvent {
     @Transient
     var source: WearEventSource {
         WearEventSource(rawValue: sourceRaw) ?? .manual
+    }
+
+    @Transient
+    var occasion: CalendarOccasionKind? {
+        occasionRaw.flatMap(CalendarOccasionKind.init(rawValue:))
     }
 
     @Transient

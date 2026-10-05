@@ -48,6 +48,8 @@ final class Garment {
     var thermalBreathabilityOverride: Int?
     var formality: Int = 3       // 1..5
     var loveScore: Int = 50      // 0..100
+    /// Sleeve length the user confirmed (`SleeveLength` raw value); nil = derived from the type.
+    var sleeveLengthRaw: String?
 
     // MARK: - Image Storage
     var imagePath: String?

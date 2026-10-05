@@ -880,6 +880,7 @@
 "look_reason_occasion_format" = "מתאים ל%@ היום";
 "look_reason_favorite_format" = "כולל פריט אהוב: %@";
 "look_reason_rotation_format" = "מחזיר את %@ (לא נלבש %d ימים)";
+"look_reason_habit_format" = "הסגנון הקבוע שלך ל%@";
 "look_reason_proven_pair" = "שילוב שכבר לבשת בעבר";
 "look_reason_palette_pop" = "בסיס ניטרלי עם נגיעת צבע";
 "look_reason_palette_tonal" = "צבעים בטון־על־טון";
@@ -979,3 +980,14 @@
 "work_dress_not_set" = "לא נבחר";
 "edit_for_workouts" = "לאימונים";
 "edit_for_work" = "לעבודה";
+
+/* Situation questions */
+"sleeve_short" = "שרוול קצר";
+"sleeve_long" = "שרוול ארוך";
+"garment_sleeve" = "שרוולים";
+"micro_question_sleeve_format" = "%@: שרוול קצר או ארוך?";
+"comfort_question_format" = "%1$d° בבוקר, %2$d° בצהריים. מה מתאים לך?";
+"comfort_choice_short_layer" = "קצר + ג׳קט";
+"comfort_choice_long" = "שרוול ארוך";
+"comfort_choice_short" = "שרוול קצר";
+"event_question_format" = "מה זה „%@”?";

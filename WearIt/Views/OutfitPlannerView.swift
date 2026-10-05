@@ -48,6 +48,9 @@ struct OutfitPlannerView: View {
     @State private var appIntentRouter = WearItAppIntentRouter.shared
     @State private var cachedTaste = TasteAffinityBuilder.Profile.empty
     @State private var cachedCombination = CombinationAffinity.empty
+    @State private var cachedOccasionStyle = OccasionStyleProfile.empty
+    /// Bumped when `OccasionMemory` tags history, so the affinity caches rebuild.
+    @State private var occasionTagVersion = 0
     @State private var cachedLatestWearByGarmentID: [UUID: Date] = [:]
     @State private var affinityCacheSignature: String = ""
     @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
@@ -69,6 +72,10 @@ struct OutfitPlannerView: View {
     @State private var pendingCalendarReplan: Set<Int> = []
     @State private var calendarConnectDismissed = UserDefaults.standard.bool(forKey: "calendar.connectCardDismissed")
     @State private var workQuestionDismissedDay = UserDefaults.standard.double(forKey: "calendar.workQuestionDismissedDay")
+    /// Answers to "short with a jacket, or long?", for the learned thresholds.
+    @State private var comfortSamples = ComfortPreferences.samples()
+    /// Day (start-of-day stamp) a planner question was last answered or closed: one a day.
+    @State private var plannerQuestionDay = UserDefaults.standard.double(forKey: "planner.questionDay")
     @State private var calendarRefreshTask: Task<Void, Never>?
     /// In-flight chunked outfit generation; cancelled when a newer request arrives.
     @State private var outfitGenerationTask: Task<Void, Never>?
@@ -192,6 +199,7 @@ struct OutfitPlannerView: View {
         }
         .onChange(of: wearEvents.count) { _, _ in
             refreshAffinityCaches()
+            learnOccasionsFromHistory()
         }
         .onChange(of: dismissedOutfits.count) { _, _ in
             refreshAffinityCaches()
@@ -257,6 +265,7 @@ struct OutfitPlannerView: View {
                 ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
                 : []
             calendarUnderstandingDidChange(replanning: workDays)
+            learnOccasionsFromHistory()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -416,6 +425,7 @@ struct OutfitPlannerView: View {
             }
             // Days whose events changed since the app last ran get re-planned below.
             pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+            await tagOccasionsFromHistory()
             if appIntentRouter.pendingAction != nil {
                 performPendingIntentAction()
             } else {
@@ -625,6 +635,7 @@ struct OutfitPlannerView: View {
             reminderLine: calendarReminder(for: dayIndex).map { reminder in
                 ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
             },
+            question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
             }
@@ -636,6 +647,11 @@ struct OutfitPlannerView: View {
 
                 if let reminder = calendarReminder(for: dayIndex) {
                     calendarReminderRow(reminder)
+                }
+
+                if let question = plannerQuestion, question.dayIndex == dayIndex {
+                    plannerQuestionCard(question)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if state.assignedGarmentIDs.isEmpty {
@@ -1175,7 +1191,123 @@ struct OutfitPlannerView: View {
     private func correctCalendarEvent(title: String, as kind: CalendarEventUnderstanding.Kind, dayIndex: Int) {
         CalendarEventCorrections.set(kind, forTitle: title)
         DS.haptic(0.4)
+        // Past looks for this title may now mean something else.
+        OccasionMemory.forgetRecentTags(context: context)
+        learnOccasionsFromHistory()
         calendarUnderstandingDidChange(replanning: [dayIndex])
+    }
+
+    // MARK: - Planner questions
+
+    /// At most one question a day, asked only when the answer changes the look.
+    private enum PlannerQuestion: Equatable {
+        case layer(dayIndex: Int, temperatureC: Double, morning: Int, midday: Int)
+        case event(dayIndex: Int, title: String)
+
+        var dayIndex: Int {
+            switch self {
+            case .layer(let dayIndex, _, _, _), .event(let dayIndex, _): return dayIndex
+            }
+        }
+
+        var key: String {
+            switch self {
+            case .layer(_, _, let morning, let midday): return "layer|\(morning)|\(midday)"
+            case .event(_, let title): return "event|\(title)"
+            }
+        }
+    }
+
+    private static let dismissedEventQuestionsKey = "planner.dismissedEventQuestions"
+
+    private var plannerQuestion: PlannerQuestion? {
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        guard plannerQuestionDay != today, !boardState.days.isEmpty else { return nil }
+        let nearDays = Array(boardState.days.indices.prefix(3))
+
+        // Today or tomorrow: is it short with a jacket, long, or short?
+        for index in nearDays.prefix(2) where canReplanForCalendar(index) {
+            let state = boardState.days[index]
+            guard state.overrides.temperatureC == nil,
+                  ComfortPreferences.answer(for: state.date) == nil,
+                  let forecast = state.forecast else { continue }
+            let profile = DayTemperatureProfile(from: forecast)
+            // Rain decides the layer on its own.
+            guard profile.rainProbability <= 0.5,
+                  ComfortPreferences.isBorderline(
+                    temperatureC: profile.effectiveTemp,
+                    low: profile.lowTemp,
+                    high: profile.highTemp,
+                    samples: comfortSamples
+                  ) else { continue }
+            return .layer(
+                dayIndex: index,
+                temperatureC: profile.effectiveTemp,
+                morning: Int(profile.morningTemp.rounded()),
+                midday: Int(profile.afternoonTemp.rounded())
+            )
+        }
+
+        // An event in the next days the app could not read.
+        let dismissed = Set(UserDefaults.standard.stringArray(forKey: Self.dismissedEventQuestionsKey) ?? [])
+        for index in nearDays where canReplanForCalendar(index) {
+            let unknown = calendarContext(for: index).events.first { event in
+                let title = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !event.isAllDay
+                    && event.kind == .none
+                    && title.count >= 2
+                    && CalendarEventCorrections.kind(forTitle: title) == nil
+                    && !dismissed.contains(title.lowercased())
+            }
+            if let unknown {
+                return .event(dayIndex: index, title: unknown.title.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private func plannerQuestionCard(_ question: PlannerQuestion) -> some View {
+        switch question {
+        case .layer(let dayIndex, let temperatureC, let morning, let midday):
+            LayerQuestionCard(
+                morningTemp: morning,
+                middayTemp: midday,
+                onPick: { answerLayerQuestion($0, dayIndex: dayIndex, temperatureC: temperatureC) },
+                onDismiss: { closePlannerQuestion() }
+            )
+        case .event(let dayIndex, let title):
+            EventQuestionCard(
+                title: title,
+                onPick: { kind in
+                    closePlannerQuestion()
+                    correctCalendarEvent(title: title, as: kind, dayIndex: dayIndex)
+                },
+                onDismiss: {
+                    var dismissed = UserDefaults.standard.stringArray(forKey: Self.dismissedEventQuestionsKey) ?? []
+                    dismissed.append(title.lowercased())
+                    UserDefaults.standard.set(Array(dismissed.suffix(100)), forKey: Self.dismissedEventQuestionsKey)
+                    closePlannerQuestion()
+                }
+            )
+        }
+    }
+
+    private func answerLayerQuestion(_ choice: DayLayerChoice, dayIndex: Int, temperatureC: Double) {
+        guard dayIndex < boardState.days.count else { return }
+        ComfortPreferences.setAnswer(choice, for: boardState.days[dayIndex].date, temperatureC: temperatureC)
+        comfortSamples = ComfortPreferences.samples()
+        closePlannerQuestion()
+        // A fresh look for that day with the answer applied (locked pieces stay).
+        calendarUnderstandingDidChange(replanning: [dayIndex])
+    }
+
+    private func closePlannerQuestion() {
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        UserDefaults.standard.set(today, forKey: "planner.questionDay")
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            plannerQuestionDay = today
+        }
     }
 
     private struct CalendarReminder {
@@ -1296,12 +1428,17 @@ struct OutfitPlannerView: View {
         let favoriteColors = cachedTaste.sourceGarmentCount >= 5
             ? cachedTaste.colorShares(limit: 2).filter { $0.share >= 0.15 }.map(\.tag)
             : []
+        let calendar = calendarContext(for: dayIndex)
+        let dressCode = activeProfile?.workDressCode
+        let habit = habitOccasion(calendar, isEvening: false, dressCode: dressCode)
+        let followsHabit = !occasionTitle(habit).isEmpty
+            && cachedOccasionStyle.lookFollowsHabit(garments, occasion: habit)
         return LookReasonBuilder.reasons(
             LookReasonBuilder.Input(
                 garments: garments,
                 profile: state.forecast.map { DayTemperatureProfile(from: $0) },
-                occasion: calendarContext(for: dayIndex)
-                    .occasion(isEvening: false, workDressCode: activeProfile?.workDressCode),
+                occasion: calendar.occasion(isEvening: false, workDressCode: dressCode),
+                habitOccasion: followsHabit ? habit : nil,
                 lastWorn: cachedLatestWearByGarmentID,
                 combination: cachedCombination,
                 favoriteColors: favoriteColors,
@@ -1329,6 +1466,8 @@ struct OutfitPlannerView: View {
             return format("look_reason_warm_cold_format", temp)
         case .occasion(let kind):
             return format("look_reason_occasion_format", occasionTitle(kind))
+        case .habit(let kind):
+            return format("look_reason_habit_format", occasionTitle(kind))
         case .favorite(let id):
             return format("look_reason_favorite_format", title(id))
         case .rotation(let id, let days):
@@ -1359,6 +1498,7 @@ struct OutfitPlannerView: View {
         case .lightForHeat: return "sun.max"
         case .warmForCold: return "thermometer.snowflake"
         case .occasion: return "calendar"
+        case .habit: return "checkmark.seal"
         case .favorite: return "star"
         case .rotation: return "arrow.counterclockwise"
         case .provenPair: return "link"
@@ -2322,6 +2462,13 @@ struct OutfitPlannerView: View {
             }
         } else if state.garmentID(for: .outer) != nil {
             return true
+        }
+
+        // The user's answer for the day ("short with a jacket" / "short, no jacket").
+        if lookTime == .day, let choice = ComfortPreferences.answer(for: state.date) {
+            let rainy = state.forecast.map { DayTemperatureProfile(from: $0).rainProbability > 0.35 } ?? false
+            if choice == .shortWithLayer { return true }
+            if choice == .shortNoLayer, !rainy { return false }
         }
 
         if let forecast = state.forecast {
@@ -3501,7 +3648,15 @@ struct OutfitPlannerView: View {
         let baseFormality = state.overrides.desiredFormality ?? preferredFormality
         let calendar = calendarContext(for: dayIndex)
         let dressCode = profile?.workDressCode
-        let desiredFormality = min(5, max(1, baseFormality + calendar.formalityBump(isEvening: isEvening, workDressCode: dressCode)))
+        let habitOccasion = self.habitOccasion(calendar, isEvening: isEvening, dressCode: dressCode)
+        var formality = Double(baseFormality + calendar.formalityBump(isEvening: isEvening, workDressCode: dressCode))
+        // How formally the user really dresses for this occasion pulls the target
+        // toward their habit (not when they set the day's formality by hand).
+        if state.overrides.desiredFormality == nil,
+           let learned = cachedOccasionStyle.learnedFormality(for: habitOccasion) {
+            formality += (learned.value - formality) * 0.7 * learned.confidence
+        }
+        let desiredFormality = min(5, max(1, Int(formality.rounded())))
         let temperatureBias = calendar.temperatureBias(isEvening: isEvening)
 
         let temperatureC: Double
@@ -3544,7 +3699,11 @@ struct OutfitPlannerView: View {
                         rainProbability: $0.rainProbability
                     )
                 } ?? []) : [],
-            allowRepeatedItems: allowRepeatedItems
+            allowRepeatedItems: allowRepeatedItems,
+            occasionStyle: cachedOccasionStyle,
+            habitOccasion: habitOccasion,
+            layerChoice: isEvening ? nil : ComfortPreferences.answer(for: state.date),
+            shortSleeveFromC: ComfortPreferences.shortSleeveFromC(comfortSamples)
         )
     }
 
@@ -3554,6 +3713,13 @@ struct OutfitPlannerView: View {
         }
         guard dayIndex < boardState.days.count else { return .empty }
         return CalendarContextService.shared.context(for: boardState.days[dayIndex].date)
+    }
+
+    /// The occasion whose learned habit applies: the raw calendar occasion, except
+    /// a uniform work day, where the wardrobe look doesn't matter.
+    private func habitOccasion(_ calendar: DayCalendarContext, isEvening: Bool, dressCode: WorkDressCode?) -> CalendarOccasionKind {
+        let occasion = isEvening ? calendar.eveningOccasion : calendar.dayOccasion
+        return occasion == .work && dressCode == .uniform ? .none : occasion
     }
 
     /// Re-reads the calendar. Returns the days whose calendar meaning changed
@@ -3643,7 +3809,7 @@ struct OutfitPlannerView: View {
     }
 
     private func refreshAffinityCaches() {
-        let signature = "\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
+        let signature = "\(occasionTagVersion)|\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
         guard signature != affinityCacheSignature else { return }
         affinityCacheSignature = signature
         cachedTaste = TasteAffinityBuilder.build(
@@ -3668,7 +3834,21 @@ struct OutfitPlannerView: View {
             swipeEvents: Array(recentSwipes)
         )
         cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
+        cachedOccasionStyle = OccasionStyleProfile.build(events: wearEvents, garments: allGarments)
         TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
+    }
+
+    /// Tags confirmed looks with the calendar occasion they were worn for, so
+    /// the planner learns the user's own look per occasion.
+    private func tagOccasionsFromHistory() async {
+        let changed = await OccasionMemory.tagUntagged(context: context)
+        guard changed > 0 else { return }
+        occasionTagVersion += 1
+        refreshAffinityCaches()
+    }
+
+    private func learnOccasionsFromHistory() {
+        Task { await tagOccasionsFromHistory() }
     }
 
     @discardableResult
@@ -5267,6 +5447,8 @@ private struct DayCardSignature: Equatable {
     let eventLine: String?
     /// Workout / work-clothes reminder text plus the suggested items.
     let reminderLine: String?
+    /// The question shown on this card ("short with a jacket?" / "what is this event?").
+    let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
 }

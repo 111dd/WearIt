@@ -861,6 +861,7 @@
 "look_reason_occasion_format" = "Dressed for %@";
 "look_reason_favorite_format" = "Includes a favorite: %@";
 "look_reason_rotation_format" = "Brings back %@ (not worn for %d days)";
+"look_reason_habit_format" = "Your usual style for %@";
 "look_reason_proven_pair" = "A pairing you've worn before";
 "look_reason_palette_pop" = "Neutral base with one pop of color";
 "look_reason_palette_tonal" = "Tone-on-tone colors";
@@ -960,3 +961,14 @@
 "work_dress_not_set" = "Not set";
 "edit_for_workouts" = "For workouts";
 "edit_for_work" = "For work";
+
+/* Situation questions */
+"sleeve_short" = "Short sleeves";
+"sleeve_long" = "Long sleeves";
+"garment_sleeve" = "Sleeves";
+"micro_question_sleeve_format" = "%@: short or long sleeves?";
+"comfort_question_format" = "%1$d° in the morning, %2$d° at midday. What feels right?";
+"comfort_choice_short_layer" = "Short + jacket";
+"comfort_choice_long" = "Long sleeves";
+"comfort_choice_short" = "Short sleeves";
+"event_question_format" = "What is “%@”?";
