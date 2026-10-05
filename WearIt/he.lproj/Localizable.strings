@@ -991,3 +991,18 @@
 "comfort_choice_long" = "שרוול ארוך";
 "comfort_choice_short" = "שרוול קצר";
 "event_question_format" = "מה זה „%@”?";
+
+/* Right for (item situations) */
+"fits_title" = "מתאים עבור";
+"fits_reset" = "אוטומטי";
+"fits_hint" = "לפי הפריט ולפי מה שלבשת אותו. אפשר לשנות בלחיצה.";
+"fits_everyday" = "יום־יום";
+"fits_work" = "עבודה";
+"fits_evening_out" = "יציאה בערב";
+"fits_formal" = "אירוע רשמי";
+"fits_sport" = "אימון";
+"fits_outdoor" = "בחוץ";
+"fits_home" = "בית";
+"fits_question_format" = "לבשת את %1$@ הרבה ל„%2$@”. לסמן שמתאים?";
+"fits_question_yes" = "כן";
+"fits_question_no" = "לא ממש";

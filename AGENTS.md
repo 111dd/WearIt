@@ -124,6 +124,12 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · "Right for" per item: `Logic/GarmentOccasionProfile` scores everyday / work /
+  evening out / formal / workouts / outdoors / home from the item (formality, type, style, tags) and from
+  calendar-tagged wear; user answers in `Garment.occasionFitsRaw` / `occasionNotFitsRaw` (work and
+  workouts sync the `.work` / `.gym` tags). Chips replace the two toggles in `EditGarmentView`; the
+  wardrobe asks "you often wear X for work, mark it?"; `AIRecommender.situationFit` uses it.
+
 - 2026-10-05 · Claude Code · Ask when in doubt: one planner question a day inside the day card, either
   "short + jacket / long / short?" on in-between days (`Logic/ComfortPreferences`, learns the user's
   short-sleeve and jacket temperatures and asks less) or "what is this event?" for unreadable events

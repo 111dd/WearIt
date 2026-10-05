@@ -972,3 +972,18 @@
 "comfort_choice_long" = "Long sleeves";
 "comfort_choice_short" = "Short sleeves";
 "event_question_format" = "What is “%@”?";
+
+/* Right for (item situations) */
+"fits_title" = "Right for";
+"fits_reset" = "Automatic";
+"fits_hint" = "Based on the item and what you wore it for. Tap to change.";
+"fits_everyday" = "Everyday";
+"fits_work" = "Work";
+"fits_evening_out" = "Evening out";
+"fits_formal" = "Formal event";
+"fits_sport" = "Workouts";
+"fits_outdoor" = "Outdoors";
+"fits_home" = "Home";
+"fits_question_format" = "You often wear %1$@ for “%2$@”. Mark it as right for it?";
+"fits_question_yes" = "Yes";
+"fits_question_no" = "Not really";

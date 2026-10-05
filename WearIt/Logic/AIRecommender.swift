@@ -663,7 +663,25 @@ final class AIRecommender {
         // The user's own habit for this occasion gradually takes over from the rules.
         let habitConfidence = ctx.occasionStyle.confidence(for: ctx.habitOccasion)
         let habit = ctx.occasionStyle.fit(g, occasion: ctx.habitOccasion)
-        return habit + ruleOccasionFit(g, ctx: ctx) * (1 - 0.6 * habitConfidence)
+        return habit
+            + ruleOccasionFit(g, ctx: ctx) * (1 - 0.6 * habitConfidence)
+            + situationFit(g, ctx: ctx, habitConfidence: habitConfidence)
+    }
+
+    /// The item's own fit for the situation: the user's answer counts fully;
+    /// otherwise what the item implies nudges formal, evening and outdoor looks
+    /// (work and workouts are covered by the rules above).
+    private func situationFit(_ g: Garment, ctx: RecoContext, habitConfidence: Double) -> Double {
+        guard let situation = GarmentOccasion(calendar: ctx.occasionKind) else { return 0 }
+        if g.occasionFits.contains(situation) { return 0.08 }
+        if g.occasionNotFits.contains(situation) { return -0.15 }
+        switch situation {
+        case .formal, .eveningOut, .outdoor:
+            let derived = GarmentOccasionProfile.derivedScore(g, for: situation)
+            return (derived - 0.5) * 0.10 * (1 - 0.5 * habitConfidence)
+        default:
+            return 0
+        }
     }
 
     /// Short or long sleeves: the day's answer decides, else the learned threshold nudges.

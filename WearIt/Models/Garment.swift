@@ -50,6 +50,9 @@ final class Garment {
     var loveScore: Int = 50      // 0..100
     /// Sleeve length the user confirmed (`SleeveLength` raw value); nil = derived from the type.
     var sleeveLengthRaw: String?
+    /// Situations the user said the item is / is not for (`GarmentOccasion` raw values).
+    var occasionFitsRaw: [String]?
+    var occasionNotFitsRaw: [String]?
 
     // MARK: - Image Storage
     var imagePath: String?

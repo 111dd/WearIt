@@ -18,6 +18,8 @@ struct EditGarmentView: View {
     @State private var showDeleteAlert = false
     @State private var errorMessage: String?
     @State private var hasUnsavedChanges = false
+    /// Looks this item was worn in, per situation (from calendar-tagged wear history).
+    @State private var occasionWearCounts: [GarmentOccasion: Int] = [:]
     @State private var brandText = ""
     @State private var showLabelScanner = false
     @State private var isScanningLabel = false
@@ -124,6 +126,7 @@ struct EditGarmentView: View {
             brandText = garment.brand ?? ""
             BrandStore.syncFromGarments(context: context)
             loadHeroImage()
+            loadOccasionWearCounts()
         }
         .onChange(of: garment.imagePath) { _, _ in
             loadHeroImage()
@@ -663,23 +666,71 @@ struct EditGarmentView: View {
         .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
-    /// "For workouts" / "For work": what the calendar reminders and work days pick.
-    private func occasionToggle(_ tag: OccasionTag, title: String, icon: String) -> some View {
-        Toggle(isOn: Binding(
-            get: { garment.occasionTags?.contains(tag) == true },
-            set: { isOn in
-                var tags = garment.occasionTags ?? []
-                tags.removeAll { $0 == tag }
-                if isOn { tags.append(tag) }
-                garment.occasionTags = tags.isEmpty ? nil : tags
-                garment.markUserEdited(ItemTypeDefaults.FieldKey.occasionTags)
-                hasUnsavedChanges = true
+    /// "Right for": everyday, work, evening out, formal, workouts, outdoors, home.
+    /// Starts from what the item implies and what it was worn for; a tap sets the
+    /// user's own answer (work and workouts also feed reminders and work days).
+    private var occasionFitsSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack {
+                Label(String(localized: "fits_title"), systemImage: "checkmark.seal")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                if !garment.occasionFits.isEmpty || !garment.occasionNotFits.isEmpty {
+                    Button(String(localized: "fits_reset")) {
+                        for occasion in GarmentOccasion.allCases {
+                            garment.setOccasionAnswer(nil, for: occasion)
+                        }
+                        hasUnsavedChanges = true
+                    }
+                    .font(.caption.weight(.medium))
+                }
             }
-        )) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.medium))
+            Text(String(localized: "fits_hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+                ForEach(GarmentOccasion.allCases) { occasion in
+                    occasionChip(occasion)
+                }
+            }
         }
-        .tint(.accentColor)
+    }
+
+    private func occasionChip(_ occasion: GarmentOccasion) -> some View {
+        let fits = GarmentOccasionProfile.fits(garment, occasion, wornFor: occasionWearCounts[occasion] ?? 0)
+        return Button {
+            DS.haptic(0.3)
+            garment.setOccasionAnswer(!fits, for: occasion)
+            hasUnsavedChanges = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: fits ? "checkmark" : occasion.icon)
+                    .font(.caption.weight(.semibold))
+                Text(occasion.title)
+                    .font(.footnote.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .padding(.horizontal, 6)
+            .foregroundStyle(fits ? Color.white : Color.primary)
+            .background(
+                Capsule().fill(fits ? Color.accentColor : Color.secondary.opacity(0.12))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(fits ? .isSelected : [])
+    }
+
+    private func loadOccasionWearCounts() {
+        let descriptor = FetchDescriptor<WearEvent>(
+            predicate: #Predicate { event in event.occasionRaw != nil }
+        )
+        let events = (try? context.fetch(descriptor)) ?? []
+        let id = garment.id
+        occasionWearCounts = GarmentOccasionProfile.wearCounts(
+            from: events.filter { $0.garmentIDs.contains(id) }
+        )[id] ?? [:]
     }
 
     private var attributesCard: some View {
@@ -725,8 +776,7 @@ struct EditGarmentView: View {
             }
             .tint(.yellow)
 
-            occasionToggle(.gym, title: String(localized: "edit_for_workouts"), icon: "figure.run")
-            occasionToggle(.work, title: String(localized: "edit_for_work"), icon: "briefcase.fill")
+            occasionFitsSection
 
             if garment.category == .top {
                 HStack {
