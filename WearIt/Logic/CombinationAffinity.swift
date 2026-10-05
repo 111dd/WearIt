@@ -58,6 +58,7 @@ enum CombinationAffinityBuilder {
         wearEvents: [WearEvent],
         dismissed: [DismissedOutfit],
         rejectedEvents: [RecommendationEvent] = [],
+        swipeEvents: [RecommendationEvent] = [],
         maxEvents: Int = 120
     ) -> CombinationAffinity {
         var raw: [String: Double] = [:]
@@ -88,6 +89,17 @@ enum CombinationAffinityBuilder {
             let ids = Array(Set(event.selectedGarmentIDs))
             guard ids.count >= 2 else { continue }
             addPairs(ids: ids, delta: -0.9, into: &raw)
+        }
+
+        // Style Swipe: a liked look is a softer "goes together" than a real wear.
+        for event in swipeEvents {
+            let ids = Array(Set(event.selectedGarmentIDs))
+            guard ids.count >= 2 else { continue }
+            switch event.kind {
+            case .swipeLiked?: addPairs(ids: ids, delta: 0.6, into: &raw)
+            case .swipeDisliked?: addPairs(ids: ids, delta: -0.4, into: &raw)
+            default: continue
+            }
         }
 
         // Soft-squash into -1...1

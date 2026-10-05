@@ -52,6 +52,9 @@ struct OutfitPlannerView: View {
     @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
     /// Brief non-error status after a successful neutral look replacement.
     @State private var statusToast: String?
+    @State private var showStyleSwipe = false
+    @State private var styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+    @State private var styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
     /// Prevents concurrent action commits on the same day/look row.
     @State private var swipeBusyKeys: Set<String> = []
     /// Memoized advisor/availability results — plain class so body-time writes
@@ -217,8 +220,17 @@ struct OutfitPlannerView: View {
                 addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
             }
         }
+        .fullScreenCover(isPresented: $showStyleSwipe) {
+            StyleSwipeView(deckSize: styleSwipeDeckSize) {
+                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                refreshAffinityCaches()
+            }
+            .environmentObject(auth)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshCurrentDate()
+            styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -248,6 +260,26 @@ struct OutfitPlannerView: View {
                     unwornNudgeCard(nudge)
                         .padding(.horizontal, DS.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if styleSwipeOffered, StyleSwipeDeckBuilder.isEligible(allGarments) {
+                    StyleSwipeEntryCard(
+                        deckSize: styleSwipeDeckSize,
+                        isOnboarding: StyleSwipeSchedule.needsOnboarding,
+                        progress: AIRecommender.shared.learningProgress(profileID: activeProfile?.id, modelContext: context),
+                        onOpen: {
+                            styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                            showStyleSwipe = true
+                        },
+                        onDismiss: {
+                            StyleSwipeSchedule.dismissForToday()
+                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                                styleSwipeOffered = false
+                            }
+                        }
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if allGarments.isEmpty {
@@ -814,6 +846,18 @@ struct OutfitPlannerView: View {
             } label: {
                 Label(String(localized: "planner_refresh_day"), systemImage: "arrow.clockwise")
             }
+            if boardState.days[dayIndex].assignedGarmentIDs.count >= 2 {
+                Button {
+                    refreshDayLook(dayIndex, variation: .similar)
+                } label: {
+                    Label(String(localized: "planner_more_like_this"), systemImage: "square.on.square")
+                }
+                Button {
+                    refreshDayLook(dayIndex, variation: .different)
+                } label: {
+                    Label(String(localized: "planner_something_different"), systemImage: "shuffle")
+                }
+            }
             // Future looks have no wear prompt on the card; planning lives here.
             if dayTiming(for: dayIndex) == .future,
                !boardState.days[dayIndex].assignedGarmentIDs.isEmpty,
@@ -1138,6 +1182,16 @@ struct OutfitPlannerView: View {
             return format("look_reason_rotation_format", title(id), days)
         case .provenPair:
             return String(localized: "look_reason_proven_pair")
+        case .palette(let palette):
+            switch palette {
+            case .neutralPlusPop: return String(localized: "look_reason_palette_pop")
+            case .tonal: return String(localized: "look_reason_palette_tonal")
+            case .analogous: return String(localized: "look_reason_palette_analogous")
+            case .complementary: return String(localized: "look_reason_palette_complementary")
+            case .neutral, .bold: return String(localized: "look_reason_palette_neutral")
+            }
+        case .balancedProportions:
+            return String(localized: "look_reason_balanced_proportions")
         case .favoriteColor(let color):
             return format("look_reason_favorite_color_format", color.title)
         case .weatherRange(let low, let high):
@@ -1155,6 +1209,8 @@ struct OutfitPlannerView: View {
         case .favorite: return "star"
         case .rotation: return "arrow.counterclockwise"
         case .provenPair: return "link"
+        case .palette: return "swatchpalette"
+        case .balancedProportions: return "figure.stand"
         case .favoriteColor: return "paintpalette"
         case .weatherRange: return "thermometer.medium"
         }
@@ -1723,8 +1779,40 @@ struct OutfitPlannerView: View {
                 replacementID: garment.id,
                 lookTime: target.lookTime
             )
+            learnUserChoice(garment, over: replacedID, dayIndex: target.dayIndex, lookTime: target.lookTime)
         }
         persistDayPlan(target.dayIndex)
+    }
+
+    /// The user picked `chosen` instead of the piece that was in the slot: the
+    /// strongest implicit signal we get. Pairwise model update, saved with the
+    /// planner's own persist (no extra CloudKit push).
+    private func learnUserChoice(_ chosen: Garment, over replacedID: UUID, dayIndex: Int, lookTime: LookTime) {
+        guard dayIndex < boardState.days.count,
+              replacedID != chosen.id,
+              let replaced = garment(for: replacedID) else { return }
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        AIRecommender.shared.learnPreference(
+            chosen: chosen,
+            over: replaced,
+            ctx: ctx,
+            modelContext: context,
+            save: false
+        )
+        // Look level: the look after the swap beats the look before it.
+        let day = boardState.days[dayIndex]
+        let after = (lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs)
+            .compactMap { garment(for: $0) }
+        if after.contains(where: { $0.id == chosen.id }) {
+            let before = after.map { $0.id == chosen.id ? replaced : $0 }
+            AIRecommender.shared.learnLookPreference(
+                chosen: after,
+                over: before,
+                profileID: ctx.profileID,
+                modelContext: context,
+                save: false
+            )
+        }
     }
 
     /// Day-look rating hooks for the look control bar (heart + fine-tune menu).
@@ -2733,9 +2821,16 @@ struct OutfitPlannerView: View {
         }
     }
 
+    /// "More like this" keeps the look's fingerprint with other pieces;
+    /// "Something different" turns its most distinctive trait around.
+    private enum LookVariation {
+        case similar
+        case different
+    }
+
     /// Regenerates the day look only. No taste / affinity / recommendation feedback.
     @discardableResult
-    private func refreshDayLook(_ dayIndex: Int) -> Bool {
+    private func refreshDayLook(_ dayIndex: Int, variation: LookVariation? = nil) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
         let referenceDate = boardState.days[dayIndex].date
         let previousIDsBySlot: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
@@ -2782,13 +2877,31 @@ struct OutfitPlannerView: View {
         )
         let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs).union(rotationExcludedIDs)
         
-        let outfit = AIRecommender.shared.suggestOutfit(
-            from: pool,
-            ctx: ctx,
-            modelContext: context,
-            excludedIDs: excludedMerged,
-            penalizedIDs: crossDay.soft
-        )
+        let currentLook = previousIDsBySlot.values.compactMap { garment(for: $0) }
+        let outfit: [Garment]
+        if let variation, currentLook.count >= 2 {
+            let dna = LookDNA(garments: currentLook)
+            let target = AIRecommender.LookTarget(
+                dna: variation == .similar ? dna : dna.contrasting,
+                weight: variation == .similar ? 0.45 : 0.6
+            )
+            outfit = AIRecommender.shared.rankLooks(
+                from: pool,
+                ctx: ctx,
+                modelContext: context,
+                excludedIDs: excludedMerged,
+                penalizedIDs: crossDay.soft,
+                target: target
+            ).first?.garments ?? []
+        } else {
+            outfit = AIRecommender.shared.suggestOutfit(
+                from: pool,
+                ctx: ctx,
+                modelContext: context,
+                excludedIDs: excludedMerged,
+                penalizedIDs: crossDay.soft
+            )
+        }
         
         boardState.setOutfit(forDay: dayIndex, garments: outfit, overwriteExisting: true)
         var didChange = false
@@ -3309,15 +3422,26 @@ struct OutfitPlannerView: View {
         let signature = "\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
         guard signature != affinityCacheSignature else { return }
         affinityCacheSignature = signature
-        cachedTaste = TasteAffinityBuilder.build(from: allGarments)
+        cachedTaste = TasteAffinityBuilder.build(
+            from: allGarments,
+            choiceSignals: TasteAffinityBuilder.choiceSignals(
+                wearEvents: wearEvents,
+                recommendationEvents: Array(recommendationEvents.prefix(400))
+            )
+        )
         let recentRejections = recommendationEvents
             .filter { $0.kind == .notMyStyle }
             .prefix(40)
             .map { $0 }
+        let recentSwipes = recommendationEvents
+            .filter { $0.kind == .swipeLiked || $0.kind == .swipeDisliked }
+            .prefix(120)
+            .map { $0 }
         cachedCombination = CombinationAffinityBuilder.build(
             wearEvents: wearEvents,
             dismissed: dismissedOutfits,
-            rejectedEvents: Array(recentRejections)
+            rejectedEvents: Array(recentRejections),
+            swipeEvents: Array(recentSwipes)
         )
         cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
         TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
@@ -3340,6 +3464,12 @@ struct OutfitPlannerView: View {
             }
         }
 
+        let previousID: UUID? = dayIndex < boardState.days.count
+            ? (lookTime == .evening
+                ? boardState.days[dayIndex].eveningGarmentID(for: slot)
+                : boardState.days[dayIndex].garmentID(for: slot))
+            : nil
+
         let success: Bool
         if lookTime == .evening {
             success = assignEveningGarment(garment, to: slot, dayIndex: dayIndex, allowUnavailable: allowUnavailable)
@@ -3356,6 +3486,9 @@ struct OutfitPlannerView: View {
         if success {
             if lookTime == .day && isEveningLinked(dayIndex: dayIndex, slot: slot) {
                 boardState.days[dayIndex].setEveningGarment(garment.id, for: slot, locked: true)
+            }
+            if let previousID, previousID != garment.id {
+                learnUserChoice(garment, over: previousID, dayIndex: dayIndex, lookTime: lookTime)
             }
             DS.haptic(0.3)
             persistAllPlans()
@@ -3412,6 +3545,17 @@ struct OutfitPlannerView: View {
         let isLocked = boardState.days[dayIndex].isLocked(slot)
         let garmentID = boardState.days[dayIndex].garmentID(for: slot)
         boardState.days[dayIndex].setGarment(garmentID, for: slot, locked: !isLocked)
+        // Locking a piece means "keep this": a soft positive in this context.
+        if !isLocked, let garmentID, let locked = garment(for: garmentID) {
+            AIRecommender.shared.learn(
+                from: [locked],
+                ctx: recoContext(for: dayIndex),
+                reward: 0.85,
+                weight: 0.5,
+                modelContext: context,
+                save: false
+            )
+        }
         persistDayPlan(dayIndex)
     }
 
@@ -3556,6 +3700,17 @@ struct OutfitPlannerView: View {
                     replacementID: replacement.id,
                     lookTime: lookTime
                 )
+                // The app picked the replacement, so only "not this one" is known.
+                if let replaced = garment(for: currentID) {
+                    AIRecommender.shared.learn(
+                        from: [replaced],
+                        ctx: ctx,
+                        reward: 0.3,
+                        weight: 0.5,
+                        modelContext: context,
+                        save: false
+                    )
+                }
             }
             persistDayPlan(dayIndex)
             DS.haptic(0.3)
@@ -4126,6 +4281,13 @@ struct OutfitPlannerView: View {
         ) else { return }
 
         let ctx = recoContext(for: dayIndex)
+        AIRecommender.shared.learnLook(
+            selected,
+            reward: reward,
+            profileID: ctx.profileID,
+            modelContext: context,
+            save: false
+        )
         AIRecommender.shared.learn(
             from: selected,
             shown: shown,

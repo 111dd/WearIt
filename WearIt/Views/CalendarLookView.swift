@@ -366,10 +366,45 @@ struct CalendarLookView: View {
         plan.setSlotAssignments(assignments, lockedSlots: lockedSlots)
         if plan.slotAssignments != before {
             plan.applyDayLookWearStatus(nil)
+            if timing != .future {
+                learnActualWear(plan: plan, before: before, after: plan.slotAssignments)
+            }
         }
         try? context.save()
         DS.haptic(0.5)
         showStatusToast(String(localized: "success_saved"))
+    }
+
+    /// Correcting today's or a past look is "what I actually wore": each changed
+    /// slot teaches the recommender the worn piece beats the planned one.
+    /// Saved by the caller's single save.
+    private func learnActualWear(plan: DayPlan, before: [OutfitSlot: UUID], after: [OutfitSlot: UUID]) {
+        let profile = CurrentUser.activeProfile(in: context, userIdentifier: auth.userIdentifier, createIfNeeded: false)
+        let temperatureC: Double = {
+            if let high = plan.contextTempHigh, let low = plan.contextTempLow { return (high + low) / 2 }
+            return plan.contextAfternoonTemp ?? plan.contextTempHigh ?? 20
+        }()
+        let ctx = RecoContext(
+            desiredFormality: profile?.preferredFormality ?? 3,
+            temperatureC: temperatureC,
+            isRaining: plan.contextWasRaining ?? false,
+            now: plan.date,
+            profileID: profile?.id,
+            warmthSensitivity: profile?.warmthSensitivity ?? 3,
+            rainTolerance: profile?.rainTolerance ?? 3
+        )
+        for (slot, oldID) in before {
+            guard let newID = after[slot], newID != oldID,
+                  let worn = garmentsByID[newID],
+                  let planned = garmentsByID[oldID] else { continue }
+            AIRecommender.shared.learnPreference(
+                chosen: worn,
+                over: planned,
+                ctx: ctx,
+                modelContext: context,
+                save: false
+            )
+        }
     }
 
     private func setTemperatureFeedback(_ feedback: TemperatureFeedback) {

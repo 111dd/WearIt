@@ -632,6 +632,12 @@ struct SettingsView: View {
     private var debugSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             DSSectionHeader("Debug", icon: "ladybug")
+            let hitRate = RecommendationHitRate.compute(
+                events: (try? context.fetch(FetchDescriptor<RecommendationEvent>())) ?? []
+            )
+            Text("HIT_RATE_28D=\(hitRate.rate.map { "\(Int(($0 * 100).rounded()))%" } ?? "n/a") worn=\(hitRate.wornLooks)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.secondary)
             Button("Re-run Diagnostics") {
                 DebugOutfitDiagnostics.runDiagnostics(context: context, limit: 8)
             }

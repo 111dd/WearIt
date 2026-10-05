@@ -2,6 +2,12 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Recommender judges whole looks and learns from choices
+
+- **Did:** `suggestOutfit` now calls `rankLooks`: top 6 per core slot, every combination scored as a look (piece scores + `LookDNA.priorScore` + learned `RecoState.lookWeights` + pair affinity), then outer/accessory. Swaps/picks call `learnPreference` (pairwise) and `learnLookPreference`; locks and auto-replace are soft signals saved with the planner persist (`save: false`). Style Swipe trains the same models.
+- **Why:** Pieces were picked greedily one by one, so colors and proportions never mattered, and the strongest signal (what the user swapped in) was logged but never learned.
+- **Watch:** `LookDNA.vector` order is the meaning of `lookWeights`; only append to it (and to `StyleInsights` index math). Learning calls inside the planner must pass `save: false`; Style Swipe saves once per deck. Visual prints live in Application Support, never in a `@Model`.
+
 ## 2026-10-05 — Text on glass was hard to read
 
 - **Did:** Removed glass-on-glass inside the planner day card (forecast chip, ⋯ circle, gesture hint). Weather and the calendar event are plain subtitle lines. The card glass gets `tint: Color(.systemBackground).opacity(0.35)`.
