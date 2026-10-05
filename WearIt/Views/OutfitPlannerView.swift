@@ -46,8 +46,6 @@ struct OutfitPlannerView: View {
     @State private var cachedCombination = CombinationAffinity.empty
     @State private var cachedLatestWearByGarmentID: [UUID: Date] = [:]
     @State private var affinityCacheSignature: String = ""
-    /// Days whose "What do you think?" panel is expanded.
-    @State private var expandedFeedbackDays: Set<Int> = []
     @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
     /// Brief non-error status after a successful neutral look replacement.
     @State private var statusToast: String?
@@ -528,7 +526,6 @@ struct OutfitPlannerView: View {
             forecastKey: forecastKey(for: state.forecast),
             assignedSignature: assignedGarmentSignature(for: dayIndex),
             availableSignature: availableGarmentsSignature,
-            feedbackExpanded: expandedFeedbackDays.contains(dayIndex),
             aiExplanation: aiExplanationText(for: dayIndex)
         )
 
@@ -556,17 +553,11 @@ struct OutfitPlannerView: View {
                 }
 
                 if !state.assignedGarmentIDs.isEmpty {
-                    recommendationPreview(for: dayIndex)
-                    dayCardActions(for: dayIndex)
+                    lookInsightRow(for: dayIndex)
                     if isDetailsExpanded(dayIndex) {
                         dayDetailsSection(for: dayIndex)
                             .transition(.opacity)
                     }
-                }
-
-                if !state.assignedGarmentIDs.isEmpty {
-                    feedbackSection(for: dayIndex)
-                        .transition(.opacity)
                 }
 
             }
@@ -843,26 +834,6 @@ struct OutfitPlannerView: View {
         .buttonStyle(.plain)
     }
 
-    private func dayCardActions(for dayIndex: Int) -> some View {
-        let expanded = isDetailsExpanded(dayIndex)
-        return Button {
-            toggleDayDetails(dayIndex)
-        } label: {
-            HStack {
-                Text(String(localized: "planner_why_this_look"))
-                    .font(.subheadline.weight(.medium))
-                Spacer(minLength: DS.Spacing.sm)
-                Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                    .font(.caption.weight(.semibold))
-            }
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .accessibilityValue(String(localized: expanded ? "planner_details_expanded" : "planner_details_collapsed"))
-    }
-
     private var bottomActionBar: some View {
         AnyView(EmptyView())
     }
@@ -994,27 +965,42 @@ struct OutfitPlannerView: View {
         }
     }
 
-    @ViewBuilder
-    private func recommendationPreview(for dayIndex: Int) -> some View {
-        if dayIndex < boardState.days.count, let forecast = boardState.days[dayIndex].forecast {
-            let profile = DayTemperatureProfile(from: forecast)
-            // Keep the collapsed summary short and stable. AI text is available
-            // in the expanded explanation, rather than another competing card.
-            let guidance = recommendationGuidance(for: profile)
+    /// One quiet, tappable line under the look: the short weather guidance, or
+    /// "Why this look?" without a forecast. Tapping reveals the AI explanation
+    /// and hints, so the card has a single disclosure instead of two rows.
+    private func lookInsightRow(for dayIndex: Int) -> some View {
+        let expanded = isDetailsExpanded(dayIndex)
+        let text: String = {
+            if dayIndex < boardState.days.count, let forecast = boardState.days[dayIndex].forecast {
+                return recommendationGuidance(for: DayTemperatureProfile(from: forecast))
+            }
+            return String(localized: "planner_why_this_look")
+        }()
+        return Button {
+            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                toggleDayDetails(dayIndex)
+            }
+        } label: {
             HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xxs) {
                 Image(systemName: "sparkles")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(guidance)
+                Text(text)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.opacity)
+                Spacer(minLength: DS.Spacing.sm)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
             }
-            .padding(.top, DS.Spacing.xxs)
-        } else {
-            EmptyView()
+            .foregroundStyle(.secondary)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text(String(localized: "planner_why_this_look")))
+        .accessibilityValue(String(localized: expanded ? "planner_details_expanded" : "planner_details_collapsed"))
     }
 
     private func recommendationGuidance(for profile: DayTemperatureProfile) -> String {
@@ -1205,12 +1191,9 @@ struct OutfitPlannerView: View {
     }
 
     private func changeSuggestionsView(_ suggestions: [OutfitChangeSuggestion], dayIndex: Int) -> some View {
+        // Only the strongest suggestion: one optional nudge keeps the card light.
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            Text(String(localized: "planner_change_title"))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            ForEach(suggestions.prefix(3)) { suggestion in
+            ForEach(suggestions.prefix(1)) { suggestion in
                 Button {
                     applyChangeSuggestion(suggestion, dayIndex: dayIndex)
                 } label: {
@@ -1368,7 +1351,16 @@ struct OutfitPlannerView: View {
         let timing = dayTiming(for: dayIndex)
         let status = lookWearStatus(dayIndex: dayIndex, lookTime: lookTime)
         // Status badge / confirm gate use per-slot resolution only — not WearEvent presence.
-        let canConfirm = status != .worn
+        // Future days stop offering "will wear" once planned; today/past still let a
+        // planned look be confirmed as worn.
+        let canConfirm: Bool = {
+            switch timing {
+            case .future:
+                return status != .planned && status != .worn
+            case .today, .past:
+                return status != .worn
+            }
+        }()
         let confirmTitle: String = {
             switch timing {
             case .future:
@@ -1417,6 +1409,7 @@ struct OutfitPlannerView: View {
             clearStatusTitle: clearTitle,
             statusBadge: badge,
             accessibilitySlotLabel: slotLabel,
+            feedback: lookTime == .day ? lookFeedbackActions(for: dayIndex) : nil,
             onConfirm: {
                 handleSwipeConfirm(dayIndex: dayIndex, lookTime: lookTime)
             },
@@ -1432,6 +1425,31 @@ struct OutfitPlannerView: View {
         ) {
             outfitRow(for: dayIndex, lookTime: lookTime)
         }
+    }
+
+    /// Day-look rating hooks for the look control bar (heart + fine-tune menu).
+    private func lookFeedbackActions(for dayIndex: Int) -> LookFeedbackActions {
+        let state = boardState.days[dayIndex]
+        return LookFeedbackActions(
+            isLoved: state.feedback == .loved,
+            temperature: state.temperatureFeedback,
+            onLove: {
+                withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                    submitFeedback(for: dayIndex, rating: .loved)
+                }
+            },
+            onNotMyStyle: {
+                withAnimation(reduceMotion ? nil : DS.Animation.fast) {
+                    submitFeedback(for: dayIndex, rating: .rejected)
+                }
+            },
+            onTemperature: { feedback in
+                submitTemperatureFeedback(for: dayIndex, feedback: feedback)
+            },
+            onFormality: { direction in
+                submitFormalityFeedback(for: dayIndex, direction: direction)
+            }
+        )
     }
 
     /// DayPlan is source of truth; board mirrors raw fields, with legacy day fallback via plan.
@@ -2161,116 +2179,6 @@ struct OutfitPlannerView: View {
         }
     }
     
-    // MARK: - Feedback Section
-
-    @ViewBuilder
-    private func feedbackSection(for dayIndex: Int) -> some View {
-        let state = boardState.days[dayIndex]
-        // Positive feedback already saved → keep the look card clean.
-        if state.feedback == .loved {
-            EmptyView()
-        } else {
-            let isExpanded = expandedFeedbackDays.contains(dayIndex)
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                Button {
-                    DS.haptic(0.3)
-                    withAnimation(DS.Animation.fast) {
-                        if isExpanded {
-                            expandedFeedbackDays.remove(dayIndex)
-                        } else {
-                            expandedFeedbackDays.insert(dayIndex)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tint)
-                        Text(String(localized: "planner_what_do_you_think"))
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Spacer(minLength: 0)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.vertical, DS.Spacing.xs)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(SoftPressButtonStyle())
-                .accessibilityHint(String(localized: "planner_feedback_toggle_hint"))
-
-                if isExpanded {
-                    // Primary: love / not my style
-                    HStack(spacing: DS.Spacing.sm) {
-                        FeedbackButton(
-                            label: String(localized: "planner_love_it"),
-                            icon: "heart.fill",
-                            color: .pink,
-                            isSelected: state.feedback == .loved
-                        ) {
-                            withAnimation(DS.Animation.standard) {
-                                submitFeedback(for: dayIndex, rating: .loved)
-                                expandedFeedbackDays.remove(dayIndex)
-                            }
-                        }
-
-                        FeedbackButton(
-                            label: String(localized: "planner_not_my_style"),
-                            icon: "arrow.clockwise",
-                            color: .orange,
-                            isSelected: state.feedback == .rejected
-                        ) {
-                            withAnimation(DS.Animation.fast) {
-                                submitFeedback(for: dayIndex, rating: .rejected)
-                                expandedFeedbackDays.remove(dayIndex)
-                            }
-                        }
-                    }
-
-                    // Secondary tweaks — compact, optional
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: DS.Spacing.xs) {
-                            TempFeedbackButton(
-                                feedback: .tooWarm,
-                                isSelected: state.temperatureFeedback == .tooWarm
-                            ) {
-                                submitTemperatureFeedback(for: dayIndex, feedback: .tooWarm)
-                            }
-
-                            TempFeedbackButton(
-                                feedback: .tooCold,
-                                isSelected: state.temperatureFeedback == .tooCold
-                            ) {
-                                submitTemperatureFeedback(for: dayIndex, feedback: .tooCold)
-                            }
-
-                            LearningFeedbackChip(
-                                label: String(localized: "planner_too_formal"),
-                                icon: "briefcase.fill",
-                                color: .purple
-                            ) {
-                                submitFormalityFeedback(for: dayIndex, direction: -1)
-                            }
-
-                            LearningFeedbackChip(
-                                label: String(localized: "planner_too_casual"),
-                                icon: "tshirt.fill",
-                                color: .blue
-                            ) {
-                                submitFormalityFeedback(for: dayIndex, direction: 1)
-                            }
-                        }
-                    }
-                }
-            }
-            .padding(DS.Spacing.sm)
-            .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.025))
-            .animation(DS.Animation.fast, value: isExpanded)
-        }
-    }
-
     private var plannerProfileAvatar: some View {
         let emoji = activeProfile?.avatarEmoji ?? "🧑🏻"
         return ZStack {
@@ -4640,7 +4548,6 @@ private struct DayCardSignature: Equatable {
     let forecastKey: String
     let assignedSignature: String
     let availableSignature: String
-    let feedbackExpanded: Bool
     /// AI explanation currently shown — the memoized card must re-render when
     /// the async generation lands.
     let aiExplanation: String?
@@ -4664,100 +4571,11 @@ private struct DayCardContainer<Content: View>: View, Equatable {
     }
 }
 
-// MARK: - Feedback Button
-
-struct FeedbackButton: View {
-    let label: String
-    let icon: String
-    let color: Color
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button {
-            DS.haptic(0.45)
-            action()
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title3)
-                Text(label)
-                    .font(.caption2.weight(.medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, DS.Spacing.sm)
-            .foregroundStyle(isSelected ? color : .primary)
-            .liquidGlassSurface(
-                cornerRadius: DS.Radius.sm,
-                interactive: true,
-                tint: isSelected ? color.opacity(0.18) : nil
-            )
-        }
-        .buttonStyle(SoftPressButtonStyle())
-        .animation(DS.Animation.fast, value: isSelected)
-    }
-}
-
 private struct SoftPressButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .opacity(configuration.isPressed ? 0.88 : 1)
             .animation(DS.Animation.interactive, value: configuration.isPressed)
-    }
-}
-
-private struct LearningFeedbackChip: View {
-    let label: String
-    let icon: String
-    let color: Color
-    let action: () -> Void
-
-    var body: some View {
-        Button {
-            DS.haptic(0.35)
-            action()
-        } label: {
-            Label(label, systemImage: icon)
-                .font(.caption2.weight(.medium))
-                .lineLimit(1)
-                .padding(.horizontal, DS.Spacing.sm)
-                .padding(.vertical, DS.Spacing.xs)
-                .foregroundStyle(color)
-                .liquidGlassPill(interactive: true, tint: color.opacity(0.10))
-        }
-        .buttonStyle(SoftPressButtonStyle())
-    }
-}
-
-// MARK: - Temperature Feedback Button
-
-struct TempFeedbackButton: View {
-    let feedback: TemperatureFeedback
-    let isSelected: Bool
-    let action: () -> Void
-    
-    var body: some View {
-        Button {
-            DS.haptic(0.35)
-            action()
-        } label: {
-            HStack(spacing: 2) {
-                Text(feedback.emoji)
-                    .font(.caption2)
-                Text(feedback.label)
-                    .font(.caption2.weight(.medium))
-            }
-            .padding(.horizontal, DS.Spacing.sm)
-            .padding(.vertical, DS.Spacing.xs)
-            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-            .liquidGlassPill(
-                interactive: true,
-                tint: isSelected ? Color.accentColor.opacity(0.18) : nil
-            )
-        }
-        .buttonStyle(SoftPressButtonStyle())
     }
 }

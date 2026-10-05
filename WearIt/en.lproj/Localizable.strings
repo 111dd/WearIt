@@ -848,3 +848,5 @@
 "gap_tag_insulated" = "warm";
 "gap_tag_breathable" = "breathable";
 "gap_tag_formal" = "formal";
+
+"planner_tune_look_section" = "Fine-tune";
