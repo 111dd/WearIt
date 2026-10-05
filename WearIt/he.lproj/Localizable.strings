@@ -837,3 +837,33 @@
 "calendar_jump_date" = "בחירת תאריך";
 "calendar_go_to_date" = "מעבר לתאריך";
 "planner_allow_repeats" = "אפשר חזרה על כל סוגי הפריטים";
+
+/* Wardrobe gaps (Stats) */
+"stats_gaps_title" = "חוסרים בארון";
+"stats_gaps_subtitle" = "לפי התחזית, היומן ומה שבאמת לבשת.";
+"gap_title_missing_core_format" = "חסר: %@";
+"gap_title_rain_shoes" = "נעליים לגשם";
+"gap_title_rain_outer" = "מעיל גשם";
+"gap_title_warm_outer" = "מעיל חם";
+"gap_title_hot_tops" = "חולצות קלות לחום";
+"gap_title_formal_top" = "חולצה מכובדת";
+"gap_title_formal_bottom" = "מכנסיים מכובדים";
+"gap_title_formal_shoes" = "נעליים מכובדות";
+"gap_title_backup_format" = "תחליף ל%@";
+"gap_reason_no_items" = "בלי זה אי אפשר להשלים לוק.";
+"gap_reason_upcoming_rain_format" = "ימי גשם בתחזית: %d. אין בארון פריט שמתאים לגשם.";
+"gap_reason_rainy_climate_format" = "בכ-%d%% מהימים שתכננת ירד גשם.";
+"gap_reason_upcoming_cold_format" = "ימים של 10° ומטה בקרוב: %d.";
+"gap_reason_cold_climate_format" = "בכ-%d%% מהימים שתכננת היה קר.";
+"gap_reason_upcoming_heat_format" = "ימים של 28° ומעלה בקרוב: %d.";
+"gap_reason_hot_climate_format" = "בכ-%d%% מהימים שתכננת היה חם.";
+"gap_reason_upcoming_formal_format" = "אירועים חגיגיים ביומן השבוע: %d.";
+"gap_reason_formal_habit_format" = "בכ-%d%% מהתכנונים נדרש לוק מכובד.";
+"gap_reason_heavy_rotation_format" = "נלבש ב-%d%% מהימים, ואין לו תחליף.";
+"gap_suggestion_prefix" = "כדאי לחפש:";
+"gap_action_find" = "חיפוש";
+"gap_action_dismiss" = "לא צריך";
+"gap_tag_waterproof" = "עמיד למים";
+"gap_tag_insulated" = "חם";
+"gap_tag_breathable" = "נושם";
+"gap_tag_formal" = "מכובד";

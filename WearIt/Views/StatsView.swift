@@ -5,8 +5,13 @@ struct StatsView: View {
     @Query private var garments: [Garment]
     @Query private var wearEvents: [WearEvent]
     @Query private var dismissedOutfits: [DismissedOutfit]
+    @Query private var recommendationEvents: [RecommendationEvent]
+    @EnvironmentObject private var weather: WeatherCenter
 
     @State private var snapshot = StatsSnapshot.empty
+    @State private var gaps: [WardrobeGapAnalyzer.Gap] = []
+    /// "gapID=timestamp" pairs separated by ";" — dismissed gaps stay hidden for a while.
+    @AppStorage("wardrobeGapDismissals") private var gapDismissalsRaw = ""
 
     init() {
         _garments = Query(sort: [SortDescriptor(\Garment.createdAt, order: .reverse)])
@@ -20,12 +25,23 @@ struct StatsView: View {
         var dismissed = FetchDescriptor<DismissedOutfit>()
         dismissed.fetchLimit = 100
         _dismissedOutfits = Query(dismissed)
+
+        var recoEvents = FetchDescriptor<RecommendationEvent>(
+            sortBy: [SortDescriptor(\RecommendationEvent.createdAt, order: .reverse)]
+        )
+        recoEvents.fetchLimit = 300
+        _recommendationEvents = Query(recoEvents)
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: DS.Spacing.md) {
                 statsCards
+                WardrobeGapsSection(
+                    gaps: gaps,
+                    garmentsByID: snapshot.garmentsByID,
+                    onDismiss: dismissGap
+                )
                 tasteColorsSection
                 tasteBrandsSection
                 favoriteCombosSection
@@ -43,6 +59,8 @@ struct StatsView: View {
         .onChange(of: garments.count) { _, _ in rebuildSnapshot() }
         .onChange(of: wearEvents.count) { _, _ in rebuildSnapshot() }
         .onChange(of: dismissedOutfits.count) { _, _ in rebuildSnapshot() }
+        .onChange(of: recommendationEvents.count) { _, _ in rebuildGaps() }
+        .onChange(of: weather.forecasts.count) { _, _ in rebuildGaps() }
     }
     
     // MARK: - Stats Cards
@@ -260,6 +278,74 @@ struct StatsView: View {
             wearEvents: wearEvents,
             dismissed: dismissedOutfits
         )
+        rebuildGaps()
+    }
+
+    // MARK: - Wardrobe gaps
+
+    /// Dismissed gaps come back after this long, in case life changed.
+    private static let gapDismissalDays = 60
+
+    private func rebuildGaps() {
+        let wear = WardrobeGapAnalyzer.wearSummary(events: wearEvents)
+        let input = WardrobeGapAnalyzer.Input(
+            garments: garments,
+            wearCounts: wear.counts,
+            wearDays: wear.days,
+            climate: WardrobeGapAnalyzer.climate(
+                forecasts: weather.forecasts,
+                pastEvents: recommendationEvents
+            ),
+            upcomingFormalDays: upcomingFormalDays(),
+            pastFormalShare: WardrobeGapAnalyzer.pastFormalShare(recommendationEvents),
+            taste: snapshot.taste
+        )
+        let dismissed = activeGapDismissals()
+        gaps = Array(
+            WardrobeGapAnalyzer.analyze(input)
+                .filter { !dismissed.contains($0.id) }
+                .prefix(4)
+        )
+    }
+
+    private func upcomingFormalDays() -> Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        return (0..<7).filter { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: today) else { return false }
+            let context = CalendarContextService.shared.context(for: day)
+            return context.occasionKind == .formal
+                || context.occasionKind == .blackTie
+                || (context.occasionKind == .holiday && context.eveningFormalityBoost >= 2)
+        }.count
+    }
+
+    private func parsedGapDismissals() -> [String: Date] {
+        var result: [String: Date] = [:]
+        for pair in gapDismissalsRaw.split(separator: ";") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2, let seconds = TimeInterval(parts[1]) else { continue }
+            result[String(parts[0])] = Date(timeIntervalSince1970: seconds)
+        }
+        return result
+    }
+
+    private func activeGapDismissals() -> Set<String> {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -Self.gapDismissalDays, to: .now) ?? .now
+        return Set(parsedGapDismissals().filter { $0.value >= cutoff }.map(\.key))
+    }
+
+    private func dismissGap(_ gap: WardrobeGapAnalyzer.Gap) {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -Self.gapDismissalDays, to: .now) ?? .now
+        var entries = parsedGapDismissals().filter { $0.value >= cutoff }
+        entries[gap.id] = .now
+        gapDismissalsRaw = entries
+            .map { "\($0.key)=\(Int($0.value.timeIntervalSince1970))" }
+            .sorted()
+            .joined(separator: ";")
+        withAnimation(DS.Animation.standard) {
+            gaps.removeAll { $0.id == gap.id }
+        }
     }
 }
 
@@ -272,6 +358,8 @@ private struct StatsSnapshot {
     var unworn: [Garment]
     var categoryCounts: [(Category, Int)]
     var lastWornByGarment: [UUID: Date]
+    var taste: TasteAffinityBuilder.Profile
+    var garmentsByID: [UUID: Garment]
 
     static let empty = StatsSnapshot(
         topColors: [],
@@ -281,7 +369,9 @@ private struct StatsSnapshot {
         recentlyWorn: 0,
         unworn: [],
         categoryCounts: [],
-        lastWornByGarment: [:]
+        lastWornByGarment: [:],
+        taste: .empty,
+        garmentsByID: [:]
     )
 
     static func build(
@@ -368,7 +458,9 @@ private struct StatsSnapshot {
             recentlyWorn: recentlyWorn,
             unworn: unworn,
             categoryCounts: categoryCounts,
-            lastWornByGarment: lastWorn
+            lastWornByGarment: lastWorn,
+            taste: taste,
+            garmentsByID: byID
         )
     }
 

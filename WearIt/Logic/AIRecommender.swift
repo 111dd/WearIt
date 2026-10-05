@@ -835,7 +835,7 @@ final class AIRecommender {
             state.learnedFormalityOffset = max(-1.5, state.learnedFormalityOffset - step)
         case .tooCasual:
             state.learnedFormalityOffset = min(1.5, state.learnedFormalityOffset + step)
-        case .loved, .notMyStyle, .justRight, .worn:
+        case .loved, .notMyStyle, .justRight, .worn, .replaced:
             return
         }
 
