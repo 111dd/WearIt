@@ -248,6 +248,13 @@ struct WardrobeView: View {
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.sm)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if let question = occasionFitQuestion {
+                    OccasionFitQuestionCard(garment: question.garment, occasion: question.occasion) {
+                        completeMicroQuestion()
+                    }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.sm)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 } else if let garment = microQuestionGarment {
                     MicroQuestionCard(garment: garment) {
                         completeMicroQuestion()
@@ -318,6 +325,24 @@ struct WardrobeView: View {
         return allGarments
             .filter { $0.needsSleeveAnswer && !$0.isCurrentlyUnavailable && $0.timesWorn > 0 }
             .max { $0.timesWorn < $1.timesWorn }
+    }
+
+    /// An item the user keeps wearing for a situation the app doesn't think it fits.
+    private var occasionFitQuestion: (garment: Garment, occasion: GarmentOccasion)? {
+        guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
+        let counts = GarmentOccasionProfile.wearCounts(from: wearEvents)
+        var best: (garment: Garment, occasion: GarmentOccasion, count: Int)?
+        for garment in allGarments where !garment.isCurrentlyUnavailable {
+            guard let perOccasion = counts[garment.id] else { continue }
+            for (occasion, count) in perOccasion where count >= 3 {
+                guard !garment.occasionFits.contains(occasion),
+                      !garment.occasionNotFits.contains(occasion),
+                      !GarmentOccasionProfile.fits(garment, occasion),
+                      count > (best?.count ?? 0) else { continue }
+                best = (garment, occasion, count)
+            }
+        }
+        return best.map { ($0.garment, $0.occasion) }
     }
 
     private func completeMicroQuestion() {

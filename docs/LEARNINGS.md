@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Item situations: answer first, then wear, then the item
+- **Did:** `GarmentOccasionProfile` + `GarmentOccasion` (maps from `CalendarOccasionKind`), "Right for" chips on the item, a wardrobe question for items worn 3+ times for a situation they don't seem to fit.
+- **Why:** occasion fit was only formality plus two hand-set tags (gym, work).
+- **Watch:** `Garment.setOccasionAnswer` is the only writer: it keeps `.work` / `.gym` occasion tags in sync, which `isWorkwear`, `isActivewear` and `GymKit` read. Work and workout looks are scored by the rule terms; `situationFit` only adds the user's answers there and the derived fit for formal / evening / outdoor.
+
 ## 2026-10-05 — Planner questions: ask only when the answer changes the look
 - **Did:** `ComfortPreferences` (day answers + samples in UserDefaults, learned thresholds, `isBorderline`), `LayerQuestionCard` / `EventQuestionCard` in the day card, `SleeveQuestionCard` in the wardrobe, `RecoContext.layerChoice` / `shortSleeveFromC`.
 - **Why:** the jacket and sleeve call on 17–23° days was a guess, and unreadable events silently counted as nothing.

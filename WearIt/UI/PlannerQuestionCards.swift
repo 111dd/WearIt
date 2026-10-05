@@ -73,6 +73,35 @@ struct SleeveQuestionCard: View {
     }
 }
 
+/// "You've worn the navy shirt for “Work” a lot. Mark it as a fit?"
+struct OccasionFitQuestionCard: View {
+    @Environment(\.modelContext) private var context
+    let garment: Garment
+    let occasion: GarmentOccasion
+    let onDone: () -> Void
+
+    var body: some View {
+        QuestionCardShell(
+            icon: occasion.icon,
+            title: String(format: String(localized: "fits_question_format"), garment.displayTitle, occasion.title),
+            onDismiss: onDone
+        ) {
+            HStack(spacing: DS.Spacing.xs) {
+                QuestionChip(title: String(localized: "fits_question_yes"), icon: "checkmark") { answer(true) }
+                QuestionChip(title: String(localized: "fits_question_no"), icon: "xmark") { answer(false) }
+            }
+        }
+        .padding(DS.Spacing.xs)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+    }
+
+    private func answer(_ fits: Bool) {
+        garment.setOccasionAnswer(fits, for: occasion)
+        try? context.save()
+        onDone()
+    }
+}
+
 private struct QuestionCardShell<Choices: View>: View {
     let icon: String
     let title: String
