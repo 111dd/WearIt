@@ -132,6 +132,13 @@ struct BootstrapView: View {
             _ = await (locationWeather, forecast)
 
             await NotificationService.shared.scheduleDailyNotifications(context: modelContext)
+
+            // Visual fingerprints for "looks like" matching; cached, a small batch per launch.
+            let withImages = FetchDescriptor<Garment>(predicate: #Predicate { $0.imagePath != nil })
+            let items = ((try? modelContext.fetch(withImages)) ?? []).compactMap { garment in
+                garment.imagePath.map { GarmentVisualSimilarity.Item(garmentID: garment.id, imagePath: $0) }
+            }
+            await GarmentVisualSimilarity.shared.warmUp(items)
         }
     }
 

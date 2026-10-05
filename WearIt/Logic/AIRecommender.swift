@@ -449,6 +449,13 @@ final class AIRecommender {
                 }
             }
 
+            // When on-device visual prints exist, how alike the photos look
+            // counts as much as matching tags.
+            if other.category == g.category,
+               let visual = GarmentVisualSimilarity.shared.similarity(g.id, other.id) {
+                sim = 0.5 * sim + 0.5 * visual
+            }
+
             let love = Double(other.loveScore) / 100.0
             let preference = min(1.0, love + (other.isFavorite ? 0.3 : 0))
             let blended = sim * (0.5 + preference * 0.5)
