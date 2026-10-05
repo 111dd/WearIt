@@ -58,6 +58,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Secrets: `Config/Secrets.xcconfig` (git-ignored, copy from `Secrets.example.xcconfig`).
   Only `BARCODE_LOOKUP_API_KEY` today; the app degrades gracefully without it.
   API keys come from build settings (`$(BARCODE_LOOKUP_API_KEY)`), never hardcoded.
+- Calendar: `CalendarEventUnderstanding.classify` (pure, tested) → `CalendarContextService.build`
+  → `DayCalendarContext` with separate day / evening occasions. Use `occasion(isEvening:workDressCode:)`
+  and `formalityBump(isEvening:workDressCode:)`, never the headline `occasionKind`, for a look.
 - Weather: WeatherKit (`ForecastService`) plus Open-Meteo (`WeatherService`),
   shared state in `WeatherCenter`.
 - Images are files under `Documents/WearItImages` (`ImageStore`: disk + downsample +
@@ -120,6 +123,13 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 ## Progress log
 
 Newest first. One line per meaningful change: date, tool, what.
+
+- 2026-10-05 · Claude Code · Calendar understanding: word-based Hebrew/English event engine
+  (`Logic/CalendarEventUnderstanding`, prefixes/construct forms, weighted keywords, user corrections
+  from the planner's event line), day vs evening split in `DayCalendarContext`, a workout after other
+  plans is a "pack gym clothes" reminder with a `GymKit` instead of a sporty day, work days follow
+  `UserProfile.workDressCode` (asked once by a planner card, editable in Settings), connect-calendar
+  card, re-plan on EventKit changes, Hebrew holiday-eve month numbers fixed, gym/work toggles on items.
 
 - 2026-10-05 · Claude Code · Style Swipe polish: opaque full-screen layer of its own (no app
   backdrop, nothing behind takes taps), bigger "worn" flat-lay card on a light studio surface with

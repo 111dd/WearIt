@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import EventKit
 
 //
 //  SettingsView.swift
@@ -24,6 +25,8 @@ struct SettingsView: View {
     @State private var preferredFormality: Int = 3
     @State private var warmthSensitivity: Int = 3
     @State private var rainTolerance: Int = 3
+    @State private var workDressCode: WorkDressCode?
+    @State private var calendarAccessDenied = false
     @State private var didLoadTaste = false
     @State private var showSignInSheet = false
     @State private var showSignOutDialog = false
@@ -77,6 +80,17 @@ struct SettingsView: View {
         .onChange(of: preferredFormality) { _, _ in saveTasteValues() }
         .onChange(of: warmthSensitivity) { _, _ in saveTasteValues() }
         .onChange(of: rainTolerance) { _, _ in saveTasteValues() }
+        .onChange(of: workDressCode) { _, newValue in
+            let stored = CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)?.workDressCode
+            saveTasteValues()
+            // Loading the saved value also fires this; only a real change re-plans.
+            guard didLoadTaste, stored != newValue else { return }
+            NotificationCenter.default.post(
+                name: .calendarUnderstandingChanged,
+                object: nil,
+                userInfo: ["replanWorkDays": true]
+            )
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshCurrentDate()
         }
@@ -266,6 +280,19 @@ struct SettingsView: View {
                 labels: [String(localized: "profile_dont_care"), String(localized: "profile_prefer_dry")]
             )
 
+            HStack(spacing: DS.Spacing.sm) {
+                Label(String(localized: "work_dress_setting"), systemImage: "briefcase")
+                    .font(.subheadline)
+                Spacer()
+                Picker(String(localized: "work_dress_setting"), selection: $workDressCode) {
+                    Text(String(localized: "work_dress_not_set")).tag(WorkDressCode?.none)
+                    ForEach(WorkDressCode.allCases) { code in
+                        Text(code.title).tag(WorkDressCode?.some(code))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
             Divider()
 
             HStack(alignment: .center, spacing: DS.Spacing.sm) {
@@ -343,22 +370,42 @@ struct SettingsView: View {
                 .tint(.accentColor)
                 .onChange(of: deviceCalendarEnabled) { _, enabled in
                     guard enabled else {
-                        CalendarContextService.shared.invalidateCache()
+                        calendarAccessDenied = false
+                        notifyCalendarChanged()
                         return
                     }
                     Task {
-                        _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
-                        CalendarContextService.shared.invalidateCache()
+                        let granted = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
+                        calendarAccessDenied = !granted
+                        notifyCalendarChanged()
                     }
                 }
+
+            if deviceCalendarEnabled && calendarAccessDenied {
+                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(String(localized: "calendar_access_denied"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button(String(localized: "calendar_open_settings")) { openAppSettings() }
+                        .font(.caption.weight(.semibold))
+                }
+            }
 
             Text(String(localized: "calendar_context_device_help"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
         .dsCard()
+        .onAppear {
+            let status = CalendarContextService.shared.authorizationStatus
+            calendarAccessDenied = deviceCalendarEnabled && (status == .denied || status == .restricted)
+        }
         .onChange(of: hebrewCalendarEnabled) { _, _ in
-            CalendarContextService.shared.invalidateCache()
+            notifyCalendarChanged()
         }
     }
 
@@ -779,6 +826,11 @@ struct SettingsView: View {
         }
     }
 
+    private func notifyCalendarChanged() {
+        CalendarContextService.shared.invalidateCache()
+        NotificationCenter.default.post(name: .calendarUnderstandingChanged, object: nil)
+    }
+
     // MARK: - Taste persistence (auto-save)
 
     private func loadTasteValues() {
@@ -787,6 +839,7 @@ struct SettingsView: View {
         preferredFormality = me.preferredFormality
         warmthSensitivity = me.warmthSensitivity
         rainTolerance = me.rainTolerance
+        workDressCode = me.workDressCode
         didLoadTaste = true
     }
 
@@ -796,6 +849,7 @@ struct SettingsView: View {
         me.preferredFormality = preferredFormality
         me.warmthSensitivity = warmthSensitivity
         me.rainTolerance = rainTolerance
+        me.workDressCode = workDressCode
         schedulePrefsSave()
     }
 

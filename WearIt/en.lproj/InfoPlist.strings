@@ -1,0 +1,3 @@
+/* Calendar permission prompt */
+"NSCalendarsFullAccessUsageDescription" = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
+"NSCalendarsUsageDescription" = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";

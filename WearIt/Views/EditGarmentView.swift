@@ -663,6 +663,25 @@ struct EditGarmentView: View {
         .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
+    /// "For workouts" / "For work": what the calendar reminders and work days pick.
+    private func occasionToggle(_ tag: OccasionTag, title: String, icon: String) -> some View {
+        Toggle(isOn: Binding(
+            get: { garment.occasionTags?.contains(tag) == true },
+            set: { isOn in
+                var tags = garment.occasionTags ?? []
+                tags.removeAll { $0 == tag }
+                if isOn { tags.append(tag) }
+                garment.occasionTags = tags.isEmpty ? nil : tags
+                garment.markUserEdited(ItemTypeDefaults.FieldKey.occasionTags)
+                hasUnsavedChanges = true
+            }
+        )) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+        }
+        .tint(.accentColor)
+    }
+
     private var attributesCard: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             DSSectionHeader(String(localized: "garment_attributes"), icon: "slider.horizontal.3")
@@ -705,6 +724,9 @@ struct EditGarmentView: View {
                     .font(.subheadline.weight(.medium))
             }
             .tint(.yellow)
+
+            occasionToggle(.gym, title: String(localized: "edit_for_workouts"), icon: "figure.run")
+            occasionToggle(.work, title: String(localized: "edit_for_work"), icon: "briefcase.fill")
 
             HStack {
                 Image(systemName: "calendar").foregroundStyle(.secondary)

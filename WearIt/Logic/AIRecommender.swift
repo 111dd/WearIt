@@ -598,7 +598,9 @@ final class AIRecommender {
             if g.fitTag == .relaxed || g.fitTag == .oversized { score += 0.03 }
         case .outdoor:
             if g.category == .outer { score += 0.04 }
-        case .socialEvening, .none:
+        case .mourning:
+            if g.formality >= 3 { score += 0.05 }
+        case .socialEvening, .socialDay, .none:
             break
         }
 
@@ -629,7 +631,28 @@ final class AIRecommender {
         let learnedWeight = 0.2 + (interactionWeight * 0.6)
         let heuristicWeight = 1.0 - learnedWeight
         
-        return (learned * learnedWeight) + (heuristic * heuristicWeight)
+        let blended = (learned * learnedWeight) + (heuristic * heuristicWeight)
+        return max(0, min(1, blended + occasionFit(g, ctx: ctx)))
+    }
+
+    /// Calendar occasion fit that doesn't fade as the model learns: the learned
+    /// model has no occasion features, so a workout look needs workout clothes
+    /// and a funeral needs muted colors no matter how much was learned.
+    private func occasionFit(_ g: Garment, ctx: RecoContext) -> Double {
+        switch ctx.occasionKind {
+        case .sport:
+            if g.isActivewear { return 0.12 }
+            return g.formality >= 4 ? -0.10 : 0
+        case .work:
+            return g.isWorkwear ? 0.06 : 0
+        case .mourning:
+            guard let color = g.safeColorTags.first else { return 0 }
+            let muted: Set<ColorTag> = [.black, .navy, .gray, .white, .brown, .beige, .cream]
+            if muted.contains(color) { return 0.06 }
+            return ColorHarmony.info(color).chroma > 40 ? -0.10 : 0
+        default:
+            return 0
+        }
     }
 
     func score(_ garment: Garment, ctx: RecoContext, modelContext: ModelContext) -> Double {

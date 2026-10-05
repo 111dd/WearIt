@@ -2,6 +2,16 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Calendar events: words, not substrings; day and evening apart
+- **Did:** replaced the substring keyword classifier with `Logic/CalendarEventUnderstanding` and split
+  `DayCalendarContext` into day / evening occasions, sport reminders and work dress code.
+- **Why:** a 266-event audit scored the old classifier 40%: any unmatched event after 16:00 became
+  "evening out", "run" matched brunch, "ברית" matched עברית, and a morning gym made the whole day sporty.
+  Hebrew holiday eves used Nisan=1 numbering; Foundation's Hebrew calendar is Tishrei=1 … Elul=13.
+- **Watch:** add vocabulary as words or phrases with weights, and add a test case in
+  `WearItTests/CalendarEventUnderstandingTests`. The audit corpus and a Python port live in the project's
+  `plans/` folder (`calendar_classifier_test.py`, `calendar_engine_port.py`).
+
 ## 2026-10-05 — Full-screen covers must not use the app backdrop
 - **Did:** Style Swipe dropped `withLocalAppBackdrop()` and paints its own opaque background.
 - **Why:** `ClearHostingBackground` clears every superview and controller up the chain, so a

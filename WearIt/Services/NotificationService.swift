@@ -152,6 +152,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             content.title = String(localized: "notif_morning_title_fallback")
         }
         content.body = String(localized: "notif_morning_body")
+        if let line = calendarLine(for: nextDateFor(hour: prefs.morningHour, minute: prefs.morningMinute)) {
+            content.body += "\n" + line
+        }
         content.categoryIdentifier = NotificationType.morningPlan.rawValue
 
         return scheduleNotification(
@@ -160,6 +163,16 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
             minute: prefs.morningMinute,
             content: content
         )
+    }
+
+    /// "Gym · 18:00 · pack your gym clothes", or the day's headline event.
+    @MainActor private func calendarLine(for date: Date?) -> String? {
+        guard let date else { return nil }
+        let context = CalendarContextService.shared.context(for: date)
+        if let sport = context.sportReminder {
+            return String(format: NSLocalizedString("calendar_reminder_sport_format", comment: ""), sport.label)
+        }
+        return context.primaryReason
     }
 
     private func scheduleWeatherUpdate() -> Bool {

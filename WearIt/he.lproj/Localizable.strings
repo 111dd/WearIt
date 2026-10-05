@@ -950,3 +950,32 @@
 "style_insight_plain" = "פריטים חלקים יותר מדוגמאות";
 "profile_formulas_title" = "הנוסחאות שלך";
 "profile_formula_worn_format" = "נלבש %d פעמים";
+
+/* Calendar understanding */
+"calendar_hint_mourning" = "אבל — לבוש צנוע בצבעים שקטים";
+"look_occasion_mourning" = "זמן אבל";
+"calendar_correct_title" = "מה האירוע הזה?";
+"calendar_kind_sport" = "אימון";
+"calendar_kind_work" = "עבודה";
+"calendar_kind_social" = "יציאה / מפגש חברים";
+"calendar_kind_formal" = "אירוע חגיגי או רשמי";
+"calendar_kind_outdoor" = "בחוץ";
+"calendar_kind_travel" = "נסיעה";
+"calendar_kind_mourning" = "אבל";
+"calendar_kind_none" = "לא משנה מה ללבוש";
+"calendar_reminder_sport_format" = "%@ · לקחת בגדי אימון";
+"calendar_reminder_uniform" = "יום עבודה · בגדי העבודה הקבועים";
+"calendar_connect_title" = "חבר את היומן";
+"calendar_connect_subtitle" = "אתאים לוקים לאימונים, לעבודה ולאירועים שלך";
+"calendar_access_denied" = "הגישה ליומן כבויה בהגדרות iOS, ולכן אי אפשר לקרוא אירועים.";
+"calendar_open_settings" = "פתח הגדרות";
+"work_dress_question" = "מה אתה לובש בעבודה?";
+"work_dress_question_subtitle" = "ראיתי עבודה ביומן. אתאים את ימי העבודה לפי זה.";
+"work_dress_uniform" = "מדים / בגדי עבודה קבועים";
+"work_dress_business" = "עסקי / רשמי";
+"work_dress_smart_casual" = "סמארט קז'ואל";
+"work_dress_free" = "חופשי";
+"work_dress_setting" = "לבוש בעבודה";
+"work_dress_not_set" = "לא נבחר";
+"edit_for_workouts" = "לאימונים";
+"edit_for_work" = "לעבודה";

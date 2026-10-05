@@ -149,8 +149,8 @@ enum LookReasonBuilder {
     /// Occasions that actually change what the planner picks.
     private static func occasionShapesLook(_ occasion: CalendarOccasionKind) -> Bool {
         switch occasion {
-        case .formal, .blackTie, .socialEvening, .work, .sport, .shabbat, .holiday: return true
-        case .none, .travel, .outdoor: return false
+        case .formal, .blackTie, .socialEvening, .work, .sport, .shabbat, .holiday, .mourning: return true
+        case .none, .travel, .outdoor, .socialDay: return false
         }
     }
 

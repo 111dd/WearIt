@@ -8,6 +8,7 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import UIKit
+import EventKit
 import os
 
 struct OutfitPlannerView: View {
@@ -64,6 +65,11 @@ struct OutfitPlannerView: View {
     @State private var garmentsByID: [UUID: Garment] = [:]
     /// Bumped whenever calendar contexts are recomputed; advisor memo dependency.
     @State private var calendarContextsVersion = 0
+    /// Days to re-plan on the next generation pass (dress code / correction changed).
+    @State private var pendingCalendarReplan: Set<Int> = []
+    @State private var calendarConnectDismissed = UserDefaults.standard.bool(forKey: "calendar.connectCardDismissed")
+    @State private var workQuestionDismissedDay = UserDefaults.standard.double(forKey: "calendar.workQuestionDismissedDay")
+    @State private var calendarRefreshTask: Task<Void, Never>?
     /// In-flight chunked outfit generation; cancelled when a newer request arrives.
     @State private var outfitGenerationTask: Task<Void, Never>?
     /// AI look explanations keyed by LookExplanationRequest.cacheKey.
@@ -231,6 +237,26 @@ struct OutfitPlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshCurrentDate()
             styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+            // Events may have changed while the app was in the background.
+            if CalendarContextPreferences.deviceCalendarEnabled {
+                calendarUnderstandingDidChange()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            // EventKit posts this in bursts (sync, edits); re-read once it settles.
+            calendarRefreshTask?.cancel()
+            calendarRefreshTask = Task {
+                try? await Task.sleep(for: .milliseconds(800))
+                guard !Task.isCancelled else { return }
+                calendarUnderstandingDidChange()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { note in
+            // The work dress code changed in Settings: work days get a fresh look.
+            let workDays = note.userInfo?["replanWorkDays"] as? Bool == true
+                ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
+                : []
+            calendarUnderstandingDidChange(replanning: workDays)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -260,6 +286,35 @@ struct OutfitPlannerView: View {
                     unwornNudgeCard(nudge)
                         .padding(.horizontal, DS.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if showsCalendarConnectCard {
+                    CalendarConnectCard(
+                        onConnect: {
+                            Task { _ = await CalendarContextService.shared.connect() }
+                        },
+                        onDismiss: {
+                            UserDefaults.standard.set(true, forKey: "calendar.connectCardDismissed")
+                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                                calendarConnectDismissed = true
+                            }
+                        }
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                } else if showsWorkDressCodeCard {
+                    WorkDressCodeCard(
+                        onPick: { setWorkDressCode($0) },
+                        onDismiss: {
+                            let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+                            UserDefaults.standard.set(today, forKey: "calendar.workQuestionDismissedDay")
+                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                                workQuestionDismissedDay = today
+                            }
+                        }
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if styleSwipeOffered, StyleSwipeDeckBuilder.isEligible(allGarments) {
@@ -359,7 +414,8 @@ struct OutfitPlannerView: View {
             if CalendarContextPreferences.deviceCalendarEnabled {
                 _ = await CalendarContextService.shared.requestDeviceCalendarAccessIfNeeded()
             }
-            refreshCalendarContextsAndApplyEvening()
+            // Days whose events changed since the app last ran get re-planned below.
+            pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
             if appIntentRouter.pendingAction != nil {
                 performPendingIntentAction()
             } else {
@@ -565,7 +621,10 @@ struct OutfitPlannerView: View {
             aiExplanation: aiExplanationText(for: dayIndex),
             reasons: reasons,
             showsGestureHint: showsGestureHint(for: dayIndex),
-            eventLine: dayEventLine(for: dayIndex)?.text,
+            eventLine: dayEventLine(for: dayIndex).map { "\($0.text)|\($0.icon)" },
+            reminderLine: calendarReminder(for: dayIndex).map { reminder in
+                ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
+            },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
             }
@@ -574,6 +633,10 @@ struct OutfitPlannerView: View {
         return DayCardContainer(signature: signature) {
             VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 dayTopBar(for: state, dayIndex: dayIndex)
+
+                if let reminder = calendarReminder(for: dayIndex) {
+                    calendarReminderRow(reminder)
+                }
 
                 if state.assignedGarmentIDs.isEmpty {
                     emptyDayOutfitPrompt(dayIndex: dayIndex)
@@ -815,15 +878,7 @@ struct OutfitPlannerView: View {
                 }
 
                 if let event {
-                    Label {
-                        Text(event.text)
-                            .lineLimit(1)
-                    } icon: {
-                        Image(systemName: event.icon)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .labelStyle(DayLineLabelStyle())
+                    dayEventLabel(event, dayIndex: dayIndex)
                 }
             }
 
@@ -1080,8 +1135,105 @@ struct OutfitPlannerView: View {
     private func dayEventLine(for dayIndex: Int) -> (text: String, icon: String)? {
         let context = calendarContext(for: dayIndex)
         guard let text = context.primaryReason, !text.isEmpty else { return nil }
-        let icon = context.hints.first(where: { $0.text == text })?.iconName ?? "calendar"
-        return (text, icon)
+        return (text, context.headlineIcon)
+    }
+
+    /// The headline event. A calendar event opens a "what is this?" menu, so a
+    /// misunderstood title is corrected once and remembered.
+    @ViewBuilder
+    private func dayEventLabel(_ event: (text: String, icon: String), dayIndex: Int) -> some View {
+        let label = Label {
+            Text(event.text)
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: event.icon)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Color.accentColor)
+        .labelStyle(DayLineLabelStyle())
+
+        if let title = calendarContext(for: dayIndex).headlineEventTitle, !title.isEmpty {
+            Menu {
+                Section(String(localized: "calendar_correct_title")) {
+                    ForEach(CalendarEventUnderstanding.Kind.correctionChoices, id: \.self) { kind in
+                        Button {
+                            correctCalendarEvent(title: title, as: kind, dayIndex: dayIndex)
+                        } label: {
+                            Label(kind.correctionTitle, systemImage: kind.correctionIcon)
+                        }
+                    }
+                }
+            } label: {
+                label
+            }
+            .accessibilityHint(Text(String(localized: "calendar_correct_title")))
+        } else {
+            label
+        }
+    }
+
+    private func correctCalendarEvent(title: String, as kind: CalendarEventUnderstanding.Kind, dayIndex: Int) {
+        CalendarEventCorrections.set(kind, forTitle: title)
+        DS.haptic(0.4)
+        calendarUnderstandingDidChange(replanning: [dayIndex])
+    }
+
+    private struct CalendarReminder {
+        let text: String
+        let icon: String
+        let items: [Garment]
+    }
+
+    /// "Gym · 18:00 · pack your gym clothes" with the pieces to pack, or a
+    /// reminder that a uniform work day is covered.
+    private func calendarReminder(for dayIndex: Int) -> CalendarReminder? {
+        let context = calendarContext(for: dayIndex)
+        if let sport = context.sportReminder {
+            return CalendarReminder(
+                text: String(format: NSLocalizedString("calendar_reminder_sport_format", comment: ""), sport.label),
+                icon: "figure.run",
+                items: GymKit.kit(from: allGarments)
+            )
+        }
+        if context.dayOccasion == .work, activeProfile?.workDressCode == .uniform {
+            return CalendarReminder(
+                text: String(localized: "calendar_reminder_uniform"),
+                icon: WorkDressCode.uniform.icon,
+                items: allGarments.filter(\.isWorkwear).prefix(3).map { $0 }
+            )
+        }
+        return nil
+    }
+
+    private func calendarReminderRow(_ reminder: CalendarReminder) -> some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: reminder.icon)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28)
+            Text(reminder.text)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: DS.Spacing.xs)
+            if !reminder.items.isEmpty {
+                HStack(spacing: -10) {
+                    ForEach(reminder.items) { garment in
+                        DSGarmentThumbnail(garment, size: .small)
+                            .scaleEffect(0.8)
+                            .frame(width: 40, height: 40)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+        .accessibilityElement(children: .combine)
     }
 
     /// One quiet, tappable line under the look: its strongest reason (falling
@@ -1148,7 +1300,8 @@ struct OutfitPlannerView: View {
             LookReasonBuilder.Input(
                 garments: garments,
                 profile: state.forecast.map { DayTemperatureProfile(from: $0) },
-                occasion: calendarContext(for: dayIndex).occasionKind,
+                occasion: calendarContext(for: dayIndex)
+                    .occasion(isEvening: false, workDressCode: activeProfile?.workDressCode),
                 lastWorn: cachedLatestWearByGarmentID,
                 combination: cachedCombination,
                 favoriteColors: favoriteColors,
@@ -1226,7 +1379,8 @@ struct OutfitPlannerView: View {
         case .sport: return String(localized: "look_occasion_sport")
         case .travel: return String(localized: "look_occasion_travel")
         case .outdoor: return String(localized: "look_occasion_outdoor")
-        case .none: return ""
+        case .mourning: return String(localized: "look_occasion_mourning")
+        case .socialDay, .none: return ""
         }
     }
 
@@ -1263,7 +1417,8 @@ struct OutfitPlannerView: View {
             )
         }
 
-        let occasionKind = calendarContext(for: dayIndex).occasionKind
+        let occasionKind = calendarContext(for: dayIndex)
+            .occasion(isEvening: false, workDressCode: activeProfile?.workDressCode)
         return LookExplanationRequest(
             date: state.date,
             lookTime: LookTime.day.rawValue,
@@ -3345,24 +3500,26 @@ struct OutfitPlannerView: View {
         let profile = activeProfile
         let baseFormality = state.overrides.desiredFormality ?? preferredFormality
         let calendar = calendarContext(for: dayIndex)
-        let desiredFormality = min(5, max(1, baseFormality + calendar.formalityBump(isEvening: isEvening)))
+        let dressCode = profile?.workDressCode
+        let desiredFormality = min(5, max(1, baseFormality + calendar.formalityBump(isEvening: isEvening, workDressCode: dressCode)))
+        let temperatureBias = calendar.temperatureBias(isEvening: isEvening)
 
         let temperatureC: Double
         let diurnal: DiurnalTemps?
         if let override = state.overrides.temperatureC {
             diurnal = nil
-            temperatureC = override + calendar.temperatureBiasC
+            temperatureC = override + temperatureBias
         } else if let forecast = state.forecast {
             let profile = DayTemperatureProfile(from: forecast)
             diurnal = DiurnalTemps(profile: profile)
             if isEvening {
-                temperatureC = profile.eveningTemp + calendar.temperatureBiasC
+                temperatureC = profile.eveningTemp + temperatureBias
             } else {
-                temperatureC = profile.effectiveTemp + calendar.temperatureBiasC
+                temperatureC = profile.effectiveTemp + temperatureBias
             }
         } else {
             diurnal = nil
-            temperatureC = state.effectiveTemperature + calendar.temperatureBiasC
+            temperatureC = state.effectiveTemperature + temperatureBias
         }
 
         return RecoContext(
@@ -3376,14 +3533,14 @@ struct OutfitPlannerView: View {
             lookTime: isEvening ? .evening : .day,
             taste: cachedTaste,
             combination: cachedCombination,
-            occasionKind: calendar.occasionKind,
+            occasionKind: calendar.occasion(isEvening: isEvening, workDressCode: dressCode),
             diurnal: diurnal,
             thermalSamples: state.overrides.temperatureC == nil
                 ? (state.forecast?.thermalSamples(for: isEvening ? .evening : .day).map {
                     ThermalWeatherSample(
                         date: $0.date,
-                        temperatureC: $0.temperatureC + calendar.temperatureBiasC,
-                        apparentTemperatureC: $0.apparentTemperatureC.map { $0 + calendar.temperatureBiasC },
+                        temperatureC: $0.temperatureC + temperatureBias,
+                        apparentTemperatureC: $0.apparentTemperatureC.map { $0 + temperatureBias },
                         rainProbability: $0.rainProbability
                     )
                 } ?? []) : [],
@@ -3399,13 +3556,26 @@ struct OutfitPlannerView: View {
         return CalendarContextService.shared.context(for: boardState.days[dayIndex].date)
     }
 
-    private func refreshCalendarContextsAndApplyEvening() {
+    /// Re-reads the calendar. Returns the days whose calendar meaning changed
+    /// since their look was planned (and that may still change), to re-plan them.
+    @discardableResult
+    private func refreshCalendarContextsAndApplyEvening() -> Set<Int> {
         CalendarContextService.shared.invalidateCache()
         var next: [Int: DayCalendarContext] = [:]
+        var changed: Set<Int> = []
         for index in boardState.days.indices {
             let date = boardState.days[index].date
             let context = CalendarContextService.shared.context(for: date)
             next[index] = context
+
+            let signatureKey = "calendarContextSignature.\(Int(Calendar.current.startOfDay(for: date).timeIntervalSince1970))"
+            let previous = UserDefaults.standard.string(forKey: signatureKey)
+            if previous != context.signature {
+                UserDefaults.standard.set(context.signature, forKey: signatureKey)
+                if previous != nil, canReplanForCalendar(index) {
+                    changed.insert(index)
+                }
+            }
 
             guard context.suggestEveningLook else { continue }
             guard !CalendarContextPreferences.isEveningOptedOut(on: date) else { continue }
@@ -3416,6 +3586,60 @@ struct OutfitPlannerView: View {
         }
         cachedCalendarContexts = next
         calendarContextsVersion += 1
+        pruneOldCalendarSignatures()
+        return changed
+    }
+
+    /// Drops signature keys for days before the planner's first day.
+    private func pruneOldCalendarSignatures() {
+        guard let first = boardState.days.first?.date else { return }
+        let cutoff = Int(Calendar.current.startOfDay(for: first).timeIntervalSince1970)
+        let prefix = "calendarContextSignature."
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            if let stamp = Int(key.dropFirst(prefix.count)), stamp < cutoff {
+                defaults.removeObject(forKey: key)
+            }
+        }
+    }
+
+    private var showsCalendarConnectCard: Bool {
+        _ = calendarContextsVersion // re-evaluate after the calendar is (re)read
+        return !calendarConnectDismissed
+            && !allGarments.isEmpty
+            && CalendarContextService.shared.canOfferConnection
+    }
+
+    /// Asked once (or again the next day if closed) when work shows up on the calendar.
+    private var showsWorkDressCodeCard: Bool {
+        guard let profile = activeProfile, profile.workDressCodeRaw == nil else { return false }
+        let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+        guard workQuestionDismissedDay != today else { return false }
+        return cachedCalendarContexts.values.contains { $0.workEvent != nil }
+    }
+
+    private func setWorkDressCode(_ code: WorkDressCode) {
+        guard let profile = activeProfile else { return }
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            profile.workDressCode = code
+        }
+        try? context.save()
+        let workDays = Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
+        calendarUnderstandingDidChange(replanning: workDays)
+    }
+
+    /// Today or later, and not worn or committed to ("I'll wear this").
+    private func canReplanForCalendar(_ dayIndex: Int) -> Bool {
+        guard dayIndex < boardState.days.count, dayTiming(for: dayIndex) != .past else { return false }
+        guard !isConfirmed(dayIndex) else { return false }
+        let status = lookWearStatus(dayIndex: dayIndex, lookTime: .day)
+        return status != .planned && status != .worn
+    }
+
+    /// The calendar, its permission, a correction or the work dress code changed.
+    private func calendarUnderstandingDidChange(replanning days: Set<Int> = []) {
+        pendingCalendarReplan.formUnion(days.filter { canReplanForCalendar($0) })
+        scheduleGenerateAllOutfits(fillMissingOnly: true)
     }
 
     private func refreshAffinityCaches() {
@@ -3772,18 +3996,24 @@ struct OutfitPlannerView: View {
         let signposter = WearItPerformance.plannerSignposter
         let interval = signposter.beginInterval("planner-generation", id: signposter.makeSignpostID())
         defer { signposter.endInterval("planner-generation", interval) }
-        refreshCalendarContextsAndApplyEvening()
+        // Days whose calendar meaning changed get a fresh look (locked pieces stay).
+        // Kept pending until the pass finishes, so a cancelled pass doesn't lose them.
+        pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+        let replan = pendingCalendarReplan
         for i in 0..<boardState.days.count {
             guard !Task.isCancelled else { return }
-            generateDayOutfit(dayIndex: i, fillMissingOnly: fillMissingOnly)
+            generateDayOutfit(dayIndex: i, fillMissingOnly: fillMissingOnly && !replan.contains(i))
             await Task.yield()
         }
 
         for i in 0..<boardState.days.count {
             guard !Task.isCancelled else { return }
-            generateEveningOutfitIfNeeded(dayIndex: i, fillMissingOnly: fillMissingOnly)
+            let eveningStatus = lookWearStatus(dayIndex: i, lookTime: .evening)
+            let replanEvening = replan.contains(i) && eveningStatus != .planned && eveningStatus != .worn
+            generateEveningOutfitIfNeeded(dayIndex: i, fillMissingOnly: fillMissingOnly && !replanEvening)
             await Task.yield()
         }
+        pendingCalendarReplan.subtract(replan)
     }
 
     private func generateDayOutfit(dayIndex i: Int, fillMissingOnly: Bool) {
@@ -5035,6 +5265,8 @@ private struct DayCardSignature: Equatable {
     let reasons: [LookReasonBuilder.Reason]
     let showsGestureHint: Bool
     let eventLine: String?
+    /// Workout / work-clothes reminder text plus the suggested items.
+    let reminderLine: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
 }
