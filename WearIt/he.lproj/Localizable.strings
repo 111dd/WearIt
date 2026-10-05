@@ -867,3 +867,31 @@
 "gap_tag_insulated" = "חם";
 "gap_tag_breathable" = "נושם";
 "gap_tag_formal" = "מכובד";
+
+"planner_tune_look_section" = "כוונון הלוק";
+
+/* Look reasons ("Why this look?") */
+"look_reason_evening_layer_format" = "יש שכבה לערב (%d°)";
+"look_reason_rain_ready" = "מוכן לגשם";
+"look_reason_light_heat_format" = "פריטים קלים ל-%d°";
+"look_reason_warm_cold_format" = "שכבה חמה ל-%d°";
+"look_reason_occasion_format" = "מתאים ל%@ היום";
+"look_reason_favorite_format" = "כולל פריט אהוב: %@";
+"look_reason_rotation_format" = "מחזיר את %@ (לא נלבש %d ימים)";
+"look_reason_proven_pair" = "שילוב שכבר לבשת בעבר";
+"look_reason_favorite_color_format" = "בנוי סביב %@, אחד הצבעים האהובים שלך";
+"look_reason_weather_range_format" = "מתוכנן ל-%d°–%d°";
+"look_occasion_shabbat" = "שבת";
+"look_occasion_holiday" = "חג";
+"look_occasion_formal" = "אירוע החגיגי";
+"look_occasion_evening_out" = "יציאה בערב";
+"look_occasion_work" = "יום עבודה";
+"look_occasion_sport" = "אימון";
+"look_occasion_travel" = "נסיעה";
+"look_occasion_outdoor" = "בילוי בחוץ";
+
+/* Flowing look card */
+"planner_did_you_wear_question" = "לבשת את זה?";
+"planner_how_was_it" = "איך היה?";
+"planner_item_details" = "פרטי הפריט";
+"planner_gesture_hint" = "החלקה הצידה על לוק מביאה לוק חדש, והקשה על פריט פותחת חלופות.";

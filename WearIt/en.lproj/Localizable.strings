@@ -848,3 +848,31 @@
 "gap_tag_insulated" = "warm";
 "gap_tag_breathable" = "breathable";
 "gap_tag_formal" = "formal";
+
+"planner_tune_look_section" = "Fine-tune";
+
+/* Look reasons ("Why this look?") */
+"look_reason_evening_layer_format" = "Has a layer for the evening (%d°)";
+"look_reason_rain_ready" = "Ready for the rain";
+"look_reason_light_heat_format" = "Light pieces for %d°";
+"look_reason_warm_cold_format" = "A warm layer for %d°";
+"look_reason_occasion_format" = "Dressed for %@";
+"look_reason_favorite_format" = "Includes a favorite: %@";
+"look_reason_rotation_format" = "Brings back %@ (not worn for %d days)";
+"look_reason_proven_pair" = "A pairing you've worn before";
+"look_reason_favorite_color_format" = "Built around %@, one of your favorite colors";
+"look_reason_weather_range_format" = "Planned for %d°–%d°";
+"look_occasion_shabbat" = "Shabbat";
+"look_occasion_holiday" = "the holiday";
+"look_occasion_formal" = "the formal event";
+"look_occasion_evening_out" = "an evening out";
+"look_occasion_work" = "work";
+"look_occasion_sport" = "a workout";
+"look_occasion_travel" = "travel";
+"look_occasion_outdoor" = "time outdoors";
+
+/* Flowing look card */
+"planner_did_you_wear_question" = "Did you wear it?";
+"planner_how_was_it" = "How was it?";
+"planner_item_details" = "Item details";
+"planner_gesture_hint" = "Swipe a look sideways for a new one, tap an item for alternatives.";

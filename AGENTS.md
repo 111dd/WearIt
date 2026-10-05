@@ -121,6 +121,21 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Day card header: forecast (and rain %) plus the dress-relevant
+  calendar event are plain subtitle lines under the day title instead of a glass chip; ⋯ is a plain
+  glyph; the card glass gets a light `systemBackground` tint so text stays readable on any backdrop.
+- 2026-10-05 · Claude Code · Look card gestures fixed: swipe-to-replace now uses a UIKit pan
+  (`UI/HorizontalSwipeGesture`) that fails on vertical movement; tile double-tap removed so a tap
+  opens quick swaps instantly; "Love" moved to the day ⋯ menu (plus the reaction strip / status mark).
+- 2026-10-05 · Claude Code · Flowing look card (`UI/OutfitLookRow`): today/past shows one
+  "Did you wear it?" ✓/✕ line, future shows no buttons ("I'll wear this" moved to the day ⋯ menu),
+  a corner status mark holds undo + fine-tune, a one-time 😍🥶🥵👎 strip after "worn". Gestures:
+  swipe a look to replace, double-tap a tile to love, tap a tile for an inline quick-swap strip
+  (locked/linked tiles still open the item sheet). One-time gesture hint on the first look.
+- 2026-10-05 · Claude Code · "Why this look?" works everywhere: `Logic/LookReasonBuilder` gives
+  concrete localized reasons (rain-ready, evening layer, occasion, favorite, rotation, proven pair,
+  favorite color, temp range). Collapsed card line shows the top reason; details list them under
+  the AI summary. Builds on the Liquid Glass control bar from the look-card branch.
 - 2026-10-05 · Claude Code · Merged the `claude/project-thread-k0ji4x` branch (wardrobe gaps,
   this file) into `main`; folded the earlier short agent brief (hard constraints, architecture
   facts, `docs/LEARNINGS.md` workflow) into this file.
@@ -158,7 +173,6 @@ and recommend from that. Order: wardrobe gaps → smarter stats → trip packing
 - Smarter stats: optional purchase price → cost per wear; owned vs actually worn per
   category/style; items to donate; too-cold/too-warm trends; most swapped-out items.
 - Trip packing list: dates + destination forecast → planned looks.
-- Packing list for a trip: dates + destination forecast → planned looks.
 - Split `OutfitPlannerView.swift` into smaller files (variety, persistence, drag & drop).
 - Replace or remove the `.mlmodel` placeholders in `AI/`.
 - Remove legacy `OutfitView` / `ContentView` if confirmed unused.
