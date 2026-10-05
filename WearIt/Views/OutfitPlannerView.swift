@@ -32,6 +32,9 @@ struct OutfitPlannerView: View {
     @State private var targetedSlot: SlotTarget?
     @AppStorage("planner.allowRepeatedItems") private var allowRepeatedItems = true
     @State private var garmentActionTarget: SlotTarget?
+    /// Item whose inline alternatives strip is open (tap a tile to toggle).
+    @State private var quickSwapTarget: SlotTarget?
+    @AppStorage("plannerGestureHintSeen") private var gestureHintSeen = false
     @State private var lastForecastSignature: String = ""
     @State private var expandedDayDetails: Set<Int> = []
     @State private var selectedDayIndex: Int = 0
@@ -517,6 +520,7 @@ struct OutfitPlannerView: View {
     
     private func dayColumn(for dayIndex: Int) -> some View {
         let state = boardState.days[dayIndex]
+        let reasons = lookReasons(for: dayIndex)
         let signature = DayCardSignature(
             dayIndex: dayIndex,
             state: state,
@@ -526,7 +530,12 @@ struct OutfitPlannerView: View {
             forecastKey: forecastKey(for: state.forecast),
             assignedSignature: assignedGarmentSignature(for: dayIndex),
             availableSignature: availableGarmentsSignature,
-            aiExplanation: aiExplanationText(for: dayIndex)
+            aiExplanation: aiExplanationText(for: dayIndex),
+            reasons: reasons,
+            showsGestureHint: showsGestureHint(for: dayIndex),
+            quickSwap: quickSwapTarget.flatMap { target in
+                target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
+            }
         )
 
         return DayCardContainer(signature: signature) {
@@ -539,6 +548,10 @@ struct OutfitPlannerView: View {
                 } else {
                     swipeableOutfitRow(dayIndex: dayIndex, lookTime: .day)
                         .transition(.opacity)
+                    if showsGestureHint(for: dayIndex) {
+                        gestureHint
+                            .transition(.opacity)
+                    }
                     availabilityHintsView(for: dayIndex, lookTime: .day)
                 }
 
@@ -553,9 +566,9 @@ struct OutfitPlannerView: View {
                 }
 
                 if !state.assignedGarmentIDs.isEmpty {
-                    lookInsightRow(for: dayIndex)
+                    lookInsightRow(for: dayIndex, reasons: reasons)
                     if isDetailsExpanded(dayIndex) {
-                        dayDetailsSection(for: dayIndex)
+                        dayDetailsSection(for: dayIndex, reasons: reasons)
                             .transition(.opacity)
                     }
                 }
@@ -776,6 +789,17 @@ struct OutfitPlannerView: View {
             } label: {
                 Label(String(localized: "planner_refresh_day"), systemImage: "arrow.clockwise")
             }
+            // Future looks have no wear prompt on the card; planning lives here.
+            if dayTiming(for: dayIndex) == .future,
+               !boardState.days[dayIndex].assignedGarmentIDs.isEmpty,
+               lookWearStatus(dayIndex: dayIndex, lookTime: .day) != .planned,
+               lookWearStatus(dayIndex: dayIndex, lookTime: .day) != .worn {
+                Button {
+                    handleSwipeConfirm(dayIndex: dayIndex, lookTime: .day)
+                } label: {
+                    Label(String(localized: "planner_swipe_will_wear"), systemImage: "calendar.badge.checkmark")
+                }
+            }
             if dayTiming(for: dayIndex) != .future, isConfirmed(dayIndex) {
                 Button {
                     unconfirmDay(dayIndex: dayIndex)
@@ -888,13 +912,26 @@ struct OutfitPlannerView: View {
         }
     }
 
-    private func dayDetailsSection(for dayIndex: Int) -> some View {
+    /// Expanded "why this look": the on-device AI summary when available, then
+    /// the concrete reasons (always available, any language), then day hints.
+    private func dayDetailsSection(for dayIndex: Int, reasons: [LookReasonBuilder.Reason]) -> some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             if let explanation = aiExplanationText(for: dayIndex) {
                 Text(explanation)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(reasons.enumerated()), id: \.offset) { _, reason in
+                Label {
+                    Text(reasonText(reason))
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: reasonIcon(reason))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
             let hints = combinedHints(for: dayIndex)
             ForEach(Array(hints.enumerated()), id: \.offset) { _, hint in
@@ -903,15 +940,13 @@ struct OutfitPlannerView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if hints.isEmpty, aiExplanationText(for: dayIndex) == nil {
+            if hints.isEmpty, reasons.isEmpty, aiExplanationText(for: dayIndex) == nil {
                 weatherRecommendationsSection(for: dayIndex)
             }
         }
         .padding(.top, DS.Spacing.xxs)
     }
 
-    
-    
     @ViewBuilder
     private func weatherRecommendationsSection(for dayIndex: Int) -> some View {
         if dayIndex < boardState.days.count, let forecast = boardState.days[dayIndex].forecast {
@@ -965,12 +1000,14 @@ struct OutfitPlannerView: View {
         }
     }
 
-    /// One quiet, tappable line under the look: the short weather guidance, or
-    /// "Why this look?" without a forecast. Tapping reveals the AI explanation
-    /// and hints, so the card has a single disclosure instead of two rows.
-    private func lookInsightRow(for dayIndex: Int) -> some View {
+    /// One quiet, tappable line under the look: its strongest reason (falling
+    /// back to weather guidance or "Why this look?"). Tapping reveals every
+    /// reason, the AI summary when available and hints, in a single disclosure.
+    private func lookInsightRow(for dayIndex: Int, reasons: [LookReasonBuilder.Reason]) -> some View {
         let expanded = isDetailsExpanded(dayIndex)
+        // Lead with the strongest concrete reason; the rest open on tap.
         let text: String = {
+            if let first = reasons.first { return reasonText(first) }
             if dayIndex < boardState.days.count, let forecast = boardState.days[dayIndex].forecast {
                 return recommendationGuidance(for: DayTemperatureProfile(from: forecast))
             }
@@ -1011,6 +1048,90 @@ struct OutfitPlannerView: View {
             return String(localized: "planner_reco_guidance_rain")
         }
         return profile.smartHints.first?.text ?? String(localized: "planner_weather_default_hint")
+    }
+
+    // MARK: - Look Reasons
+
+    private func lookReasons(for dayIndex: Int) -> [LookReasonBuilder.Reason] {
+        guard dayIndex < boardState.days.count else { return [] }
+        let state = boardState.days[dayIndex]
+        let garments = state.assignedGarmentIDs.compactMap { garment(for: $0) }
+        guard !garments.isEmpty else { return [] }
+        let favoriteColors = cachedTaste.sourceGarmentCount >= 5
+            ? cachedTaste.colorShares(limit: 2).filter { $0.share >= 0.15 }.map(\.tag)
+            : []
+        return LookReasonBuilder.reasons(
+            LookReasonBuilder.Input(
+                garments: garments,
+                profile: state.forecast.map { DayTemperatureProfile(from: $0) },
+                occasion: calendarContext(for: dayIndex).occasionKind,
+                lastWorn: cachedLatestWearByGarmentID,
+                combination: cachedCombination,
+                favoriteColors: favoriteColors,
+                now: state.date
+            ),
+            limit: 4
+        )
+    }
+
+    private func reasonText(_ reason: LookReasonBuilder.Reason) -> String {
+        func format(_ key: String, _ args: CVarArg...) -> String {
+            String(format: NSLocalizedString(key, comment: ""), arguments: args)
+        }
+        func title(_ id: UUID) -> String {
+            garment(for: id)?.displayTitle ?? ""
+        }
+        switch reason {
+        case .eveningLayer(let temp):
+            return format("look_reason_evening_layer_format", temp)
+        case .rainReady:
+            return String(localized: "look_reason_rain_ready")
+        case .lightForHeat(let temp):
+            return format("look_reason_light_heat_format", temp)
+        case .warmForCold(let temp):
+            return format("look_reason_warm_cold_format", temp)
+        case .occasion(let kind):
+            return format("look_reason_occasion_format", occasionTitle(kind))
+        case .favorite(let id):
+            return format("look_reason_favorite_format", title(id))
+        case .rotation(let id, let days):
+            return format("look_reason_rotation_format", title(id), days)
+        case .provenPair:
+            return String(localized: "look_reason_proven_pair")
+        case .favoriteColor(let color):
+            return format("look_reason_favorite_color_format", color.title)
+        case .weatherRange(let low, let high):
+            return format("look_reason_weather_range_format", low, high)
+        }
+    }
+
+    private func reasonIcon(_ reason: LookReasonBuilder.Reason) -> String {
+        switch reason {
+        case .eveningLayer: return "moon.stars"
+        case .rainReady: return "cloud.rain"
+        case .lightForHeat: return "sun.max"
+        case .warmForCold: return "thermometer.snowflake"
+        case .occasion: return "calendar"
+        case .favorite: return "star"
+        case .rotation: return "arrow.counterclockwise"
+        case .provenPair: return "link"
+        case .favoriteColor: return "paintpalette"
+        case .weatherRange: return "thermometer.medium"
+        }
+    }
+
+    private func occasionTitle(_ kind: CalendarOccasionKind) -> String {
+        switch kind {
+        case .shabbat: return String(localized: "look_occasion_shabbat")
+        case .holiday: return String(localized: "look_occasion_holiday")
+        case .formal, .blackTie: return String(localized: "look_occasion_formal")
+        case .socialEvening: return String(localized: "look_occasion_evening_out")
+        case .work: return String(localized: "look_occasion_work")
+        case .sport: return String(localized: "look_occasion_sport")
+        case .travel: return String(localized: "look_occasion_travel")
+        case .outdoor: return String(localized: "look_occasion_outdoor")
+        case .none: return ""
+        }
     }
 
     // MARK: - AI Look Explanations (Foundation Models, iOS 26+)
@@ -1409,6 +1530,7 @@ struct OutfitPlannerView: View {
             clearStatusTitle: clearTitle,
             statusBadge: badge,
             accessibilitySlotLabel: slotLabel,
+            isFuture: timing == .future,
             feedback: lookTime == .day ? lookFeedbackActions(for: dayIndex) : nil,
             onConfirm: {
                 handleSwipeConfirm(dayIndex: dayIndex, lookTime: lookTime)
@@ -1423,8 +1545,146 @@ struct OutfitPlannerView: View {
                 handleSwipeClearStatus(dayIndex: dayIndex, lookTime: lookTime)
             }
         ) {
-            outfitRow(for: dayIndex, lookTime: lookTime)
+            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                outfitRow(for: dayIndex, lookTime: lookTime)
+                if let target = quickSwapTarget, target.dayIndex == dayIndex, target.lookTime == lookTime {
+                    quickSwapStrip(for: target)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
         }
+    }
+
+    // MARK: - Quick swap & love gestures
+
+    /// One-time tip on the first planned look explaining the card gestures.
+    private func showsGestureHint(for dayIndex: Int) -> Bool {
+        guard !gestureHintSeen, dayIndex < boardState.days.count else { return false }
+        let firstPlanned = boardState.days.firstIndex { !$0.assignedGarmentIDs.isEmpty }
+        return firstPlanned == dayIndex
+    }
+
+    private var gestureHint: some View {
+        HStack(alignment: .top, spacing: DS.Spacing.xs) {
+            Image(systemName: "hand.draw")
+                .font(.subheadline)
+                .foregroundStyle(Color.accentColor)
+            Text(String(localized: "planner_gesture_hint"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                    gestureHintSeen = true
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(String(localized: "micro_question_skip")))
+        }
+        .padding(DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: DS.Radius.md)
+    }
+
+    private func toggleQuickSwap(_ target: SlotTarget) {
+        gestureHintSeen = true
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            quickSwapTarget = quickSwapTarget == target ? nil : target
+        }
+    }
+
+    private func openGarmentDetails(_ garment: Garment, slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) {
+        quickSwapTarget = nil
+        garmentActionTarget = SlotTarget(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+        activeSheet = .garmentMenu(garment)
+    }
+
+    private func loveLook(dayIndex: Int) {
+        guard dayIndex < boardState.days.count,
+              boardState.days[dayIndex].feedback != .loved else { return }
+        gestureHintSeen = true
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            submitFeedback(for: dayIndex, rating: .loved)
+        }
+    }
+
+    private func currentGarmentID(for target: SlotTarget) -> UUID? {
+        guard target.dayIndex < boardState.days.count else { return nil }
+        let day = boardState.days[target.dayIndex]
+        if target.lookTime == .evening, !isEveningLinked(dayIndex: target.dayIndex, slot: target.slot) {
+            return day.eveningGarmentID(for: target.slot)
+        }
+        return day.garmentID(for: target.slot)
+    }
+
+    /// Inline alternatives for one item, best first. Tap one to swap it in;
+    /// the info button opens the full item sheet.
+    private func quickSwapStrip(for target: SlotTarget) -> some View {
+        let currentID = currentGarmentID(for: target)
+        let alternatives = recommendedItemsForSlot(target.slot, dayIndex: target.dayIndex, lookTime: target.lookTime)
+            .filter { $0.id != currentID }
+            .prefix(8)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: DS.Spacing.xs) {
+                if let currentID, let current = garment(for: currentID) {
+                    Button {
+                        openGarmentDetails(current, slot: target.slot, dayIndex: target.dayIndex, lookTime: target.lookTime)
+                    } label: {
+                        Image(systemName: "info")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .liquidGlassCircle(interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(String(localized: "planner_item_details")))
+                }
+                if alternatives.isEmpty {
+                    Text(String(localized: "planner_no_replacement"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, DS.Spacing.xs)
+                }
+                ForEach(Array(alternatives)) { candidate in
+                    Button {
+                        applyQuickSwap(candidate, target: target, replacedID: currentID)
+                    } label: {
+                        DSGarmentThumbnail(candidate, size: .small)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(candidate.displayTitle))
+                }
+            }
+            .padding(.vertical, DS.Spacing.xxs)
+        }
+    }
+
+    private func applyQuickSwap(_ garment: Garment, target: SlotTarget, replacedID: UUID?) {
+        guard target.dayIndex < boardState.days.count else { return }
+        DS.haptic(0.4)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            if target.lookTime == .evening {
+                boardState.days[target.dayIndex].setEveningGarment(garment.id, for: target.slot)
+            } else {
+                boardState.days[target.dayIndex].setGarment(garment.id, for: target.slot)
+            }
+            quickSwapTarget = nil
+        }
+        if let replacedID {
+            recordReplacement(
+                dayIndex: target.dayIndex,
+                replacedID: replacedID,
+                replacementID: garment.id,
+                lookTime: target.lookTime
+            )
+        }
+        persistDayPlan(target.dayIndex)
     }
 
     /// Day-look rating hooks for the look control bar (heart + fine-tune menu).
@@ -1433,6 +1693,9 @@ struct OutfitPlannerView: View {
         return LookFeedbackActions(
             isLoved: state.feedback == .loved,
             temperature: state.temperatureFeedback,
+            hasReaction: state.feedback == .loved
+                || state.feedback == .rejected
+                || state.temperatureFeedback != nil,
             onLove: {
                 withAnimation(reduceMotion ? nil : DS.Animation.standard) {
                     submitFeedback(for: dayIndex, rating: .loved)
@@ -1847,10 +2110,19 @@ struct OutfitPlannerView: View {
             )) { providers in
                 return handleDrop(providers: providers, targetDay: dayIndex, targetSlot: slot, lookTime: lookTime)
             }
+            // Double-tap loves the look; it is declared first so a single tap
+            // waits for it to fail before opening quick swaps.
+            .onTapGesture(count: 2) {
+                guard lookTime == .day else { return }
+                loveLook(dayIndex: dayIndex)
+            }
             .onTapGesture {
                 DS.haptic(0.3)
-                garmentActionTarget = SlotTarget(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-                activeSheet = .garmentMenu(garment)
+                if isLocked || isLinked {
+                    openGarmentDetails(garment, slot: slot, dayIndex: dayIndex, lookTime: lookTime)
+                } else {
+                    toggleQuickSwap(SlotTarget(dayIndex: dayIndex, slot: slot, lookTime: lookTime))
+                }
             }
             .contextMenu {
                 slotContextMenu(
@@ -1879,6 +2151,9 @@ struct OutfitPlannerView: View {
                 isLinked: isLinked
             ))
             .accessibilityAddTraits(.isButton)
+            .accessibilityAction(named: Text(String(localized: "planner_item_details"))) {
+                openGarmentDetails(garment, slot: slot, dayIndex: dayIndex, lookTime: lookTime)
+            }
 
         if canDrag {
             dropTarget
@@ -4551,6 +4826,10 @@ private struct DayCardSignature: Equatable {
     /// AI explanation currently shown — the memoized card must re-render when
     /// the async generation lands.
     let aiExplanation: String?
+    let reasons: [LookReasonBuilder.Reason]
+    let showsGestureHint: Bool
+    /// Open quick-swap strip on this card ("slot-lookTime"), if any.
+    let quickSwap: String?
 }
 
 private struct DayCardContainer<Content: View>: View, Equatable {

@@ -2,11 +2,14 @@
 //  OutfitLookRow.swift
 //  WearIt
 //
-//  One look inside a planner day card: garment tiles over a single Liquid
-//  Glass control bar. One primary action (wear / status), a heart, a replace
-//  button and one menu that holds everything else (fine-tune feedback, not
-//  worn, clear status). On iOS 26+ the controls share a GlassEffectContainer,
-//  so the wear button morphs into the status capsule once confirmed.
+//  One look inside a planner day card, designed to show only what matters now:
+//  - Today / past, not yet answered: one quiet "Did you wear it?" line (✓ / ✕).
+//  - Future days: no buttons at all — the plan is the content.
+//  - Once answered: a small status mark on the corner; tapping it undoes or fine-tunes.
+//  - Right after "worn": a one-tap "How was it?" emoji strip, then it disappears.
+//  Gestures carry the rest: swipe the look sideways to replace it, double-tap an
+//  item to love the look (handled by the tile), tap an item for quick swaps.
+//  Every gesture is mirrored as a VoiceOver action.
 //
 
 import SwiftUI
@@ -16,6 +19,8 @@ import SwiftUI
 struct LookFeedbackActions {
     let isLoved: Bool
     let temperature: TemperatureFeedback?
+    /// True once any rating or temperature feedback exists for this look.
+    let hasReaction: Bool
     let onLove: () -> Void
     let onNotMyStyle: () -> Void
     let onTemperature: (TemperatureFeedback) -> Void
@@ -33,6 +38,8 @@ struct OutfitLookRow<Content: View>: View {
     let clearStatusTitle: String?
     let statusBadge: String?
     let accessibilitySlotLabel: String
+    /// Future looks show no wear prompt; they are confirmed from the day menu.
+    var isFuture: Bool = false
     var feedback: LookFeedbackActions? = nil
     let onConfirm: () -> Void
     let onNotWorn: () -> Void
@@ -40,18 +47,39 @@ struct OutfitLookRow<Content: View>: View {
     let onClearStatus: (() -> Void)?
     @ViewBuilder let content: () -> Content
 
-    @Namespace private var glassNamespace
-    @State private var replaceTick = 0
+    @State private var swipeOffset: CGFloat = 0
+    @State private var reactionDismissed = false
+    @State private var heartBurst = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Horizontal travel that commits a swipe-to-replace.
+    private static var swipeCommitDistance: CGFloat { 80 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .topLeading) { statusMark }
+                .overlay { heartOverlay }
+                .offset(x: swipeOffset)
+                .opacity(1 - min(0.5, abs(swipeOffset) / 300))
+                .simultaneousGesture(swipeGesture)
 
-            controlBar
+            if showsWearPrompt {
+                wearPrompt
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if showsReactionStrip, let feedback {
+                reactionStrip(feedback)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
         }
         .opacity(isBusy ? 0.65 : 1)
+        .animation(reduceMotion ? nil : DS.Animation.standard, value: showsWearPrompt)
+        .animation(reduceMotion ? nil : DS.Animation.standard, value: showsReactionStrip)
+        .onChange(of: feedback?.isLoved ?? false) { _, loved in
+            guard loved else { return }
+            playHeartBurst()
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(accessibilitySummary))
         .accessibilityAction(named: Text(confirmTitle)) {
@@ -78,201 +106,269 @@ struct OutfitLookRow<Content: View>: View {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Control bar
+    private var showsWearPrompt: Bool {
+        // Unanswered, or only planned ahead of time: ask once on the day itself.
+        canConfirm && !isFuture && (status == nil || status == .planned)
+    }
 
-    private var controlBar: some View {
-        LiquidGlassGroup(spacing: DS.Spacing.sm) {
+    private var showsReactionStrip: Bool {
+        guard let feedback else { return false }
+        return status == .worn && !feedback.hasReaction && !reactionDismissed
+    }
+
+    // MARK: - Wear prompt
+
+    private var wearPrompt: some View {
+        LiquidGlassGroup(spacing: DS.Spacing.xs) {
             HStack(spacing: DS.Spacing.xs) {
-                primaryControl
-                Spacer(minLength: DS.Spacing.xs)
-                if let feedback {
-                    loveButton(feedback)
-                }
-                replaceButton
-                moreMenu
-            }
-        }
-        .animation(reduceMotion ? nil : DS.Animation.standard, value: canConfirm)
-        .animation(reduceMotion ? nil : DS.Animation.standard, value: status)
-    }
-
-    /// Wear button while the look can still be confirmed; afterwards the same
-    /// glass shape becomes a status capsule that opens the undo options.
-    @ViewBuilder
-    private var primaryControl: some View {
-        if canConfirm {
-            Button {
-                DS.haptic(0.4)
-                onConfirm()
-            } label: {
-                HStack(spacing: DS.Spacing.xxs) {
-                    Label(confirmTitle, systemImage: "checkmark")
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    if let statusBadge {
-                        // Secondary state, e.g. planned earlier or marked not worn.
-                        Text("· \(statusBadge)")
-                            .font(.caption.weight(.medium))
-                            .opacity(0.8)
-                            .lineLimit(1)
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, DS.Spacing.md)
-                .frame(minHeight: 44)
-                .modifier(ProminentGlassCapsule())
-                .liquidGlassID("primary", in: glassNamespace)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(isBusy)
-            .transition(.opacity)
-        } else {
-            Menu {
-                statusMenuItems
-            } label: {
-                Label(statusBadge ?? confirmTitle, systemImage: statusIcon)
-                    .font(.subheadline.weight(.semibold))
+                Text(String(localized: "planner_did_you_wear_question"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .foregroundStyle(statusColor)
+                    .minimumScaleFactor(0.85)
+                Spacer(minLength: DS.Spacing.xs)
+                Button {
+                    DS.haptic(0.3)
+                    onNotWorn()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, height: 40)
+                        .liquidGlassCircle(interactive: true)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+                .accessibilityLabel(Text(notWornTitle))
+
+                Button {
+                    DS.haptic(0.45)
+                    onConfirm()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 44, height: 44)
+                        .modifier(ProminentGlassCircle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+                .accessibilityLabel(Text(confirmTitle))
+            }
+        }
+    }
+
+    // MARK: - Status mark
+
+    /// Small corner mark once the look has a status. Tapping opens undo and,
+    /// for the day look, the fine-tune feedback that used to live in buttons.
+    @ViewBuilder
+    private var statusMark: some View {
+        if let status {
+            Menu {
+                if let feedback {
+                    Section(String(localized: "planner_tune_look_section")) {
+                        if !feedback.isLoved {
+                            Button(String(localized: "planner_love_it"), systemImage: "heart") {
+                                feedback.onLove()
+                            }
+                        }
+                        Button(String(localized: "planner_not_my_style"), systemImage: "hand.thumbsdown") {
+                            feedback.onNotMyStyle()
+                        }
+                        Button(String(localized: "planner_too_warm"), systemImage: "thermometer.sun") {
+                            feedback.onTemperature(.tooWarm)
+                        }
+                        .disabled(feedback.temperature == .tooWarm)
+                        Button(String(localized: "planner_too_cold"), systemImage: "thermometer.snowflake") {
+                            feedback.onTemperature(.tooCold)
+                        }
+                        .disabled(feedback.temperature == .tooCold)
+                        Button(String(localized: "planner_too_formal"), systemImage: "briefcase") {
+                            feedback.onFormality(-1)
+                        }
+                        Button(String(localized: "planner_too_casual"), systemImage: "tshirt") {
+                            feedback.onFormality(1)
+                        }
+                    }
+                }
+                Section {
+                    if status != .notWorn {
+                        Button(notWornTitle, systemImage: "xmark.circle") { onNotWorn() }
+                    }
+                    if let clearStatusTitle {
+                        Button(clearStatusTitle, systemImage: "arrow.uturn.backward.circle") {
+                            onClearStatus?()
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: Self.icon(for: status))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Self.color(for: status))
                     .symbolEffect(.bounce, value: status)
-                    .padding(.horizontal, DS.Spacing.md)
-                    .frame(minHeight: 44)
-                    .liquidGlassPill(interactive: true, tint: statusColor.opacity(0.14))
-                    .liquidGlassID("primary", in: glassNamespace)
-                    .contentShape(Capsule())
+                    .frame(width: 30, height: 30)
+                    .liquidGlassCircle(interactive: true, tint: Self.color(for: status).opacity(0.18))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isBusy)
-            .transition(.opacity)
+            .offset(x: -10, y: -10)
+            .transition(.scale.combined(with: .opacity))
+            .accessibilityLabel(Text(statusBadge ?? confirmTitle))
         }
     }
 
-    private func loveButton(_ feedback: LookFeedbackActions) -> some View {
-        Button {
-            guard !feedback.isLoved else { return }
-            feedback.onLove()
-        } label: {
-            Image(systemName: feedback.isLoved ? "heart.fill" : "heart")
-                .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.bounce, value: feedback.isLoved)
-                .foregroundStyle(feedback.isLoved ? Color.pink : .primary)
-                .modifier(GlassCircleIcon(namespace: glassNamespace, id: "love"))
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .accessibilityLabel(Text(String(localized: "planner_love_it")))
-        .accessibilityAddTraits(feedback.isLoved ? .isSelected : [])
-    }
-
-    private var replaceButton: some View {
-        Button {
-            replaceTick += 1
-            DS.haptic(0.4)
-            onReplace()
-        } label: {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .symbolEffect(.rotate, value: replaceTick)
-                .foregroundStyle(.primary)
-                .modifier(GlassCircleIcon(namespace: glassNamespace, id: "replace"))
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .accessibilityLabel(Text(replaceTitle))
-    }
-
-    private var moreMenu: some View {
-        Menu {
-            if let feedback {
-                Section(String(localized: "planner_tune_look_section")) {
-                    Button(String(localized: "planner_not_my_style"), systemImage: "hand.thumbsdown") {
-                        feedback.onNotMyStyle()
-                    }
-                    Button(String(localized: "planner_too_warm"), systemImage: "thermometer.sun") {
-                        feedback.onTemperature(.tooWarm)
-                    }
-                    .disabled(feedback.temperature == .tooWarm)
-                    Button(String(localized: "planner_too_cold"), systemImage: "thermometer.snowflake") {
-                        feedback.onTemperature(.tooCold)
-                    }
-                    .disabled(feedback.temperature == .tooCold)
-                    Button(String(localized: "planner_too_formal"), systemImage: "briefcase") {
-                        feedback.onFormality(-1)
-                    }
-                    Button(String(localized: "planner_too_casual"), systemImage: "tshirt") {
-                        feedback.onFormality(1)
-                    }
-                }
-            }
-            Section {
-                statusMenuItems
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .foregroundStyle(.primary)
-                .modifier(GlassCircleIcon(namespace: glassNamespace, id: "more"))
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .accessibilityLabel(Text(String(localized: "planner_swipe_more_actions")))
-    }
-
-    @ViewBuilder
-    private var statusMenuItems: some View {
-        if status != .notWorn {
-            Button(notWornTitle, systemImage: "xmark.circle") { onNotWorn() }
-        }
-        if let clearStatusTitle {
-            Button(clearStatusTitle, systemImage: "arrow.uturn.backward.circle") {
-                onClearStatus?()
-            }
-        }
-    }
-
-    private var statusIcon: String {
+    private static func icon(for status: LookWearStatus) -> String {
         switch status {
-        case .worn: return "checkmark.seal.fill"
-        case .notWorn: return "xmark.circle"
-        case .planned: return "calendar.badge.checkmark"
-        case nil: return "circle.dashed"
+        case .worn: return "checkmark"
+        case .notWorn: return "xmark"
+        case .planned: return "calendar"
         }
     }
 
-    private var statusColor: Color {
+    private static func color(for status: LookWearStatus) -> Color {
         switch status {
         case .worn: return .green
         case .notWorn: return .secondary
         case .planned: return .accentColor
-        case nil: return .secondary
+        }
+    }
+
+    // MARK: - Reaction strip
+
+    private func reactionStrip(_ feedback: LookFeedbackActions) -> some View {
+        HStack(spacing: DS.Spacing.xs) {
+            Text(String(localized: "planner_how_was_it"))
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: DS.Spacing.xxs)
+            LiquidGlassGroup(spacing: DS.Spacing.xxs) {
+                HStack(spacing: DS.Spacing.xxs) {
+                    reactionButton("😍", label: "planner_love_it") { feedback.onLove() }
+                    reactionButton("🥶", label: "planner_too_cold") { feedback.onTemperature(.tooCold) }
+                    reactionButton("🥵", label: "planner_too_warm") { feedback.onTemperature(.tooWarm) }
+                    reactionButton("👎", label: "planner_not_my_style") { feedback.onNotMyStyle() }
+                }
+            }
+            Button {
+                reactionDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 28, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(String(localized: "micro_question_skip")))
+        }
+    }
+
+    private func reactionButton(_ emoji: String, label: String.LocalizationValue, action: @escaping () -> Void) -> some View {
+        Button {
+            DS.haptic(0.35)
+            action()
+        } label: {
+            Text(emoji)
+                .font(.title3)
+                .frame(width: 40, height: 40)
+                .liquidGlassCircle(interactive: true)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isBusy)
+        .accessibilityLabel(Text(String(localized: label)))
+    }
+
+    // MARK: - Heart burst
+
+    @ViewBuilder
+    private var heartOverlay: some View {
+        if heartBurst {
+            Image(systemName: "heart.fill")
+                .font(.system(size: 56, weight: .semibold))
+                .foregroundStyle(.pink)
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                .transition(.scale(scale: 0.4).combined(with: .opacity))
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func playHeartBurst() {
+        guard !reduceMotion else { return }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) {
+            heartBurst = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            withAnimation(.easeOut(duration: 0.25)) {
+                heartBurst = false
+            }
+        }
+    }
+
+    // MARK: - Swipe to replace
+
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onChanged { value in
+                guard !isBusy else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                // Only clearly horizontal drags; vertical scrolling keeps working.
+                guard abs(dx) > abs(dy) * 1.6 else { return }
+                swipeOffset = dx * 0.55
+            }
+            .onEnded { value in
+                let dx = value.translation.width
+                let dy = value.translation.height
+                let isHorizontal = abs(dx) > abs(dy) * 1.6
+                let travel = max(abs(dx), abs(value.predictedEndTranslation.width) * 0.6)
+                guard isHorizontal, travel >= Self.swipeCommitDistance, !isBusy else {
+                    withAnimation(reduceMotion ? nil : DS.Animation.standard) { swipeOffset = 0 }
+                    return
+                }
+                commitSwipe(direction: dx >= 0 ? 1 : -1)
+            }
+    }
+
+    /// Slide the old look out, replace it, and bring the new one in from the other side.
+    private func commitSwipe(direction: CGFloat) {
+        DS.haptic(0.45)
+        guard !reduceMotion else {
+            swipeOffset = 0
+            onReplace()
+            return
+        }
+        withAnimation(.easeIn(duration: 0.16)) {
+            swipeOffset = direction * 260
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            onReplace()
+            swipeOffset = -direction * 120
+            withAnimation(DS.Animation.standard) {
+                swipeOffset = 0
+            }
         }
     }
 }
 
-/// Accent-tinted glass capsule for the one primary action. Before iOS 26 the
-/// plain material fallback would leave white text unreadable, so it uses a
-/// solid accent capsule instead.
-private struct ProminentGlassCapsule: ViewModifier {
+/// Accent-tinted glass circle for the one primary action. Before iOS 26 the
+/// plain material fallback would leave a white glyph unreadable, so it uses a
+/// solid accent circle instead.
+private struct ProminentGlassCircle: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.tint(.accentColor).interactive(), in: .capsule)
+            content.glassEffect(.regular.tint(.accentColor).interactive(), in: .circle)
         } else {
-            content.background(Color.accentColor, in: Capsule())
+            content.background(Color.accentColor, in: Circle())
         }
-    }
-}
-
-/// 44pt glass circle for a single SF Symbol in the look control bar.
-private struct GlassCircleIcon: ViewModifier {
-    let namespace: Namespace.ID
-    let id: String
-
-    func body(content: Content) -> some View {
-        content
-            .font(.body.weight(.semibold))
-            .frame(width: 44, height: 44)
-            .liquidGlassCircle(interactive: true)
-            .liquidGlassID(id, in: namespace)
-            .contentShape(Circle())
     }
 }

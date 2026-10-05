@@ -2,6 +2,18 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Look card is gesture-first
+
+- **Did:** `OutfitLookRow` shows only the action that fits the moment (wear prompt today/past, nothing on future days, corner status mark after), a post-wear reaction strip, swipe-to-replace (`DragGesture` via `simultaneousGesture`, horizontal-only), and the planner tile now double-taps to love and single-taps to open `quickSwapStrip`.
+- **Why:** The owner found the four-button glass bar heavy; feedback before wearing a look is noise.
+- **Watch:** `DayCardContainer` is `.equatable()` — any new planner `@State` that changes a card (quick swap, hint) must be added to `DayCardSignature` or the card will not redraw. Tile `onTapGesture(count: 2)` must stay before the single tap. Every gesture needs a matching `accessibilityAction`.
+
+## 2026-10-05 — "Why this look?" was empty in Hebrew
+
+- **Did:** Added `LookReasonBuilder` (deterministic reasons from forecast, calendar occasion, favorites, wear history, `CombinationAffinity`, taste colors). The planner card's insight line and expanded details use it; the FoundationModels summary is shown on top only when it exists.
+- **Why:** `LookExplanationAvailability.isSupported` requires the device language to be in `SystemLanguageModel.supportedLanguages`. Hebrew is not supported, and devices without Apple Intelligence also return false, so the explanation silently never appeared and the row only repeated weather guidance.
+- **Watch:** Never make a user-facing feature depend only on FoundationModels; always ship a deterministic fallback. New `Reason` cases need text in `reasonText`, an icon in `reasonIcon`, and en + he strings.
+
 ## 2026-09-16 — Skip full-table startup migrations
 
 - **Did:** `DataMigrationService` now gates critical garment/brand work with UserDefaults (`criticalGarmentMigrationVersion`, `brandDuplicateMergeDone`). Pending garments are fetched by `migrationVersion` (`nil` / `0` / `1`) instead of `FetchDescriptor<Garment>()`. Thumbnail backfill uses `#Predicate { thumbnailPath == nil && imagePath != nil }`, generates thumbs off-main, and yields every 8 items. `BrandStore.mergeDuplicateBrands` loads garments only when duplicates exist.
