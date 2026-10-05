@@ -2,6 +2,13 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Full-screen covers must not use the app backdrop
+- **Did:** Style Swipe dropped `withLocalAppBackdrop()` and paints its own opaque background.
+- **Why:** `ClearHostingBackground` clears every superview and controller up the chain, so a
+  `fullScreenCover` became see-through and the screen behind it showed (and felt tappable).
+- **Watch:** for covers use an opaque `.background` + `.presentationBackground`. Constants on a
+  `@MainActor` type read from nonisolated code need `nonisolated static let`.
+
 ## 2026-10-05 — Recommender judges whole looks and learns from choices
 
 - **Did:** `suggestOutfit` now calls `rankLooks`: top 6 per core slot, every combination scored as a look (piece scores + `LookDNA.priorScore` + learned `RecoState.lookWeights` + pair affinity), then outer/accessory. Swaps/picks call `learnPreference` (pairwise) and `learnLookPreference`; locks and auto-replace are soft signals saved with the planner persist (`save: false`). Style Swipe trains the same models.

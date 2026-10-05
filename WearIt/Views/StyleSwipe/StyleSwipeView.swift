@@ -19,6 +19,7 @@ struct StyleSwipeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
     @EnvironmentObject private var auth: AuthManager
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var garments: [Garment]
@@ -38,22 +39,17 @@ struct StyleSwipeView: View {
     private let verticalThreshold: CGFloat = 120
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: DS.Spacing.md) {
-                progressHeader
-                content
-            }
-            .padding(.horizontal, DS.Spacing.md)
-            .padding(.bottom, DS.Spacing.md)
-            .navigationTitle(String(localized: "style_swipe_title"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(String(localized: "action_close")) { close() }
-                }
-            }
-            .withLocalAppBackdrop()
+        VStack(spacing: DS.Spacing.md) {
+            topBar
+            content
         }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.bottom, DS.Spacing.sm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Opaque, full-screen layer of its own: nothing behind it shows or takes taps.
+        .background { backdrop.ignoresSafeArea() }
+        .contentShape(Rectangle())
+        .presentationBackground(Color(.systemBackground))
         .task { loadDeckIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { saveIfNeeded() }
@@ -61,39 +57,80 @@ struct StyleSwipeView: View {
         .onDisappear { saveIfNeeded() }
     }
 
+    /// A soft wash of the current look's colors over a solid base.
+    private var backdrop: some View {
+        let tint = currentCardTint
+        return ZStack {
+            Color(.systemBackground)
+            RadialGradient(
+                colors: [tint.opacity(0.28), tint.opacity(0.08), .clear],
+                center: .top,
+                startRadius: 40,
+                endRadius: 620
+            )
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: index)
+    }
+
+    private var currentCardTint: Color {
+        guard index < deck.count else { return .accentColor }
+        let colors = deck[index].garments.compactMap { $0.safeColorTags.first }
+        let accent = colors.first { !ColorHarmony.info($0).isNeutral && $0 != .multicolor }
+        return accent?.color ?? colors.first?.color ?? .accentColor
+    }
+
     // MARK: - Header
+
+    private var topBar: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            progressHeader
+            Button {
+                close()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .liquidGlassCircle(interactive: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(String(localized: "action_close")))
+        }
+        .padding(.top, DS.Spacing.xs)
+    }
 
     private var progressHeader: some View {
         HStack(spacing: DS.Spacing.sm) {
             ZStack {
                 Circle()
-                    .stroke(Color.primary.opacity(0.12), lineWidth: 5)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 4)
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 Image(systemName: "sparkles")
-                    .font(.caption.weight(.semibold))
+                    .font(.caption2.weight(.semibold))
                     .foregroundStyle(Color.accentColor)
             }
-            .frame(width: 38, height: 38)
+            .frame(width: 32, height: 32)
             .animation(reduceMotion ? nil : DS.Animation.standard, value: progress)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: NSLocalizedString("style_swipe_progress_format", comment: ""), Int((progress * 100).rounded())))
-                    .font(.subheadline.weight(.semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(String(localized: "style_swipe_title"))
+                    .font(.headline)
                     .foregroundStyle(.primary)
+                Text(String(format: NSLocalizedString("style_swipe_progress_format", comment: ""), Int((progress * 100).rounded())))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .contentTransition(.numericText())
-                if !deck.isEmpty, index < deck.count {
-                    Text(String(format: NSLocalizedString("style_swipe_count_format", comment: ""), index + 1, deck.count))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
             Spacer()
+            if !deck.isEmpty, index < deck.count {
+                Text(String(format: NSLocalizedString("style_swipe_count_short_format", comment: ""), index + 1, deck.count))
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
-        .padding(DS.Spacing.sm)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35))
         .accessibilityElement(children: .combine)
     }
 
@@ -111,11 +148,11 @@ struct StyleSwipeView: View {
             finishedView
         } else {
             cardStack
+            actionButtons
             Text(String(localized: "style_swipe_hint"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            actionButtons
         }
     }
 
@@ -123,12 +160,16 @@ struct StyleSwipeView: View {
         ZStack {
             if index + 1 < deck.count {
                 SwipeLookCard(card: deck[index + 1])
-                    .scaleEffect(0.95)
-                    .opacity(0.7)
+                    .environment(\.layoutDirection, layoutDirection)
+                    .scaleEffect(0.94)
+                    .offset(y: 14)
+                    .opacity(0.6)
                     .allowsHitTesting(false)
             }
             let card = deck[index]
             SwipeLookCard(card: card)
+                // Card text follows the app language; only the swipe is physical.
+                .environment(\.layoutDirection, layoutDirection)
                 .overlay(alignment: .topLeading) { verdictBadge(.pass) }
                 .overlay(alignment: .topTrailing) { verdictBadge(.like) }
                 .overlay(alignment: .bottom) { verdictBadge(.love) }
