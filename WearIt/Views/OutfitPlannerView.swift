@@ -48,6 +48,9 @@ struct OutfitPlannerView: View {
     @State private var appIntentRouter = WearItAppIntentRouter.shared
     @State private var cachedTaste = TasteAffinityBuilder.Profile.empty
     @State private var cachedCombination = CombinationAffinity.empty
+    @State private var cachedOccasionStyle = OccasionStyleProfile.empty
+    /// Bumped when `OccasionMemory` tags history, so the affinity caches rebuild.
+    @State private var occasionTagVersion = 0
     @State private var cachedLatestWearByGarmentID: [UUID: Date] = [:]
     @State private var affinityCacheSignature: String = ""
     @State private var cachedCalendarContexts: [Int: DayCalendarContext] = [:]
@@ -192,6 +195,7 @@ struct OutfitPlannerView: View {
         }
         .onChange(of: wearEvents.count) { _, _ in
             refreshAffinityCaches()
+            learnOccasionsFromHistory()
         }
         .onChange(of: dismissedOutfits.count) { _, _ in
             refreshAffinityCaches()
@@ -257,6 +261,7 @@ struct OutfitPlannerView: View {
                 ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
                 : []
             calendarUnderstandingDidChange(replanning: workDays)
+            learnOccasionsFromHistory()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -416,6 +421,7 @@ struct OutfitPlannerView: View {
             }
             // Days whose events changed since the app last ran get re-planned below.
             pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+            await tagOccasionsFromHistory()
             if appIntentRouter.pendingAction != nil {
                 performPendingIntentAction()
             } else {
@@ -1175,6 +1181,9 @@ struct OutfitPlannerView: View {
     private func correctCalendarEvent(title: String, as kind: CalendarEventUnderstanding.Kind, dayIndex: Int) {
         CalendarEventCorrections.set(kind, forTitle: title)
         DS.haptic(0.4)
+        // Past looks for this title may now mean something else.
+        OccasionMemory.forgetRecentTags(context: context)
+        learnOccasionsFromHistory()
         calendarUnderstandingDidChange(replanning: [dayIndex])
     }
 
@@ -1296,12 +1305,17 @@ struct OutfitPlannerView: View {
         let favoriteColors = cachedTaste.sourceGarmentCount >= 5
             ? cachedTaste.colorShares(limit: 2).filter { $0.share >= 0.15 }.map(\.tag)
             : []
+        let calendar = calendarContext(for: dayIndex)
+        let dressCode = activeProfile?.workDressCode
+        let habit = habitOccasion(calendar, isEvening: false, dressCode: dressCode)
+        let followsHabit = !occasionTitle(habit).isEmpty
+            && cachedOccasionStyle.lookFollowsHabit(garments, occasion: habit)
         return LookReasonBuilder.reasons(
             LookReasonBuilder.Input(
                 garments: garments,
                 profile: state.forecast.map { DayTemperatureProfile(from: $0) },
-                occasion: calendarContext(for: dayIndex)
-                    .occasion(isEvening: false, workDressCode: activeProfile?.workDressCode),
+                occasion: calendar.occasion(isEvening: false, workDressCode: dressCode),
+                habitOccasion: followsHabit ? habit : nil,
                 lastWorn: cachedLatestWearByGarmentID,
                 combination: cachedCombination,
                 favoriteColors: favoriteColors,
@@ -1329,6 +1343,8 @@ struct OutfitPlannerView: View {
             return format("look_reason_warm_cold_format", temp)
         case .occasion(let kind):
             return format("look_reason_occasion_format", occasionTitle(kind))
+        case .habit(let kind):
+            return format("look_reason_habit_format", occasionTitle(kind))
         case .favorite(let id):
             return format("look_reason_favorite_format", title(id))
         case .rotation(let id, let days):
@@ -1359,6 +1375,7 @@ struct OutfitPlannerView: View {
         case .lightForHeat: return "sun.max"
         case .warmForCold: return "thermometer.snowflake"
         case .occasion: return "calendar"
+        case .habit: return "checkmark.seal"
         case .favorite: return "star"
         case .rotation: return "arrow.counterclockwise"
         case .provenPair: return "link"
@@ -3501,7 +3518,15 @@ struct OutfitPlannerView: View {
         let baseFormality = state.overrides.desiredFormality ?? preferredFormality
         let calendar = calendarContext(for: dayIndex)
         let dressCode = profile?.workDressCode
-        let desiredFormality = min(5, max(1, baseFormality + calendar.formalityBump(isEvening: isEvening, workDressCode: dressCode)))
+        let habitOccasion = self.habitOccasion(calendar, isEvening: isEvening, dressCode: dressCode)
+        var formality = Double(baseFormality + calendar.formalityBump(isEvening: isEvening, workDressCode: dressCode))
+        // How formally the user really dresses for this occasion pulls the target
+        // toward their habit (not when they set the day's formality by hand).
+        if state.overrides.desiredFormality == nil,
+           let learned = cachedOccasionStyle.learnedFormality(for: habitOccasion) {
+            formality += (learned.value - formality) * 0.7 * learned.confidence
+        }
+        let desiredFormality = min(5, max(1, Int(formality.rounded())))
         let temperatureBias = calendar.temperatureBias(isEvening: isEvening)
 
         let temperatureC: Double
@@ -3544,7 +3569,9 @@ struct OutfitPlannerView: View {
                         rainProbability: $0.rainProbability
                     )
                 } ?? []) : [],
-            allowRepeatedItems: allowRepeatedItems
+            allowRepeatedItems: allowRepeatedItems,
+            occasionStyle: cachedOccasionStyle,
+            habitOccasion: habitOccasion
         )
     }
 
@@ -3554,6 +3581,13 @@ struct OutfitPlannerView: View {
         }
         guard dayIndex < boardState.days.count else { return .empty }
         return CalendarContextService.shared.context(for: boardState.days[dayIndex].date)
+    }
+
+    /// The occasion whose learned habit applies: the raw calendar occasion, except
+    /// a uniform work day, where the wardrobe look doesn't matter.
+    private func habitOccasion(_ calendar: DayCalendarContext, isEvening: Bool, dressCode: WorkDressCode?) -> CalendarOccasionKind {
+        let occasion = isEvening ? calendar.eveningOccasion : calendar.dayOccasion
+        return occasion == .work && dressCode == .uniform ? .none : occasion
     }
 
     /// Re-reads the calendar. Returns the days whose calendar meaning changed
@@ -3643,7 +3677,7 @@ struct OutfitPlannerView: View {
     }
 
     private func refreshAffinityCaches() {
-        let signature = "\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
+        let signature = "\(occasionTagVersion)|\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
         guard signature != affinityCacheSignature else { return }
         affinityCacheSignature = signature
         cachedTaste = TasteAffinityBuilder.build(
@@ -3668,7 +3702,21 @@ struct OutfitPlannerView: View {
             swipeEvents: Array(recentSwipes)
         )
         cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
+        cachedOccasionStyle = OccasionStyleProfile.build(events: wearEvents, garments: allGarments)
         TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
+    }
+
+    /// Tags confirmed looks with the calendar occasion they were worn for, so
+    /// the planner learns the user's own look per occasion.
+    private func tagOccasionsFromHistory() async {
+        let changed = await OccasionMemory.tagUntagged(context: context)
+        guard changed > 0 else { return }
+        occasionTagVersion += 1
+        refreshAffinityCaches()
+    }
+
+    private func learnOccasionsFromHistory() {
+        Task { await tagOccasionsFromHistory() }
     }
 
     @discardableResult

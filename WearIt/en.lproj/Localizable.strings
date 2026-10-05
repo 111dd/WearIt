@@ -861,6 +861,7 @@
 "look_reason_occasion_format" = "Dressed for %@";
 "look_reason_favorite_format" = "Includes a favorite: %@";
 "look_reason_rotation_format" = "Brings back %@ (not worn for %d days)";
+"look_reason_habit_format" = "Your usual style for %@";
 "look_reason_proven_pair" = "A pairing you've worn before";
 "look_reason_palette_pop" = "Neutral base with one pop of color";
 "look_reason_palette_tonal" = "Tone-on-tone colors";

@@ -124,6 +124,11 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-05 · Claude Code · Occasion memory: confirmed looks are tagged with their calendar occasion
+  (`WearEvent.occasionRaw`, filled after the fact by `Services/OccasionMemory`, incl. 180 days of
+  history), `Logic/OccasionStyleProfile` learns the user's own look per occasion; from 3 looks it
+  nudges item scores and the formality target and fades the occasion rules; "Your usual style for…" reason.
+
 - 2026-10-05 · Claude Code · Calendar understanding: word-based Hebrew/English event engine
   (`Logic/CalendarEventUnderstanding`, prefixes/construct forms, weighted keywords, user corrections
   from the planner's event line), day vs evening split in `DayCalendarContext`, a workout after other

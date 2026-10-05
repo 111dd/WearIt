@@ -133,6 +133,11 @@ struct RecoContext {
     let diurnal: DiurnalTemps?
     let thermalSamples: [ThermalWeatherSample]
     let allowRepeatedItems: Bool
+    /// What the user actually wears per occasion (learned from tagged wear history).
+    let occasionStyle: OccasionStyleProfile
+    /// The occasion to look up in `occasionStyle`. Unlike `occasionKind`, a free
+    /// dress-code work day stays `.work` so the user's own work look is learned.
+    let habitOccasion: CalendarOccasionKind
 
     init(
         desiredFormality: Int,
@@ -148,7 +153,9 @@ struct RecoContext {
         occasionKind: CalendarOccasionKind = .none,
         diurnal: DiurnalTemps? = nil,
         thermalSamples: [ThermalWeatherSample] = [],
-        allowRepeatedItems: Bool = false
+        allowRepeatedItems: Bool = false,
+        occasionStyle: OccasionStyleProfile = .empty,
+        habitOccasion: CalendarOccasionKind? = nil
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -164,6 +171,8 @@ struct RecoContext {
         self.diurnal = diurnal
         self.thermalSamples = thermalSamples
         self.allowRepeatedItems = allowRepeatedItems
+        self.occasionStyle = occasionStyle
+        self.habitOccasion = habitOccasion ?? occasionKind
     }
     
     // Temperature bucket helpers
@@ -639,6 +648,13 @@ final class AIRecommender {
     /// model has no occasion features, so a workout look needs workout clothes
     /// and a funeral needs muted colors no matter how much was learned.
     private func occasionFit(_ g: Garment, ctx: RecoContext) -> Double {
+        // The user's own habit for this occasion gradually takes over from the rules.
+        let habitConfidence = ctx.occasionStyle.confidence(for: ctx.habitOccasion)
+        let habit = ctx.occasionStyle.fit(g, occasion: ctx.habitOccasion)
+        return habit + ruleOccasionFit(g, ctx: ctx) * (1 - 0.6 * habitConfidence)
+    }
+
+    private func ruleOccasionFit(_ g: Garment, ctx: RecoContext) -> Double {
         switch ctx.occasionKind {
         case .sport:
             if g.isActivewear { return 0.12 }

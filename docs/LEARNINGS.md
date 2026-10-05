@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Occasion memory learns per-occasion looks from wear history
+- **Did:** `WearEvent.occasionRaw` + `OccasionMemory.tagUntagged` (reads the calendar for past wear days) + `OccasionStyleProfile` used by `AIRecommender.occasionFit` and the planner's formality target.
+- **Why:** wear events never recorded what they were worn for, so "your work look" could not be learned.
+- **Watch:** nil `occasionRaw` = not looked up yet, "none" = plain day. Without calendar access plain days stay nil on purpose so connecting the calendar later tags them. A corrected event title calls `forgetRecentTags` so past looks are re-read. A uniform work day maps to `.none` for the habit; a free dress code still learns `.work`.
+
 ## 2026-10-05 — Calendar events: words, not substrings; day and evening apart
 - **Did:** replaced the substring keyword classifier with `Logic/CalendarEventUnderstanding` and split
   `DayCalendarContext` into day / evening occasions, sport reminders and work dress code.
