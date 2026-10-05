@@ -81,7 +81,8 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - `WearHistoryService.timesWorn` is distinct wear-days. A failed event fetch must not insert
   a duplicate.
 - On-device image understanding (`GarmentImageUnderstandingService`) is iOS 27+ vision, no
-  Cloud Compute. It takes a file URL, never a live SwiftData object.
+  Cloud Compute. It takes a file URL, never a live SwiftData object. `AutoFillService.refine`
+  writes the cutout to a temp JPEG for it and maps the answer to the app's enums.
 
 ## Code map
 
@@ -90,7 +91,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 | `Models/` | SwiftData `@Model`s: `Garment`, `DayPlan` (+ `DayPlanService`), `WearEvent`, `RecommendationEvent`, `UserProfile`, `TasteProfile`, `NotificationPreferences`, `Brand`, `Outfit`, `DailyLook`. Taxonomy enums in `GarmentTypes.swift`; per-type defaults in `ItemTypeDefaults.swift`. |
 | `Logic/` | Recommendation: `AIRecommender` (online logistic model + heuristics, `RecoState` weights per profile, `FeatureSpace`), `TemperatureComfort` + `GarmentThermalProfile`, `TasteAffinity`, `CombinationAffinity`, `OutfitComposer`, `OutfitChangeAdvisor`, `WardrobeGapAnalyzer`. `Recommender.swift` (root) is the rule-based fallback. |
 | `Services/` | Weather, calendar context (incl. Hebrew/Jewish holiday rules), notifications, CloudKit monitor/image sync, migrations, widget snapshot, auth (Sign in with Apple + keychain), product enrichment (`BarcodeLookupService`, `ProductPageMetadataService`, `DigimarcProductIDService`, `LabelScanService`, `ProductFieldMapper`, `GarmentEnrichmentService`), `LookExplanationService` (FoundationModels). |
-| `Services/imgML`, `ImageProcessing/`, `AI/` | Vision-based classification, color extraction, background cutout. `AI/ClassificationService` and `AI/SegmentationService` are placeholders for `.mlmodel` files that were never added. |
+| `Services/imgML`, `ImageProcessing/` | Add-garment AI: `GarmentCutoutService` (instance cutout with choices, selfie top/bottom/shoes bands, quality hints), `GarmentVisionClassifier` (built-in `VNClassifyImageRequest`), `ColorExtractor`, `AutoFillService` (instant `suggest` + Foundation Models `refine`). `ImageCutout` is the Simulator/no-subject fallback. `Models/DeepLabV3.mlmodel` + `DeepLabSegmenter` are unused. |
 | `UI/` | Design system (`DesignSystem.swift` = `DS` tokens, `GlassKit.swift` liquid-glass), backdrop presets, shared components. |
 | `Views/` | Screens. `OutfitView.swift` is legacy (not in the tab bar). `ContentView.swift` is an old list view. |
 | `WearItTests/` | Swift Testing (`@Test`) unit tests. |
@@ -123,6 +124,13 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 ## Progress log
 
 Newest first. One line per meaningful change: date, tool, what.
+
+- 2026-10-05 · Claude Code · Garment understanding + smart cutout (plan: project `plans/ai-everywhere.md`
+  steps 1–2). Add-garment now classifies with Apple's built-in Vision classifier instantly and refines
+  with Foundation Models on the image (iOS 27: category, type, colors, pattern, sleeve, fit). Cutout picks
+  items (drops clutter, "which item?" chooser), splits mirror selfies into top/bottom/shoes by body pose,
+  frames every cutout with even padding, and hints a retake (cut off / too small / too dark). Removed the
+  never-shipped `AI/` placeholder pipeline and `GarmentMLClassifier`.
 
 - 2026-10-05 · Claude Code · "Right for" per item: `Logic/GarmentOccasionProfile` scores everyday / work /
   evening out / formal / workouts / outdoors / home from the item (formality, type, style, tags) and from
@@ -214,7 +222,9 @@ and recommend from that. Order: wardrobe gaps → smarter stats → trip packing
   category/style; items to donate; too-cold/too-warm trends; most swapped-out items.
 - Trip packing list: dates + destination forecast → planned looks.
 - Split `OutfitPlannerView.swift` into smaller files (variety, persistence, drag & drop).
-- Replace or remove the `.mlmodel` placeholders in `AI/`.
+- Remove the unused `DeepLabV3.mlmodel` / `DeepLabSegmenter`, `VisionAutoCropper`, `ImagePostprocess`.
+- AI plan steps 3–6 (`plans/ai-everywhere.md`): background AI queue + nightly backfill, best-photo
+  pick + duplicates, look photo → wardrobe items, "ask the wardrobe".
 - Remove legacy `OutfitView` / `ContentView` if confirmed unused.
 
 ## When you finish a task

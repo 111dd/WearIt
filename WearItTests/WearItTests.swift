@@ -470,7 +470,7 @@ struct WearItTests {
 
     @Test
     func autoFillMapperMapsClothingCategoriesAndColors() {
-        let jeans = AutoFillMapper.mapClothingCategory(.jeans)
+        let jeans = AutoFillMapper.mapClassifierLabel("jeans")
         #expect(jeans.category == .bottom)
         #expect(jeans.itemType == .jeans)
 

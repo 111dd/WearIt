@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-05 — Add-garment category detection had never worked
+- **Did:** `GarmentCutoutService` + `GarmentVisionClassifier` + `AutoFillService.refine` (Foundation Models image input) replace `ClothingAIPipeline`, whose classifier and segmentation models were stubs that threw.
+- **Why:** only colors and the cutout were auto-filled; `GarmentImageUnderstandingService` existed but was never called.
+- **Watch:** instant guesses are tracked in `aiSuggested*` state; refinement and cutout switches only replace values still equal to those (or empty). Every late AI result checks `aiGeneration`. Selfie bands are rough horizontal strips cut from the person mask, so they need the body pose (shoulders + hips); fewer than two bands means "not a selfie".
+
 ## 2026-10-05 — Item situations: answer first, then wear, then the item
 - **Did:** `GarmentOccasionProfile` + `GarmentOccasion` (maps from `CalendarOccasionKind`), "Right for" chips on the item, a wardrobe question for items worn 3+ times for a situation they don't seem to fit.
 - **Why:** occasion fit was only formality plus two hand-set tags (gym, work).

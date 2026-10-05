@@ -9,6 +9,8 @@ struct GarmentImageUnderstandingResult: Sendable {
     let itemType: String
     let colors: [String]
     let pattern: String
+    let sleeveLength: String
+    let fit: String
 }
 
 @available(iOS 27.0, *)
@@ -22,6 +24,10 @@ private struct GeneratedVisibleGarment {
     var colors: [String]
     @Guide(description: "One allowed visible pattern, or unknown when ambiguous.")
     var pattern: String
+    @Guide(description: "short or long for tops with sleeves, unknown otherwise or when not visible.")
+    var sleeveLength: String
+    @Guide(description: "One allowed fit, or unknown when the cut is not clear.")
+    var fit: String
 }
 
 /// No Cloud Compute fallback. One request at a time, bounded image size and
@@ -67,7 +73,8 @@ actor GarmentImageUnderstandingService {
             let value = response.content
             let result = GarmentImageUnderstandingResult(
                 category: value.category, itemType: value.itemType,
-                colors: Array(value.colors.prefix(3)), pattern: value.pattern
+                colors: Array(value.colors.prefix(3)), pattern: value.pattern,
+                sleeveLength: value.sleeveLength, fit: value.fit
             )
             if cache.count >= 24 { cache.removeAll(keepingCapacity: true) }
             cache[imageURL] = result

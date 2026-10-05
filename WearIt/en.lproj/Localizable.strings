@@ -696,6 +696,13 @@
 "add_garment_choose_library" = "Choose from Library";
 "add_garment_analyzing" = "Analyzing item…";
 "add_garment_ai_filled" = "Suggestions filled — you can edit anything";
+"add_garment_ai_refining" = "Looking closer at the item…";
+"cutout_choose_title" = "Which item to add?";
+"cutout_choice_all" = "All";
+"cutout_choice_item_format" = "Item %ld";
+"cutout_issue_cut_off" = "Part of the item is out of the frame. A retake will look better.";
+"cutout_issue_small" = "The item is small in the photo. Try a closer shot.";
+"cutout_issue_dark" = "The photo is dark. Try more light.";
 "add_garment_crop_hint" = "The background is removed and details are filled in automatically — just review and save.";
 "add_garment_chip_choose_category" = "Choose category";
 "add_garment_chip_colors" = "Colors";

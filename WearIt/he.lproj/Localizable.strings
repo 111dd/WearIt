@@ -715,6 +715,13 @@
 "add_garment_choose_library" = "בחירה מהגלריה";
 "add_garment_analyzing" = "מנתח את הפריט…";
 "add_garment_ai_filled" = "מילאנו הצעות — אפשר לערוך הכל";
+"add_garment_ai_refining" = "בודקים את הפריט מקרוב…";
+"cutout_choose_title" = "איזה פריט להוסיף?";
+"cutout_choice_all" = "הכל";
+"cutout_choice_item_format" = "פריט %ld";
+"cutout_issue_cut_off" = "חלק מהפריט מחוץ לתמונה. צילום מחדש ייראה טוב יותר.";
+"cutout_issue_small" = "הפריט קטן בתמונה. כדאי לצלם מקרוב.";
+"cutout_issue_dark" = "התמונה חשוכה. כדאי לצלם באור.";
 "add_garment_crop_hint" = "הרקע מוסר והפרטים מתמלאים אוטומטית — נשאר רק לבדוק ולשמור.";
 "add_garment_chip_choose_category" = "בחירת קטגוריה";
 "add_garment_chip_colors" = "צבעים";
