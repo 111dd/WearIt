@@ -19,6 +19,16 @@ final class UserProfile {
     var avatarImagePath: String?
     /// `WorkDressCode` raw value; nil until the user answers the work question.
     var workDressCodeRaw: String?
+    /// Usual clothing sizes (`SizeOption` raw values), filled on "My sizes".
+    var topSizeRaw: String?
+    var bottomSizeRaw: String?
+    var shoeSizeRaw: String?
+    /// Body measurements in centimeters, all optional.
+    var heightCm: Double?
+    var chestCm: Double?
+    var waistCm: Double?
+    var hipsCm: Double?
+    var inseamCm: Double?
     var garmentIDs: [UUID] = []
     var outfitIDs: [UUID] = []
     var dayPlanIDs: [UUID] = []
@@ -27,6 +37,27 @@ final class UserProfile {
     var workDressCode: WorkDressCode? {
         get { workDressCodeRaw.flatMap(WorkDressCode.init(rawValue:)) }
         set { workDressCodeRaw = newValue?.rawValue }
+    }
+
+    /// The size the user usually wears in a category (tops and outerwear share one).
+    func usualSize(for category: Category) -> SizeOption? {
+        let raw: String?
+        switch category {
+        case .top, .outer: raw = topSizeRaw
+        case .bottom: raw = bottomSizeRaw
+        case .shoes: raw = shoeSizeRaw
+        case .accessory: raw = nil
+        }
+        return raw.flatMap(SizeOption.init(rawValue:))
+    }
+
+    func setUsualSize(_ size: SizeOption?, for category: Category) {
+        switch category {
+        case .top, .outer: topSizeRaw = size?.rawValue
+        case .bottom: bottomSizeRaw = size?.rawValue
+        case .shoes: shoeSizeRaw = size?.rawValue
+        case .accessory: break
+        }
     }
 
     init(

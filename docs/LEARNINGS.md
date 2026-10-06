@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-06 — Love is learned; user sizes live on UserProfile
+- **Did:** removed the love slider (add + edit); `LoveScoreLearner` runs once per launch (swaps −2/+1, capped; weekly −1 for items unworn 60+ days, floor 30, favorites exempt). Added `UserProfile` size/measurement fields, `MySizesView`, a Size row in the add screen's detected card pre-filled via `MySizesView.usualSize`.
+- **Why:** dor wants the app to learn how much an item is loved, and to know the user's sizes for future in-stock matching.
+- **Watch:** wear confirmations already add +1 live (`WearHistoryService` `loveScoreDelta`), so the learner must not count wears again. Tops and outerwear share one usual size. A label scan may replace a guessed (✨) size but never one the user picked.
+
 ## 2026-10-05 — Substring keywords: "sweatshirts" contains "tshirts"
 - **Did:** `mapItemType` scores the product title alone first; added "sweatshirt"/"סווטשירט" to sweater.
 - **Why:** a G-Star sweater (path `sweatshirts-hoodies`) became a T-shirt; ties go to the first type in the list.

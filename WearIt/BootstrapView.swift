@@ -133,6 +133,9 @@ struct BootstrapView: View {
 
             await NotificationService.shared.scheduleDailyNotifications(context: modelContext)
 
+            // How much each item is loved is learned, not asked.
+            LoveScoreLearner.run(context: modelContext)
+
             // Visual fingerprints for "looks like" matching; cached, a small batch per launch.
             let withImages = FetchDescriptor<Garment>(predicate: #Predicate { $0.imagePath != nil })
             let items = ((try? modelContext.fetch(withImages)) ?? []).compactMap { garment in

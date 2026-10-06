@@ -130,6 +130,11 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-06 · Claude Code · Love is learned, sizes are the user's: the love slider is gone from add/edit
+  (`Logic/LoveScoreLearner` in deferred bootstrap adds swap signals and slow neglect decay on top of the live
+  wear/feedback/swipe nudges). "My sizes" (`Views/MySizesView`, from the profile) stores usual top/bottom/shoe
+  sizes and body measurements on `UserProfile`; the add screen's detected card has a Size row pre-filled
+  from it (or from the user's own items). Sizes now include W24/W26 and EU 35–38.
 - 2026-10-05 · Claude Code · Lighter add screen: "Check what we found" card (one row per field, ✨ while a value is
   still the auto-filled one via `autoValues`, tap opens only that editor, sleeve as an inline menu); weather comfort
   and season moved under "More details"; links no longer open the full form. Cutouts rendered from a 2048 px copy

@@ -300,8 +300,8 @@ enum FitTag: String, Codable, CaseIterable, Identifiable {
 
 enum SizeOption: String, Codable, CaseIterable, Identifiable {
     case xs, s, m, l, xl, xxl
-    case w28, w30, w32, w34, w36, w38, w40
-    case eu39, eu40, eu41, eu42, eu43, eu44, eu45, eu46, eu47
+    case w24, w26, w28, w30, w32, w34, w36, w38, w40
+    case eu35, eu36, eu37, eu38, eu39, eu40, eu41, eu42, eu43, eu44, eu45, eu46, eu47
 
     var id: String { rawValue }
 
@@ -313,6 +313,8 @@ enum SizeOption: String, Codable, CaseIterable, Identifiable {
         case .l: return String(localized: "size_l")
         case .xl: return String(localized: "size_xl")
         case .xxl: return String(localized: "size_xxl")
+        case .w24: return String(localized: "size_w24")
+        case .w26: return String(localized: "size_w26")
         case .w28: return String(localized: "size_w28")
         case .w30: return String(localized: "size_w30")
         case .w32: return String(localized: "size_w32")
@@ -320,6 +322,10 @@ enum SizeOption: String, Codable, CaseIterable, Identifiable {
         case .w36: return String(localized: "size_w36")
         case .w38: return String(localized: "size_w38")
         case .w40: return String(localized: "size_w40")
+        case .eu35: return String(localized: "size_eu35")
+        case .eu36: return String(localized: "size_eu36")
+        case .eu37: return String(localized: "size_eu37")
+        case .eu38: return String(localized: "size_eu38")
         case .eu39: return String(localized: "size_eu39")
         case .eu40: return String(localized: "size_eu40")
         case .eu41: return String(localized: "size_eu41")
@@ -337,9 +343,9 @@ enum SizeOption: String, Codable, CaseIterable, Identifiable {
         case .top, .outer, .accessory:
             return [.xs, .s, .m, .l, .xl, .xxl]
         case .bottom:
-            return [.w28, .w30, .w32, .w34, .w36, .w38, .w40]
+            return [.w24, .w26, .w28, .w30, .w32, .w34, .w36, .w38, .w40]
         case .shoes:
-            return [.eu39, .eu40, .eu41, .eu42, .eu43, .eu44, .eu45, .eu46, .eu47]
+            return [.eu35, .eu36, .eu37, .eu38, .eu39, .eu40, .eu41, .eu42, .eu43, .eu44, .eu45, .eu46, .eu47]
         }
     }
 }
