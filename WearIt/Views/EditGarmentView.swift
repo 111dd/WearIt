@@ -795,7 +795,7 @@ struct EditGarmentView: View {
                 } else {
                     Text(String(localized: "edit_never_worn"))
                         .font(.subheadline)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
             }
 

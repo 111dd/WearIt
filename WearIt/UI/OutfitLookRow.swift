@@ -148,7 +148,7 @@ struct OutfitLookRow<Content: View>: View {
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.body.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Accent.onFill)
                         .frame(width: 44, height: 44)
                         .modifier(ProminentGlassCircle())
                         .contentShape(Circle())

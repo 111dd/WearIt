@@ -238,7 +238,7 @@ struct DayJournalCard: View {
                         if model.lockedGarmentIDs.contains(item.garment.id) {
                             Image(systemName: "lock.fill")
                                 .font(.caption2)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(DS.Accent.onFill)
                                 .padding(4)
                                 .background(Color.accentColor, in: Circle())
                                 .offset(x: 4, y: -4)

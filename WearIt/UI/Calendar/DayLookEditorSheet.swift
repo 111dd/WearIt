@@ -142,7 +142,7 @@ struct DayLookEditorSheet: View {
                     if lockedSlots.contains(slot), assigned != nil {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(DS.Accent.onFill)
                             .padding(3)
                             .background(Color.accentColor, in: Circle())
                             .offset(x: 3, y: -3)
@@ -196,7 +196,7 @@ struct DayLookEditorSheet: View {
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.subheadline)
-                        .foregroundStyle(.white, Color.accentColor)
+                        .foregroundStyle(DS.Accent.onFill, Color.accentColor)
                         .offset(x: 4, y: -4)
                 }
             }

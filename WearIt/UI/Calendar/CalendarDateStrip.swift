@@ -230,7 +230,7 @@ struct CalendarDateStrip: View {
     }
 
     private func numberColor(isSelected: Bool, isToday: Bool) -> Color {
-        if isSelected { return .white }
+        if isSelected { return DS.Accent.onFill }
         if isToday { return .accentColor }
         return .primary
     }

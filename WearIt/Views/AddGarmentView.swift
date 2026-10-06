@@ -406,7 +406,7 @@ struct AddGarmentView: View {
 
                 Text(String(localized: "add_garment_crop_hint"))
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DS.Spacing.lg)
 
@@ -915,7 +915,7 @@ struct AddGarmentView: View {
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, DS.Spacing.sm)
                 .padding(.vertical, 5)
