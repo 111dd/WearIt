@@ -90,7 +90,6 @@ struct AddGarmentView: View {
     @State private var thermalWarmthOverride: Int?
     @State private var thermalBreathabilityOverride: Int?
     @State private var formality = 3
-    @State private var love = 50
 
     // Image
     @State private var selectedImage: UIImage?
@@ -626,6 +625,10 @@ struct AddGarmentView: View {
                     detectedRow(icon: "ruler", label: String(localized: "fit_label"),
                                 value: fitTag.title, key: "fit", section: .fit)
                 }
+                if shouldShowSize {
+                    detectedRow(icon: "ruler.fill", label: String(localized: "size_label"),
+                                value: sizeOption?.title, key: "size", section: .fit)
+                }
                 if !scannedMaterials.isEmpty {
                     detectedRow(icon: "leaf", label: String(localized: "garment_materials"),
                                 value: scannedMaterials.prefix(2).map(\.title).joined(separator: ", "),
@@ -750,6 +753,7 @@ struct AddGarmentView: View {
         case "sleeve": return sleeveLength?.rawValue ?? ""
         case "material": return scannedMaterials.map(\.rawValue).joined(separator: ",")
         case "brand": return brand
+        case "size": return sizeOption?.rawValue ?? ""
         default: return ""
         }
     }
@@ -1479,21 +1483,6 @@ struct AddGarmentView: View {
                     .labelsHidden()
                     .controlSize(.small)
             }
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundStyle(.pink)
-                    Text(String(localized: "garment_love"))
-                        .font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text("\(love)%")
-                        .font(.caption.bold())
-                        .foregroundStyle(.pink)
-                }
-                Slider(value: Binding(get: { Double(love) }, set: { love = Int($0) }), in: 0...100)
-                    .accessibilityLabel(String(localized: "garment_love"))
-                    .tint(.pink)
-            }
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2164,9 +2153,11 @@ struct AddGarmentView: View {
                 markAutoFilled("brand")
                 found.append(scannedBrand)
             }
-            if let size = result.size, sizeOption == nil, shouldShowSize,
+            // The label beats a guessed usual size, never a size the user picked.
+            if let size = result.size, sizeOption == nil || isAutoFilled("size"), shouldShowSize,
                let cat = category, SizeOption.options(for: cat).contains(size) {
                 sizeOption = size
+                autoValues["size"] = nil
                 found.append(size.title)
             }
             if !result.materials.isEmpty, scannedMaterials.isEmpty {
@@ -2190,6 +2181,7 @@ struct AddGarmentView: View {
     /// Reflect per-type defaults in the visible controls so the chips show
     /// exactly what will be saved. Never touches fields the user edited.
     private func applyTypeDefaultsToState() {
+        prefillUsualSize()
         guard let type = itemType, let defaults = ItemTypeDefaults.defaults(for: type) else { return }
         if !userEditedFields.contains(ItemTypeDefaults.FieldKey.warmth) {
             warmth = defaults.warmth
@@ -2200,6 +2192,18 @@ struct AddGarmentView: View {
         if !userEditedFields.contains(ItemTypeDefaults.FieldKey.season) {
             seasonSuitability = defaults.season
         }
+    }
+
+    /// The user's usual size for this category ("My sizes", else what their
+    /// items say), marked ✨ so they confirm it like any other guess.
+    private func prefillUsualSize() {
+        guard sizeOption == nil, shouldShowSize, let category else { return }
+        let profile = CurrentUser.activeProfile(in: context, createIfNeeded: false)
+        let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
+        guard let size = MySizesView.usualSize(for: category, profile: profile, garments: garments),
+              SizeOption.options(for: category).contains(size) else { return }
+        sizeOption = size
+        markAutoFilled("size")
     }
 
     private func saveGarment() {
@@ -2234,7 +2238,6 @@ struct AddGarmentView: View {
             maxTempC: maxTempC,
             warmth: warmth,
             formality: formality,
-            loveScore: love,
             imagePath: savedImagePath,
             thumbnailPath: savedThumbnailPath,
             originalImagePath: savedOriginalImagePath,
@@ -2326,7 +2329,6 @@ struct AddGarmentView: View {
         thermalWarmthOverride = nil
         thermalBreathabilityOverride = nil
         formality = 3
-        love = 50
         selectedImage = nil
         originalPickedImage = nil
         pendingCropImage = nil

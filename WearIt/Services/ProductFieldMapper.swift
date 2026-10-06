@@ -258,7 +258,7 @@ enum ProductFieldMapper {
 
         if category == .bottom {
             let widths: [(SizeOption, [String])] = [
-                (.w28, ["w28", "28"]), (.w30, ["w30", "30"]), (.w32, ["w32", "32"]),
+                (.w24, ["w24", "24"]), (.w26, ["w26", "26"]), (.w28, ["w28", "28"]), (.w30, ["w30", "30"]), (.w32, ["w32", "32"]),
                 (.w34, ["w34", "34"]), (.w36, ["w36", "36"]), (.w38, ["w38", "38"]), (.w40, ["w40", "40"])
             ]
             // Prefer exact / prefixed matches over bare digit contains.
@@ -271,7 +271,7 @@ enum ProductFieldMapper {
 
         if category == .shoes {
             let eu: [(SizeOption, String)] = [
-                (.eu39, "39"), (.eu40, "40"), (.eu41, "41"), (.eu42, "42"),
+                (.eu35, "35"), (.eu36, "36"), (.eu37, "37"), (.eu38, "38"), (.eu39, "39"), (.eu40, "40"), (.eu41, "41"), (.eu42, "42"),
                 (.eu43, "43"), (.eu44, "44"), (.eu45, "45"), (.eu46, "46"), (.eu47, "47")
             ]
             for (size, key) in eu {

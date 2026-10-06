@@ -750,23 +750,6 @@ struct EditGarmentView: View {
                 .controlSize(.small)
             }
 
-            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                HStack {
-                    Image(systemName: "heart.fill").foregroundStyle(.pink)
-                    Text(String(localized: "garment_love")).font(.subheadline.weight(.medium))
-                    Spacer()
-                    Text("\(garment.loveScore)%")
-                        .font(.caption.bold())
-                        .foregroundStyle(.pink)
-                }
-                Slider(value: Binding(
-                    get: { Double(garment.loveScore) },
-                    set: { garment.loveScore = Int($0); hasUnsavedChanges = true }
-                ), in: 0...100)
-                .accessibilityLabel(String(localized: "garment_love"))
-                .tint(.pink)
-            }
-
             Toggle(isOn: Binding(
                 get: { garment.isFavorite },
                 set: { garment.isFavorite = $0; hasUnsavedChanges = true }

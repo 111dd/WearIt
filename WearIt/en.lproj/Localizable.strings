@@ -315,6 +315,8 @@
 "color_purple" = "Purple";
 "color_multicolor" = "Multicolor";
 "color_denim" = "Denim";
+"size_w24" = "24";
+"size_w26" = "26";
 "size_w28" = "28";
 "size_w30" = "30";
 "size_w32" = "32";
@@ -322,6 +324,10 @@
 "size_w36" = "36";
 "size_w38" = "38";
 "size_w40" = "40";
+"size_eu35" = "EU 35";
+"size_eu36" = "EU 36";
+"size_eu37" = "EU 37";
+"size_eu38" = "EU 38";
 "size_eu39" = "EU 39";
 "size_eu40" = "EU 40";
 "size_eu41" = "EU 41";
@@ -999,3 +1005,21 @@
 "fits_question_format" = "You often wear %1$@ for “%2$@”. Mark it as right for it?";
 "fits_question_yes" = "Yes";
 "fits_question_no" = "Not really";
+
+/* My sizes */
+"my_sizes_title" = "My sizes";
+"my_sizes_row_empty" = "Add your sizes and measurements";
+"my_sizes_footer" = "Optional. Your usual sizes are filled in when you add an item, and later help find pieces that are in stock in your size. Stored only in your iCloud.";
+"my_sizes_clothing" = "Usual sizes";
+"my_sizes_body" = "Body measurements";
+"my_sizes_learned_format" = "Your items say %@";
+"my_sizes_not_set" = "Not set";
+"my_sizes_tops" = "Tops & outerwear";
+"my_sizes_bottoms" = "Pants (waist)";
+"my_sizes_shoes" = "Shoes";
+"my_sizes_height" = "Height";
+"my_sizes_chest" = "Chest / bust";
+"my_sizes_waist" = "Waist";
+"my_sizes_hips" = "Hips";
+"my_sizes_inseam" = "Inseam (pants length)";
+"my_sizes_cm" = "cm";

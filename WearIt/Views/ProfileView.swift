@@ -65,6 +65,7 @@ struct ProfileView: View {
                 styleIdentitySection
                 formulasSection
                 styleSwipeRow
+                mySizesRow
                 myLooksSection
             }
             .padding(.horizontal, DS.Spacing.md)
@@ -382,6 +383,41 @@ struct ProfileView: View {
         }
         .buttonStyle(.plain)
         .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+    }
+
+    // MARK: - My Sizes
+
+    @ViewBuilder
+    private var mySizesRow: some View {
+        if let profile = activeProfile {
+            NavigationLink {
+                MySizesView(profile: profile)
+                    .withLocalAppBackdrop()
+            } label: {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "ruler.fill")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "my_sizes_title"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(MySizesView.summary(for: profile) ?? String(localized: "my_sizes_row_empty"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(DS.Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+        }
     }
 
     private var activeTasteProfile: TasteProfile? {

@@ -244,6 +244,8 @@
 "color_purple" = "סגול";
 "color_multicolor" = "רב־צבעוני";
 "color_denim" = "דנים";
+"size_w24" = "24";
+"size_w26" = "26";
 "size_w28" = "28";
 "size_w30" = "30";
 "size_w32" = "32";
@@ -251,6 +253,10 @@
 "size_w36" = "36";
 "size_w38" = "38";
 "size_w40" = "40";
+"size_eu35" = "EU 35";
+"size_eu36" = "EU 36";
+"size_eu37" = "EU 37";
+"size_eu38" = "EU 38";
 "size_eu39" = "EU 39";
 "size_eu40" = "EU 40";
 "size_eu41" = "EU 41";
@@ -1018,3 +1024,21 @@
 "fits_question_format" = "לבשת את %1$@ הרבה ל„%2$@”. לסמן שמתאים?";
 "fits_question_yes" = "כן";
 "fits_question_no" = "לא ממש";
+
+/* My sizes */
+"my_sizes_title" = "המידות שלי";
+"my_sizes_row_empty" = "הוסף מידות והיקפים";
+"my_sizes_footer" = "לא חובה. המידה הרגילה שלך תמולא אוטומטית כשמוסיפים פריט, ובהמשך תעזור למצוא פריטים שיש במלאי במידה שלך. נשמר רק ב-iCloud שלך.";
+"my_sizes_clothing" = "מידות רגילות";
+"my_sizes_body" = "היקפים";
+"my_sizes_learned_format" = "לפי הפריטים שלך: %@";
+"my_sizes_not_set" = "לא נקבע";
+"my_sizes_tops" = "חולצות ועליוניות";
+"my_sizes_bottoms" = "מכנסיים (מותן)";
+"my_sizes_shoes" = "נעליים";
+"my_sizes_height" = "גובה";
+"my_sizes_chest" = "היקף חזה";
+"my_sizes_waist" = "היקף מותן";
+"my_sizes_hips" = "היקף ירכיים";
+"my_sizes_inseam" = "אורך מכנס פנימי";
+"my_sizes_cm" = "ס״מ";
