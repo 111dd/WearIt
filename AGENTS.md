@@ -11,7 +11,9 @@ short entry to `docs/LEARNINGS.md` (format at the bottom of this file).
 
 - **Never run a build or the simulator.** The owner runs Xcode. Do not use `xcodebuild`,
   `simctl`, or launch the app.
-- **Never commit unless asked.** Never push unless asked.
+- **Local agents (working directly on Dor's Mac files): never commit or push unless asked.**
+  Cloud agents working on their own branch may commit and push that branch freely; merging into
+  `main` still waits for Dor ("תעלה לגיט").
 - **Never commit secrets.** `Config/Secrets.xcconfig` is gitignored. Edit
   `Config/Secrets.example.xcconfig` only.
 - Prefer the smallest change that matches existing patterns. No drive-by refactors.
@@ -24,6 +26,10 @@ short entry to `docs/LEARNINGS.md` (format at the bottom of this file).
   by default; build/test only when the owner asks.
 - Develop together with the owner: propose, then implement what they choose.
 - Keep changes focused. Big refactors only when asked.
+- Git flow: one branch + one PR per change. When Dor says "תעלה לגיט", commit, push, open the PR
+  and merge it into `main`; Dor then only pulls `main` in Xcode. Don't ask Dor to switch branches.
+  Undo a merged change with a revert PR (never rewrite `main`). Old branches that are 0 commits ahead
+  of `main` are safe to delete (the session proxy can't delete branches; Dor uses GitHub's trash icon).
 
 ## What the app is
 
@@ -91,7 +97,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 | Folder | What lives there |
 |---|---|
 | `Models/` | SwiftData `@Model`s: `Garment`, `DayPlan` (+ `DayPlanService`), `WearEvent`, `RecommendationEvent`, `UserProfile`, `TasteProfile`, `NotificationPreferences`, `Brand`, `Outfit`, `DailyLook`. Taxonomy enums in `GarmentTypes.swift`; per-type defaults in `ItemTypeDefaults.swift`. |
-| `Logic/` | Recommendation: `AIRecommender` (online logistic model + heuristics, `RecoState` weights per profile, `FeatureSpace`), `TemperatureComfort` + `GarmentThermalProfile`, `TasteAffinity`, `CombinationAffinity`, `OutfitComposer`, `OutfitChangeAdvisor`, `WardrobeGapAnalyzer`. `Recommender.swift` (root) is the rule-based fallback. |
+| `Logic/` | Recommendation: `AIRecommender` (online logistic model + heuristics, `RecoState` weights per profile, `FeatureSpace`), `TemperatureComfort` + `GarmentThermalProfile`, `TasteAffinity`, `CombinationAffinity`, `OutfitComposer`, `OutfitChangeAdvisor`, `WardrobeGapAnalyzer`, `LoveScoreLearner`. `Recommender.swift` (root) is the rule-based fallback. |
 | `Services/` | Weather, calendar context (incl. Hebrew/Jewish holiday rules), notifications, CloudKit monitor/image sync, migrations, widget snapshot, auth (Sign in with Apple + keychain), product enrichment (`BarcodeLookupService`, `ProductPageMetadataService`, `DigimarcProductIDService`, `LabelScanService`, `ProductFieldMapper`, `GarmentEnrichmentService`), `LookExplanationService` (FoundationModels). |
 | `Services/imgML`, `ImageProcessing/` | Add-garment AI: `GarmentCutoutService` (instance cutout with choices, selfie top/bottom/shoes bands, quality hints), `GarmentVisionClassifier` (built-in `VNClassifyImageRequest`), `ColorExtractor`, `AutoFillService` (instant `suggest` + Foundation Models `refine`). `ImageCutout` is the Simulator/no-subject fallback. `Models/DeepLabV3.mlmodel` + `DeepLabSegmenter` are unused. |
 | `UI/` | Design system (`DesignSystem.swift` = `DS` tokens, `GlassKit.swift` liquid-glass), backdrop presets, shared components. |
@@ -120,6 +126,14 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - **Product links**: shop-specific sources go in `Services/ShopProductAdapters` (Zara also registered in
   `ProductURLResolverRegistry`) and build the result with `ProductPageMetadataService.makeProduct`; they return
   nil / fall back to the generic reader instead of failing. Never fill size from a product page.
+- **Love is learned, never asked**: there is no love control in the UI. `Garment.loveScore` moves only through
+  signals: confirmed wear (+1 live via `WearHistoryService` `loveScoreDelta`), look feedback, Style Swipe, and
+  `LoveScoreLearner` (swaps, neglect decay; deferred bootstrap). Don't count wears twice.
+- **User sizes**: usual sizes (`topSizeRaw` for tops + outerwear, `bottomSizeRaw`, `shoeSizeRaw`) and body
+  measurements in cm live on `UserProfile`, edited on "My sizes" (`Views/MySizesView`). Read a usual size via
+  `MySizesView.usualSize(for:profile:garments:)` (falls back to the size most of the user's items carry). The add
+  screen pre-fills it marked ✨; a scanned label may replace a guessed size, never one the user picked.
+  Goal: later match in-stock items in the user's size.
 - **RecoState features**: append new features at the end of `FeatureSpace` so old
   weights migrate by zero-padding, and bump `RecoState.version`.
 - Widget types (`TodaySnapshot`, `WidgetCommand`) are duplicated in
@@ -253,6 +267,8 @@ and recommend from that. Order: wardrobe gaps → smarter stats → trip packing
 - AI plan steps 3–6 (`plans/ai-everywhere.md`): background AI queue + nightly backfill, best-photo
   pick + duplicates, look photo → wardrobe items, "ask the wardrobe".
 - Remove legacy `OutfitView` / `ContentView` if confirmed unused.
+- Sizes: use body measurements for brand size advice and in-stock matching (needs a product/stock source).
+- Show the learned love on the item (read-only) or use it in Stats ("items you love but rarely wear").
 
 ## When you finish a task
 
