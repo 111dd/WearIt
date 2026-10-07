@@ -23,9 +23,8 @@ struct MicroQuestionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack(spacing: DS.Spacing.xs) {
-                Image(systemName: "questionmark.bubble")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                DSGarmentThumbnail(garment, size: .small)
+                    .accessibilityHidden(true)
                 Text(String(
                     format: NSLocalizedString("micro_question_brand_format", comment: ""),
                     garment.displayTitle

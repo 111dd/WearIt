@@ -68,6 +68,10 @@ struct OutfitPlannerView: View {
     @State private var garmentsByID: [UUID: Garment] = [:]
     /// Bumped whenever calendar contexts are recomputed; advisor memo dependency.
     @State private var calendarContextsVersion = 0
+    /// Bumped when a work day's "work clothes only / my own clothes" answer changes.
+    @State private var workAttireVersion = 0
+    /// Bumped when the "your wardrobe is missing" nudge is snoozed.
+    @State private var gapNudgeVersion = 0
     /// Days to re-plan on the next generation pass (dress code / correction changed).
     @State private var pendingCalendarReplan: Set<Int> = []
     /// Forecasts at tagged calendar places, keyed by place + day.
@@ -128,6 +132,8 @@ struct OutfitPlannerView: View {
         case garmentMenu(Garment)
         case addPicker(dayIndex: Int, slots: [OutfitSlot], lookTime: LookTime, initialSlot: OutfitSlot?)
         case addNewItem(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime)
+        /// Add an item to the wardrobe (not to a look), from the "your wardrobe is missing" nudge.
+        case addToWardrobe(Category)
 
         var id: String {
             switch self {
@@ -138,6 +144,8 @@ struct OutfitPlannerView: View {
                 return "picker-\(dayIndex)-\(lookTime.rawValue)-\(slot)"
             case .addNewItem(let dayIndex, let slot, let lookTime):
                 return "new-\(dayIndex)-\(slot.rawValue)-\(lookTime.rawValue)"
+            case .addToWardrobe(let category):
+                return "wardrobe-\(category.rawValue)"
             }
         }
     }
@@ -148,6 +156,7 @@ struct OutfitPlannerView: View {
     private final class AdvisorMemo {
         var changeSuggestions: [String: (signature: String, value: [OutfitChangeSuggestion])] = [:]
         var unwornNudge: (signature: String, value: UnwornNudge?)?
+        var gapNudge: (signature: String, value: WardrobeGapAnalyzer.Gap?)?
         var availability: [String: (signature: String, value: AvailabilityStatus)] = [:]
     }
     
@@ -234,6 +243,12 @@ struct OutfitPlannerView: View {
                 addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
             case .addNewItem(let dayIndex, let slot, let lookTime):
                 addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+            case .addToWardrobe(let category):
+                AddGarmentView(initialCategory: category) { _ in
+                    activeSheet = nil
+                    // The new item can fill tomorrow's looks; today's stay as they are.
+                    scheduleGenerateAllOutfits(fillMissingOnly: true)
+                }
             }
         }
         .fullScreenCover(isPresented: $showStyleSwipe) {
@@ -295,6 +310,12 @@ struct OutfitPlannerView: View {
 
                 if let nudge = unwornNudge {
                     unwornNudgeCard(nudge)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if let gap = wardrobeGapNudge {
+                    wardrobeGapCard(gap)
                         .padding(.horizontal, DS.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -634,9 +655,12 @@ struct OutfitPlannerView: View {
             reasons: reasons,
             showsGestureHint: showsGestureHint(for: dayIndex),
             eventLine: dayEventLine(for: dayIndex).map { "\($0.text)|\($0.icon)" },
-            reminderLine: calendarReminder(for: dayIndex).map { reminder in
-                ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
-            },
+            reminderLine: [
+                calendarReminder(for: dayIndex).map { reminder in
+                    ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
+                },
+                workDaySignature(for: dayIndex)
+            ].compactMap { $0 }.joined(separator: "#"),
             placeWeather: placeWeatherSignature(for: dayIndex),
             question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
@@ -648,6 +672,10 @@ struct OutfitPlannerView: View {
             VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 dayTopBar(for: state, dayIndex: dayIndex)
 
+                if let schedule = uniformWorkSchedule(for: dayIndex) {
+                    workDayRow(dayIndex: dayIndex, schedule: schedule)
+                }
+
                 if let reminder = calendarReminder(for: dayIndex) {
                     calendarReminderRow(reminder)
                 }
@@ -658,8 +686,11 @@ struct OutfitPlannerView: View {
                 }
 
                 if state.assignedGarmentIDs.isEmpty {
-                    emptyDayOutfitPrompt(dayIndex: dayIndex)
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    // A work-clothes-only day has no look of its own to plan.
+                    if !isUniformOnlyDay(dayIndex) {
+                        emptyDayOutfitPrompt(dayIndex: dayIndex)
+                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    }
                 } else {
                     swipeableOutfitRow(dayIndex: dayIndex, lookTime: .day)
                         .transition(.opacity)
@@ -775,6 +806,130 @@ struct OutfitPlannerView: View {
         }
         advisorMemo.unwornNudge = (signature, value)
         return value
+    }
+
+    // MARK: - Wardrobe gap nudge
+
+    /// Gaps the planner itself runs into: too few items to rotate (only when the
+    /// board actually repeats a piece of that kind or a day came out short) and
+    /// weather the wardrobe can't dress (light jacket, warm coat, rain).
+    private static let plannerGapKinds: Set<WardrobeGapAnalyzer.Kind> = [
+        .thinRotation, .lightLayer, .warmOuter, .rainOuter, .rainShoes, .hotWeatherTops
+    ]
+    private static let gapNudgeSnoozeDays = 14
+
+    private var wardrobeGapNudge: WardrobeGapAnalyzer.Gap? {
+        _ = gapNudgeVersion
+        let signature = [
+            availableGarmentsSignature,
+            affinityCacheSignature,
+            String(Int(currentDate.timeIntervalSince1970 / 86_400)),
+            boardState.days.map { forecastKey(for: $0.forecast) }.joined(separator: ","),
+            boardState.days.map { $0.assignedGarmentIDs.map(\.uuidString).joined(separator: ",") }.joined(separator: ";"),
+            String(gapNudgeVersion)
+        ].joined(separator: "#")
+        if let cached = advisorMemo.gapNudge, cached.signature == signature {
+            return cached.value
+        }
+        let value = computeWardrobeGapNudge()
+        advisorMemo.gapNudge = (signature, value)
+        return value
+    }
+
+    private func computeWardrobeGapNudge() -> WardrobeGapAnalyzer.Gap? {
+        let wear = WardrobeGapAnalyzer.wearSummary(events: wearEvents)
+        let input = WardrobeGapAnalyzer.Input(
+            garments: allGarments,
+            wearCounts: wear.counts,
+            wearDays: wear.days,
+            climate: WardrobeGapAnalyzer.climate(
+                forecasts: weather.forecasts,
+                pastEvents: Array(recommendationEvents.prefix(300))
+            ),
+            taste: cachedTaste,
+            checksRotation: true
+        )
+        // Categories the board had to repeat (or couldn't fill) right now.
+        var seen: [UUID: Int] = [:]
+        for day in boardState.days {
+            for id in Set(day.assignedGarmentIDs) { seen[id, default: 0] += 1 }
+        }
+        let repeated = Set(seen.filter { $0.value >= 2 }.keys.compactMap { garment(for: $0)?.category })
+        let shortDay = boardState.days.contains { $0.insufficientItemsWarning }
+        let snoozed = snoozedGapNudges()
+        return WardrobeGapAnalyzer.analyze(input).first { gap in
+            guard Self.plannerGapKinds.contains(gap.kind), !snoozed.contains(gap.id) else { return false }
+            if gap.kind == .thinRotation {
+                return repeated.contains(gap.suggestion.category) || shortDay
+            }
+            return true
+        }
+    }
+
+    private func snoozedGapNudges() -> Set<String> {
+        let defaults = UserDefaults.standard
+        let cutoff = Date().addingTimeInterval(-Double(Self.gapNudgeSnoozeDays) * 86_400).timeIntervalSince1970
+        let stored = defaults.dictionary(forKey: "planner.gapNudge.snoozed") as? [String: Double] ?? [:]
+        return Set(stored.filter { $0.value >= cutoff }.keys)
+    }
+
+    private func snoozeGapNudge(_ gap: WardrobeGapAnalyzer.Gap) {
+        let defaults = UserDefaults.standard
+        var stored = defaults.dictionary(forKey: "planner.gapNudge.snoozed") as? [String: Double] ?? [:]
+        stored[gap.id] = Date().timeIntervalSince1970
+        defaults.set(stored, forKey: "planner.gapNudge.snoozed")
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            gapNudgeVersion += 1
+        }
+    }
+
+    private func wardrobeGapCard(_ gap: WardrobeGapAnalyzer.Gap) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                Image(systemName: WardrobeGapsSection.icon(for: gap))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(WardrobeGapsSection.title(for: gap, garmentsByID: [:]))
+                        .font(.subheadline.weight(.semibold))
+                    Text(WardrobeGapsSection.reasonText(for: gap.reason))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    DS.haptic(0.3)
+                    snoozeGapNudge(gap)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(String(localized: "gap_action_dismiss"))
+            }
+            Button {
+                DS.haptic(0.4)
+                activeSheet = .addToWardrobe(gap.suggestion.category)
+            } label: {
+                Label(
+                    String(
+                        format: NSLocalizedString("planner_gap_add_format", comment: ""),
+                        gap.suggestion.itemType?.title ?? gap.suggestion.category.title
+                    ),
+                    systemImage: "plus.circle.fill"
+                )
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 36)
+            }
+            .buttonStyle(SoftPressButtonStyle())
+        }
+        .padding(DS.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.08))
     }
 
     private func unwornNudgeCard(_ nudge: UnwornNudge) -> some View {
@@ -1321,8 +1476,8 @@ struct OutfitPlannerView: View {
         let items: [Garment]
     }
 
-    /// "Gym · 18:00 · pack your gym clothes" with the pieces to pack, or a
-    /// reminder that a uniform work day is covered.
+    /// "Gym · 18:00 · pack your gym clothes" with the pieces to pack. A uniform
+    /// work day has its own row (`workDayRow`).
     private func calendarReminder(for dayIndex: Int) -> CalendarReminder? {
         let context = calendarContext(for: dayIndex)
         if let sport = context.sportReminder {
@@ -1332,14 +1487,213 @@ struct OutfitPlannerView: View {
                 items: GymKit.kit(from: allGarments)
             )
         }
-        if context.dayOccasion == .work, activeProfile?.workDressCode == .uniform {
-            return CalendarReminder(
-                text: String(localized: "calendar_reminder_uniform"),
-                icon: WorkDressCode.uniform.icon,
-                items: allGarments.filter(\.isWorkwear).prefix(3).map { $0 }
-            )
-        }
         return nil
+    }
+
+    // MARK: - Uniform work day
+
+    /// The work event and the plans around it, on a work day of a user whose
+    /// dress code is a uniform / the same work clothes.
+    private func uniformWorkSchedule(for dayIndex: Int) -> WorkDaySchedule? {
+        guard activeProfile?.workDressCode == .uniform, dayIndex < boardState.days.count else { return nil }
+        return WorkDaySchedule.make(events: calendarContext(for: dayIndex).events)
+    }
+
+    /// "Work clothes only" or "my own clothes" for that day (the last answer
+    /// carries over), nil before the user ever answered.
+    private func workAttire(for dayIndex: Int) -> WorkDayAttire? {
+        _ = workAttireVersion
+        guard uniformWorkSchedule(for: dayIndex) != nil else { return nil }
+        return WorkDayAttirePreferences.choice(on: boardState.days[dayIndex].date)
+    }
+
+    /// Work clothes only, and nothing before work: the day has no look to plan.
+    private func isUniformOnlyDay(_ dayIndex: Int) -> Bool {
+        guard workAttire(for: dayIndex) == .uniform,
+              let schedule = uniformWorkSchedule(for: dayIndex) else { return false }
+        return schedule.beforeWork == nil
+    }
+
+    /// A plan after work that wants its own look (a workout only gets the gym reminder).
+    private func afterWorkPlan(_ schedule: WorkDaySchedule) -> CalendarDayEvent? {
+        guard let after = schedule.afterWork, after.kind != .sport else { return nil }
+        return after
+    }
+
+    /// The occasion a look dresses for. On a work-clothes-only day the day look
+    /// is for the plan before work and the evening look for the plan after it.
+    private func lookOccasion(
+        _ calendar: DayCalendarContext,
+        dayIndex: Int,
+        isEvening: Bool,
+        dressCode: WorkDressCode?
+    ) -> CalendarOccasionKind {
+        let base = calendar.occasion(isEvening: isEvening, workDressCode: dressCode)
+        guard base == .none, workAttire(for: dayIndex) == .uniform,
+              let schedule = uniformWorkSchedule(for: dayIndex) else { return base }
+        if isEvening, let after = afterWorkPlan(schedule) { return after.occasion }
+        if !isEvening, let before = schedule.beforeWork, before.kind != .work { return before.occasion }
+        return base
+    }
+
+    private func workDaySignature(for dayIndex: Int) -> String? {
+        guard let schedule = uniformWorkSchedule(for: dayIndex) else { return nil }
+        return [
+            workAttire(for: dayIndex)?.rawValue ?? "-",
+            schedule.beforeWork?.label ?? "",
+            schedule.afterWork?.label ?? "",
+            allGarments.filter(\.isWorkwear).prefix(3).map(\.id.uuidString).joined(separator: ",")
+        ].joined(separator: "|")
+    }
+
+    /// "Work day" with the work clothes, a choice between work clothes only and
+    /// the user's own clothes, and what that means for the plans around work.
+    private func workDayRow(dayIndex: Int, schedule: WorkDaySchedule) -> some View {
+        let attire = workAttire(for: dayIndex)
+        let workwear = Array(allGarments.filter(\.isWorkwear).prefix(3))
+        let title: String = {
+            switch attire {
+            case .uniform: return String(localized: "calendar_reminder_uniform")
+            case .own: return String(localized: "work_day_own_title")
+            case nil: return String(localized: "work_day_question")
+            }
+        }()
+        return VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: WorkDressCode.uniform.icon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 28)
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: DS.Spacing.xs)
+                if !workwear.isEmpty {
+                    HStack(spacing: -10) {
+                        ForEach(workwear) { garment in
+                            DSGarmentThumbnail(garment, size: .small)
+                                .scaleEffect(0.8)
+                                .frame(width: 40, height: 40)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                }
+            }
+
+            HStack(spacing: DS.Spacing.xs) {
+                ForEach(WorkDayAttire.allCases) { option in
+                    let selected = attire == option
+                    Button {
+                        DS.haptic(0.4)
+                        setWorkAttire(option, dayIndex: dayIndex)
+                    } label: {
+                        Label(option.title, systemImage: option.icon)
+                            .font(.footnote.weight(.medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .padding(.horizontal, DS.Spacing.xs)
+                            .foregroundStyle(selected ? DS.Accent.onFill : Color.primary)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.Radius.button, style: .continuous)
+                                    .fill(selected ? Color.accentColor : Color(.systemBackground).opacity(0.7))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+
+            if attire == .uniform {
+                if let before = schedule.beforeWork {
+                    workDayNote(
+                        String(format: NSLocalizedString("work_day_before_format", comment: ""), before.label),
+                        icon: "sunrise"
+                    )
+                } else {
+                    workDayNote(String(localized: "work_day_not_counted"), icon: "chart.bar.xaxis")
+                }
+                if !boardState.days[dayIndex].useEveningLook {
+                    Button {
+                        DS.haptic(0.4)
+                        enableAfterWorkLook(dayIndex: dayIndex)
+                    } label: {
+                        Label(
+                            afterWorkPlan(schedule).map {
+                                String(format: NSLocalizedString("work_day_add_after_format", comment: ""), $0.label)
+                            } ?? String(localized: "work_day_add_after"),
+                            systemImage: "plus.circle"
+                        )
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+    }
+
+    private func workDayNote(_ text: String, icon: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func setWorkAttire(_ attire: WorkDayAttire, dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        let date = boardState.days[dayIndex].date
+        WorkDayAttirePreferences.set(attire, on: date)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            workAttireVersion += 1
+            if attire == .uniform, let schedule = uniformWorkSchedule(for: dayIndex) {
+                if schedule.beforeWork == nil {
+                    // Only work clothes were worn: the day's look and its wears leave the stats.
+                    clearDayLookForWorkClothes(dayIndex, removeWears: true)
+                }
+                if afterWorkPlan(schedule) != nil,
+                   !CalendarContextPreferences.isEveningOptedOut(on: date),
+                   !boardState.days[dayIndex].useEveningLook {
+                    enableAfterWorkLook(dayIndex: dayIndex)
+                }
+            }
+        }
+        persistDayPlan(dayIndex, immediate: true)
+        // Other work days follow the new answer; "my own clothes" fills an empty day.
+        scheduleGenerateAllOutfits(fillMissingOnly: true)
+    }
+
+    private func enableAfterWorkLook(dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        boardState.days[dayIndex].useEveningLook = true
+        CalendarContextPreferences.setEveningOptedOut(false, on: boardState.days[dayIndex].date)
+        generateEveningOutfit(for: dayIndex)
+        persistDayPlan(dayIndex)
+    }
+
+    /// Empties the day look of a work-clothes-only day (the evening look stays).
+    private func clearDayLookForWorkClothes(_ dayIndex: Int, removeWears: Bool) {
+        guard dayIndex < boardState.days.count else { return }
+        let date = boardState.days[dayIndex].date
+        WorkDayAttirePreferences.markApplied(on: date)
+        guard !boardState.days[dayIndex].assignedGarmentIDs.isEmpty else { return }
+        for slot in OutfitSlot.allCases {
+            boardState.days[dayIndex].setGarment(nil, for: slot)
+        }
+        if removeWears {
+            WearEventStore.unmarkWorn(date: date, source: .planner, context: context)
+        }
+        // Also clears wasWornConfirmed and saves right away.
+        setLookWearStatus(dayIndex: dayIndex, lookTime: .day, status: nil)
     }
 
     private func calendarReminderRow(_ reminder: CalendarReminder) -> some View {
@@ -1443,7 +1797,7 @@ struct OutfitPlannerView: View {
             LookReasonBuilder.Input(
                 garments: garments,
                 profile: dayForecast.map { DayTemperatureProfile(from: $0) },
-                occasion: calendar.occasion(isEvening: false, workDressCode: dressCode),
+                occasion: lookOccasion(calendar, dayIndex: dayIndex, isEvening: false, dressCode: dressCode),
                 habitOccasion: followsHabit ? habit : nil,
                 lastWorn: cachedLatestWearByGarmentID,
                 combination: cachedCombination,
@@ -1720,17 +2074,35 @@ struct OutfitPlannerView: View {
                     applyChangeSuggestion(suggestion, dayIndex: dayIndex)
                 } label: {
                     HStack(spacing: DS.Spacing.sm) {
-                        Image(systemName: suggestion.slot == .shoes ? "shoe" : "arrow.triangle.2.circlepath")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tint)
+                        // The piece it suggests, so it's clear what you'd get.
+                        if let better = garment(for: suggestion.betterGarmentID) {
+                            DSGarmentThumbnail(better, size: .small)
+                                .scaleEffect(0.8)
+                                .frame(width: 40, height: 40)
+                                .accessibilityHidden(true)
+                        } else {
+                            Image(systemName: suggestion.slot == .shoes ? "shoe" : "arrow.triangle.2.circlepath")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tint)
+                        }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(
                                 String(
                                     format: NSLocalizedString("planner_change_slot_format", comment: ""),
-                                    suggestion.slot.title
+                                    changeItemName(garment(for: suggestion.currentGarmentID), slot: suggestion.slot)
                                 )
                             )
                             .font(.caption.weight(.semibold))
+                            if let better = garment(for: suggestion.betterGarmentID) {
+                                Text(
+                                    String(
+                                        format: NSLocalizedString("planner_change_to_format", comment: ""),
+                                        better.displayTitle
+                                    )
+                                )
+                                .font(.caption2.weight(.medium))
+                                .lineLimit(1)
+                            }
                             Text(suggestion.reason)
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -1748,6 +2120,12 @@ struct OutfitPlannerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "sweatshirt", "jeans": the item's own type, else the slot ("top").
+    private func changeItemName(_ garment: Garment?, slot: OutfitSlot) -> String {
+        guard let type = garment?.itemType else { return slot.title }
+        return type.title
     }
 
     private func applyChangeSuggestion(_ suggestion: OutfitChangeSuggestion, dayIndex: Int) {
@@ -2446,7 +2824,7 @@ struct OutfitPlannerView: View {
 
     private func eveningSection(for dayIndex: Int) -> some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-            Text(String(localized: "planner_evening_look"))
+            Text(String(localized: workAttire(for: dayIndex) == .uniform ? "planner_after_work_look" : "planner_evening_look"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
@@ -3710,7 +4088,7 @@ struct OutfitPlannerView: View {
             lookTime: isEvening ? .evening : .day,
             taste: cachedTaste,
             combination: cachedCombination,
-            occasionKind: calendar.occasion(isEvening: isEvening, workDressCode: dressCode),
+            occasionKind: lookOccasion(calendar, dayIndex: dayIndex, isEvening: isEvening, dressCode: dressCode),
             diurnal: diurnal,
             thermalSamples: state.overrides.temperatureC == nil
                 ? (lookForecast?.thermalSamples(for: isEvening ? .evening : .day).map {
@@ -3879,7 +4257,7 @@ struct OutfitPlannerView: View {
                 }
             }
 
-            guard context.suggestEveningLook else { continue }
+            guard context.suggestEveningLook || needsAfterWorkLook(context, date: date) else { continue }
             guard !CalendarContextPreferences.isEveningOptedOut(on: date) else { continue }
             guard !boardState.days[index].useEveningLook else { continue }
 
@@ -3890,6 +4268,14 @@ struct OutfitPlannerView: View {
         calendarContextsVersion += 1
         pruneOldCalendarSignatures()
         return changed
+    }
+
+    /// Work clothes only, and a plan after work (not a workout) that needs a look.
+    private func needsAfterWorkLook(_ context: DayCalendarContext, date: Date) -> Bool {
+        guard activeProfile?.workDressCode == .uniform,
+              WorkDayAttirePreferences.choice(on: date) == .uniform,
+              let schedule = WorkDaySchedule.make(events: context.events) else { return false }
+        return afterWorkPlan(schedule) != nil
     }
 
     /// Drops signature keys for days before the planner's first day.
@@ -4325,6 +4711,13 @@ struct OutfitPlannerView: View {
             return
         }
         pendingCalendarReplan.formUnion(placeDays.filter { canReplanForCalendar($0) })
+        // Work days that follow a "work clothes only" answer drop their planned
+        // look once (never a worn or committed one).
+        for i in boardState.days.indices where isUniformOnlyDay(i)
+            && !WorkDayAttirePreferences.wasApplied(on: boardState.days[i].date)
+            && canReplanForCalendar(i) {
+            clearDayLookForWorkClothes(i, removeWears: false)
+        }
         let replan = pendingCalendarReplan
         for i in 0..<boardState.days.count {
             guard !Task.isCancelled else { return }
@@ -4344,6 +4737,7 @@ struct OutfitPlannerView: View {
 
     private func generateDayOutfit(dayIndex i: Int, fillMissingOnly: Bool) {
         guard i < boardState.days.count else { return }
+        guard !isUniformOnlyDay(i) else { return }
         let state = boardState.days[i]
         let signposter = WearItPerformance.plannerSignposter
         let missingSlots = Set(OutfitSlot.allCases.filter {

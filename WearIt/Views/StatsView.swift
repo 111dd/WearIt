@@ -40,6 +40,7 @@ struct StatsView: View {
                 WardrobeGapsSection(
                     gaps: gaps,
                     garmentsByID: snapshot.garmentsByID,
+                    coverage: WardrobeGapAnalyzer.coverage(garments),
                     onDismiss: dismissGap
                 )
                 tasteColorsSection
@@ -298,7 +299,8 @@ struct StatsView: View {
             ),
             upcomingFormalDays: upcomingFormalDays(),
             pastFormalShare: WardrobeGapAnalyzer.pastFormalShare(recommendationEvents),
-            taste: snapshot.taste
+            taste: snapshot.taste,
+            checksRotation: true
         )
         let dismissed = activeGapDismissals()
         gaps = Array(

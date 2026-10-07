@@ -1065,3 +1065,32 @@
 "my_sizes_hips" = "Hips";
 "my_sizes_inseam" = "Inseam (pants length)";
 "my_sizes_cm" = "cm";
+
+/* Place search */
+"place_search_clear" = "Clear";
+"event_place_title" = "Event place";
+"event_place_search_placeholder" = "City, address or place";
+"event_place_search_footer" = "Pick from the list so the look and the suitcase follow the weather there. Events with the same typed location use this place too.";
+"event_place_save" = "Save";
+"event_place_clear" = "Remove the chosen place";
+"event_place_row_hint" = "Choose the place on the map";
+
+/* Uniform work day */
+"work_attire_uniform" = "Work clothes only";
+"work_attire_own" = "My own clothes";
+"work_day_question" = "Work day · what are you wearing?";
+"work_day_own_title" = "Work day · my own clothes";
+"work_day_before_format" = "Before work: %@. This look is for that.";
+"work_day_not_counted" = "Only work clothes, so today won't count in your clothes stats.";
+"work_day_add_after" = "Suggest a look for after work";
+"work_day_add_after_format" = "Suggest a look for after work: %@";
+"planner_after_work_look" = "After work";
+
+/* Wardrobe analysis */
+"planner_change_to_format" = "Instead: %@";
+"planner_gap_add_format" = "Add a %@ to your wardrobe";
+"gap_title_light_layer" = "A light jacket";
+"gap_title_more_format" = "More %@";
+"gap_reason_upcoming_mild_format" = "In-between days coming: %d. A light jacket over short sleeves adds variety.";
+"gap_reason_mild_climate_format" = "About %d%% of your planned days were light-jacket weather.";
+"gap_reason_thin_rotation_format" = "You have %d %@; at least %d keep a week of looks from repeating.";

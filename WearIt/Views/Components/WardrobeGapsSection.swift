@@ -5,17 +5,22 @@ import SwiftUI
 struct WardrobeGapsSection: View {
     let gaps: [WardrobeGapAnalyzer.Gap]
     let garmentsByID: [UUID: Garment]
+    /// Items per category against what keeps a week of looks fresh.
+    var coverage: [WardrobeGapAnalyzer.Coverage] = []
     var onDismiss: (WardrobeGapAnalyzer.Gap) -> Void
 
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        if !gaps.isEmpty {
+        if !gaps.isEmpty || coverage.contains(where: \.isShort) {
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 DSSectionHeader(String(localized: "stats_gaps_title"), icon: "sparkle.magnifyingglass")
                 Text(String(localized: "stats_gaps_subtitle"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !coverage.isEmpty {
+                    coverageRow
+                }
                 ForEach(gaps) { gap in
                     row(for: gap)
                     if gap.id != gaps.last?.id {
@@ -27,17 +32,42 @@ struct WardrobeGapsSection: View {
         }
     }
 
+    /// "Tops 4/7 · Pants 3/4 · Shoes 3/3": how deep each core category is.
+    private var coverageRow: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            ForEach(coverage) { row in
+                VStack(spacing: 2) {
+                    Image(systemName: row.category.icon)
+                        .font(.caption.weight(.semibold))
+                    Text("\(row.have)/\(row.target)")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                    Text(row.category.title)
+                        .font(.caption2)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(row.isShort ? Color.orange : Color.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                        .fill((row.isShort ? Color.orange : Color.secondary).opacity(0.08))
+                )
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
     private func row(for gap: WardrobeGapAnalyzer.Gap) -> some View {
         HStack(alignment: .top, spacing: DS.Spacing.sm) {
-            Image(systemName: icon(for: gap))
+            Image(systemName: Self.icon(for: gap))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color.accentColor)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                Text(title(for: gap))
+                Text(Self.title(for: gap, garmentsByID: garmentsByID))
                     .font(.subheadline.weight(.semibold))
-                Text(reasonText(for: gap.reason))
+                Text(Self.reasonText(for: gap.reason))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -86,7 +116,7 @@ struct WardrobeGapsSection: View {
 
     // MARK: - Text
 
-    private func icon(for gap: WardrobeGapAnalyzer.Gap) -> String {
+    static func icon(for gap: WardrobeGapAnalyzer.Gap) -> String {
         switch gap.kind {
         case .missingCore: return gap.suggestion.category.icon
         case .rainShoes, .rainOuter: return "cloud.rain.fill"
@@ -94,10 +124,12 @@ struct WardrobeGapsSection: View {
         case .hotWeatherTops: return "sun.max.fill"
         case .formalTop, .formalBottom, .formalShoes: return "sparkles"
         case .workhorseBackup: return "arrow.triangle.2.circlepath"
+        case .lightLayer: return "wind"
+        case .thinRotation: return gap.suggestion.category.icon
         }
     }
 
-    private func title(for gap: WardrobeGapAnalyzer.Gap) -> String {
+    static func title(for gap: WardrobeGapAnalyzer.Gap, garmentsByID: [UUID: Garment]) -> String {
         switch gap.kind {
         case .missingCore:
             return String(
@@ -119,10 +151,16 @@ struct WardrobeGapsSection: View {
                 return gap.suggestion.itemType?.title ?? gap.suggestion.category.title
             }()
             return String(format: NSLocalizedString("gap_title_backup_format", comment: ""), name)
+        case .lightLayer: return String(localized: "gap_title_light_layer")
+        case .thinRotation:
+            return String(
+                format: NSLocalizedString("gap_title_more_format", comment: ""),
+                gap.suggestion.category.title
+            )
         }
     }
 
-    private func reasonText(for reason: WardrobeGapAnalyzer.Reason) -> String {
+    static func reasonText(for reason: WardrobeGapAnalyzer.Reason) -> String {
         func format(_ key: String, _ value: Int) -> String {
             String(format: NSLocalizedString(key, comment: ""), value)
         }
@@ -149,6 +187,15 @@ struct WardrobeGapsSection: View {
             return format("gap_reason_formal_habit_format", percent(share))
         case .heavyRotation(_, let share):
             return format("gap_reason_heavy_rotation_format", percent(share))
+        case .upcomingMild(let days):
+            return format("gap_reason_upcoming_mild_format", days)
+        case .mildClimate(let share):
+            return format("gap_reason_mild_climate_format", percent(share))
+        case .thinRotation(let category, let have, let target):
+            return String(
+                format: NSLocalizedString("gap_reason_thin_rotation_format", comment: ""),
+                have, category.title, target
+            )
         }
     }
 

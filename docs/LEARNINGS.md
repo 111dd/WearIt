@@ -2,6 +2,21 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Style layer and wardrobe depth
+- **Did:** `rankLooks` adds a light outer (warmth ≤ 2) over a short-sleeve top on dry 20–25° days when `offersStyleLayer` says so (stable per day + top, skipped for "short, no jacket" / "long"). `WardrobeGapAnalyzer` got `lightLayer`, `thinRotation` (only with `Input.checksRotation`) and `coverage`. Planner nudge: `computeWardrobeGapNudge`, snoozed 14 days per gap id.
+- **Why:** dor wanted varied looks (jacket + tee) and the app to say what's missing instead of repeating clothes, as groundwork for "what to buy".
+- **Watch:** the style layer bypasses the suppress-policy score penalty on purpose; don't "fix" it by letting the look score decide, or it never appears. Existing gap tests assume rotation checks are off by default.
+
+## 2026-10-07 — Work clothes only days
+- **Did:** the uniform work row became a choice (`WorkDayAttire`), with before/after-work plans from `WorkDaySchedule` (needs `CalendarDayEvent.end`). Uniform-only days skip `generateDayOutfit` and drop the planned look once (`WorkDayAttirePreferences.markApplied`).
+- **Why:** dor wears a uniform: the day look was noise and polluted wear stats, and the real need is a look for after work.
+- **Watch:** the row's state lives in UserDefaults, so it is in `DayCardSignature.reminderLine` (the card is `.equatable()`). A manual look added on a uniform-only day must survive the next generation pass (that's what the applied flag is for).
+
+## 2026-10-07 — Place search with live suggestions
+- **Did:** `PlaceSearchField` (MKLocalSearchCompleter + MKLocalSearch) in the manual trip sheet and in `EventPlacePickerSheet`, opened from an event row with a typed location and no map pin. A pick is saved in `TypedEventPlaceResolver` as `userPicked` and posts `.calendarUnderstandingChanged`.
+- **Why:** dor wanted to choose the place from a list instead of trusting a one-shot guess.
+- **Watch:** a user pick is never overwritten by a geocode guess, and counts for timed events too (guesses don't). `await` can't sit on the right of `??` (autoclosure).
+
 ## 2026-10-07 — Typed trip places and a saved home fix
 - **Did:** `TypedEventPlaceResolver` geocodes a typed event location (trips and all-day events only), cached for good in UserDefaults; the planner and calendar resolve the queue and re-read the calendar when something new is found. `DeviceCoordinate` is saved so `homeCoordinate` exists at launch.
 - **Why:** a vacation typed as "Eilat" without a map pin was ignored, and pins did nothing until the first location fix.

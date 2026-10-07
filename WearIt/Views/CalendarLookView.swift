@@ -37,6 +37,7 @@ struct CalendarLookView: View {
     @State private var manualTrips: [TripSpan] = []
     @State private var packingTrip: TripSpan?
     @State private var showPlanTrip = false
+    @State private var placePickerEvent: DayJournalEvent?
 
     @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
@@ -123,7 +124,8 @@ struct CalendarLookView: View {
             onSetTemperatureFeedback: { setTemperatureFeedback($0) },
             onSaveNotes: { saveNotes($0) },
             onOpenCamera: { showCamera = true },
-            onRemovePhoto: { removePhoto(at: $0) }
+            onRemovePhoto: { removePhoto(at: $0) },
+            onPickEventPlace: { placePickerEvent = $0 }
         )
     }
 
@@ -206,6 +208,11 @@ struct CalendarLookView: View {
                 garments: allGarments,
                 onDelete: trip.isManual ? { deleteManualTrip(trip) } : nil
             )
+        }
+        .sheet(item: $placePickerEvent) { event in
+            if let query = event.placeQuery {
+                EventPlacePickerSheet(eventTitle: event.title, query: query)
+            }
         }
         .sheet(isPresented: $showPlanTrip) {
             PlanTripSheet { trip in
@@ -403,7 +410,14 @@ struct CalendarLookView: View {
         dayEvents = horizonEvents
             .filter { covers($0, day: selectedDay) }
             .map { event in
-                DayJournalEvent(id: event.id, title: event.title, detail: event.detail, icon: event.icon)
+                DayJournalEvent(
+                    id: event.id,
+                    title: event.title,
+                    detail: event.detail,
+                    icon: event.icon,
+                    placeQuery: event.placeQuery,
+                    hasPlace: event.place != nil
+                )
             }
     }
 

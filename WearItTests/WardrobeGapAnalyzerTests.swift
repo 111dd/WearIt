@@ -91,6 +91,22 @@ struct WardrobeGapAnalyzerTests {
         #expect(gaps.first?.suggestion.itemType == .jeans)
     }
 
+    @Test func mildDaysWithoutLightJacketRaiseLightLayer() {
+        var wardrobe = basicWardrobe().filter { $0.category != .outer }
+        wardrobe.append(garment(.outer, .coat, warmth: 5))
+        var input = WardrobeGapAnalyzer.Input(garments: wardrobe)
+        input.climate.upcomingMildDays = 2
+        #expect(WardrobeGapAnalyzer.analyze(input).map(\.kind) == [.lightLayer])
+    }
+
+    @Test func thinRotationOnlyWhenAsked() {
+        var input = WardrobeGapAnalyzer.Input(garments: basicWardrobe())
+        #expect(WardrobeGapAnalyzer.analyze(input).isEmpty)
+        input.checksRotation = true
+        let targets = Set(WardrobeGapAnalyzer.analyze(input).filter { $0.kind == .thinRotation }.map(\.target))
+        #expect(targets == [Category.top.rawValue, Category.bottom.rawValue, Category.shoes.rawValue])
+    }
+
     @Test func missingShoesIsTopPriority() {
         var wardrobe = basicWardrobe().filter { $0.category != .shoes }
         wardrobe.append(garment(.top, .polo))

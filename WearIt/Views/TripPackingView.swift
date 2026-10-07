@@ -516,6 +516,7 @@ struct PlanTripSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var placeName = ""
+    @State private var pickedPlace: EventPlace?
     @State private var start = Calendar.current.startOfDay(for: Date())
     @State private var end = Calendar.current.date(byAdding: .day, value: 3, to: Calendar.current.startOfDay(for: Date())) ?? Date()
     @State private var isSaving = false
@@ -524,14 +525,21 @@ struct PlanTripSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField(String(localized: "trip_destination_placeholder"), text: $placeName)
-                    .textInputAutocapitalization(.words)
-                DatePicker(String(localized: "trip_start"), selection: $start, displayedComponents: .date)
-                DatePicker(String(localized: "trip_end"), selection: $end, in: start..., displayedComponents: .date)
-                if failedGeocode {
-                    Text(String(localized: "trip_geocode_failed"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Section {
+                    PlaceSearchField(
+                        placeholder: String(localized: "trip_destination_placeholder"),
+                        text: $placeName,
+                        picked: $pickedPlace,
+                        near: WeatherCenter.shared.homeCoordinate?.location
+                    )
+                } footer: {
+                    if failedGeocode {
+                        Text(String(localized: "trip_geocode_failed"))
+                    }
+                }
+                Section {
+                    DatePicker(String(localized: "trip_start"), selection: $start, displayedComponents: .date)
+                    DatePicker(String(localized: "trip_end"), selection: $end, in: start..., displayedComponents: .date)
                 }
             }
             .navigationTitle(String(localized: "trip_manual_title"))
@@ -546,7 +554,7 @@ struct PlanTripSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
     private func save() async {
@@ -559,7 +567,9 @@ struct PlanTripSheet: View {
         var latitude: Double?
         var longitude: Double?
         var resolvedName = name
-        if let place = await Self.geocode(name) {
+        var found = pickedPlace
+        if found == nil { found = await Self.geocode(name) }
+        if let place = found {
             latitude = place.latitude
             longitude = place.longitude
             if !place.name.isEmpty { resolvedName = place.name }
