@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-06 — Readable glass and a backdrop-aware accent
+- **Did:** Untinted glass uses the planner card veil (`DS.Glass.cardTint`). AccentColor is a deep teal in light and a light teal in dark. Labels on a solid accent fill use `DS.Accent.onFill`. Washed `.tertiary` captions on cards are `.secondary`.
+- **Why:** The accent asset was empty, so system teal sat on light wallpapers (soft sky and the card glass) and failed contrast. The app already flips `preferredColorScheme` from the backdrop.
+- **Watch:** Do not sample the wallpaper under each label; it costs scroll frames. A new accent fill needs `DS.Accent.onFill` for its glyph, not hardcoded white. Pass an explicit `tint` only when a card should not use the shared veil.
+
 ## 2026-10-06 — Love is learned; user sizes live on UserProfile
 - **Did:** removed the love slider (add + edit); `LoveScoreLearner` runs once per launch (swaps −2/+1, capped; weekly −1 for items unworn 60+ days, floor 30, favorites exempt). Added `UserProfile` size/measurement fields, `MySizesView`, a Size row in the add screen's detected card pre-filled via `MySizesView.usualSize`.
 - **Why:** dor wants the app to learn how much an item is loved, and to know the user's sizes for future in-stock matching.

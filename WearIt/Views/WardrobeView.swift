@@ -456,7 +456,7 @@ struct WardrobeView: View {
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
         }
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color.accentColor.opacity(0.02), castsShadow: false)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: false)
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.sm)
     }

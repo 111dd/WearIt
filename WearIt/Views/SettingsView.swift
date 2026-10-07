@@ -241,7 +241,7 @@ struct SettingsView: View {
 
             Text(String(localized: "profile_account_sync_caption"))
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
         .dsCard()
     }
@@ -514,7 +514,7 @@ struct SettingsView: View {
 
                 Text(String(localized: "backdrop_blur_hint"))
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             .padding(.top, DS.Spacing.xxs)
         }
@@ -888,7 +888,7 @@ struct PreferenceRow: View {
             HStack {
                 Text(labels.first ?? "")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 
                 Slider(
                     value: Binding(
@@ -902,7 +902,7 @@ struct PreferenceRow: View {
                 
                 Text(labels.last ?? "")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
 
             Text(String(localized: "profile_pref_affects"))

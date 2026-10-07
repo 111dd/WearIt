@@ -130,6 +130,10 @@ private struct AdaptiveGlassSurface: ViewModifier {
     private var shadowRadius: CGFloat { castsShadow ? DS.Shadow.medium.radius : 0 }
     private var shadowY: CGFloat { castsShadow ? DS.Shadow.medium.y : 0 }
 
+    /// Untinted glass picks up the planner card veil so labels stay readable
+    /// on light wallpapers. Callers that pass a tint keep it.
+    private var resolvedTint: Color { tint ?? DS.Glass.cardTint }
+
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -137,7 +141,7 @@ private struct AdaptiveGlassSurface: ViewModifier {
                 content
                     .padding(padding)
                     .glassEffect(
-                        .regular.tint(tint).interactive(),
+                        .regular.tint(resolvedTint).interactive(),
                         in: .rect(cornerRadius: cornerRadius)
                     )
                     .shadow(color: shadowColor, radius: shadowRadius, y: shadowY)
@@ -145,7 +149,7 @@ private struct AdaptiveGlassSurface: ViewModifier {
                 content
                     .padding(padding)
                     .glassEffect(
-                        .regular.tint(tint),
+                        .regular.tint(resolvedTint),
                         in: .rect(cornerRadius: cornerRadius)
                     )
                     .shadow(color: shadowColor, radius: shadowRadius, y: shadowY)
@@ -155,6 +159,10 @@ private struct AdaptiveGlassSurface: ViewModifier {
                 .padding(padding)
                 .background(
                     fallbackMaterial,
+                    in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                )
+                .background(
+                    resolvedTint,
                     in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 )
                 .overlay(
@@ -306,7 +314,7 @@ public struct GlassListRow: ViewModifier {
                     padding: 0,
                     interactive: false,
                     tint: nil,
-                    fallbackMaterial: .ultraThinMaterial,
+                    fallbackMaterial: .regularMaterial,
                     castsShadow: false
                 )
             )
@@ -319,7 +327,7 @@ public extension View {
         padding: CGFloat = 0,
         interactive: Bool = false,
         tint: Color? = nil,
-        fallbackMaterial: Material = .ultraThinMaterial,
+        fallbackMaterial: Material = .regularMaterial,
         castsShadow: Bool = false
     ) -> some View {
         modifier(

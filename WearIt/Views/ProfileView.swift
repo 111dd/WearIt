@@ -140,7 +140,7 @@ struct ProfileView: View {
 
                     Image(systemName: "camera.fill")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(DS.Accent.onFill)
                         .padding(6)
                         .background(Color.accentColor, in: Circle())
                 }
@@ -166,7 +166,7 @@ struct ProfileView: View {
                 if let memberSince {
                     Label(memberSince, systemImage: "calendar")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
 
                 Label(
@@ -176,7 +176,7 @@ struct ProfileView: View {
                     systemImage: auth.isSignedIn ? "checkmark.icloud" : "icloud.slash"
                 )
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)

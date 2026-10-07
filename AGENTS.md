@@ -144,6 +144,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-06 · Cursor · Shared the planner's readable glass veil with every untinted card, and made the accent a deep teal on light backdrops / light teal on dark photos (`DS.Accent.onFill` for glyphs on a fill).
 - 2026-10-06 · Claude Code · Love is learned, sizes are the user's: the love slider is gone from add/edit
   (`Logic/LoveScoreLearner` in deferred bootstrap adds swap signals and slow neglect decay on top of the live
   wear/feedback/swipe nudges). "My sizes" (`Views/MySizesView`, from the profile) stores usual top/bottom/shoe

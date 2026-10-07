@@ -166,7 +166,7 @@ struct StatsView: View {
                             DSGarmentThumbnail(row.left, size: .small)
                             Image(systemName: "plus")
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                             DSGarmentThumbnail(row.right, size: .small)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(row.left.displayTitle)

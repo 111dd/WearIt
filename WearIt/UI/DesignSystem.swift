@@ -37,6 +37,23 @@ enum DS {
         static var love: Color { .pink }
         static var warmth: Color { .orange }
         static var danger: Color { .red }
+
+        /// Glyph or label drawn on a solid accent fill.
+        /// Light backdrops use a deep accent (white label). Dark photos use a
+        /// light accent, so the label switches to a near-black ink.
+        static var onFill: Color {
+            Color(uiColor: UIColor { traits in
+                traits.userInterfaceStyle == .dark
+                    ? UIColor(red: 0.04, green: 0.12, blue: 0.16, alpha: 1)
+                    : .white
+            })
+        }
+    }
+
+    /// Same veil as the planner day card. A missing glass tint resolves to this
+    /// so text on every card stays readable without sampling the wallpaper.
+    enum Glass {
+        static var cardTint: Color { Color(.systemBackground).opacity(0.35) }
     }
 
     // MARK: Spacing
@@ -147,7 +164,7 @@ struct DSCard: ViewModifier {
     init(
         cornerRadius: CGFloat = DS.Radius.card,
         padding: CGFloat = DS.Spacing.md,
-        material: Material = .ultraThinMaterial
+        material: Material = .regularMaterial
     ) {
         self.cornerRadius = cornerRadius
         self.padding = padding
@@ -182,8 +199,8 @@ struct DSField: ViewModifier {
                 cornerRadius: cornerRadius,
                 padding: padding,
                 interactive: true,
-                tint: Color.white.opacity(0.025),
-                fallbackMaterial: .ultraThinMaterial
+                tint: DS.Glass.cardTint,
+                fallbackMaterial: .regularMaterial
             )
     }
 }
@@ -284,7 +301,7 @@ struct DSPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.headline)
-            .foregroundStyle(.white)
+            .foregroundStyle(DS.Accent.onFill)
             .padding(.horizontal, DS.Spacing.lg)
             .padding(.vertical, DS.Spacing.sm)
             .frame(maxWidth: .infinity)
@@ -717,14 +734,14 @@ extension View {
     func dsCard(
         cornerRadius: CGFloat = DS.Radius.card,
         padding: CGFloat = DS.Spacing.md,
-        material: Material = .ultraThinMaterial
+        material: Material = .regularMaterial
     ) -> some View {
         modifier(DSCard(cornerRadius: cornerRadius, padding: padding, material: material))
     }
     
     /// Compact card with less padding
     func dsCardCompact() -> some View {
-        modifier(DSCard(cornerRadius: DS.Radius.sm, padding: DS.Spacing.sm, material: .ultraThinMaterial))
+        modifier(DSCard(cornerRadius: DS.Radius.sm, padding: DS.Spacing.sm, material: .regularMaterial))
     }
     
     /// Primary button style
