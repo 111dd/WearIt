@@ -4315,6 +4315,10 @@ struct OutfitPlannerView: View {
         // Days whose calendar meaning changed get a fresh look (locked pieces stay).
         // Kept pending until the pass finishes, so a cancelled pass doesn't lose them.
         pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+        // A typed trip location ("Eilat") found for the first time: re-read the calendar with it.
+        if await TypedEventPlaceResolver.shared.resolvePending(near: weather.homeCoordinate?.location) {
+            pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+        }
         let placeDays = await refreshEventPlaceForecasts()
         guard !Task.isCancelled else {
             pendingCalendarReplan.formUnion(placeDays.filter { canReplanForCalendar($0) })

@@ -391,6 +391,12 @@ struct CalendarLookView: View {
             home: weather.homeCoordinate?.location
         )
         reloadDayEvents()
+        // A typed trip location looked up for the first time can turn a vacation into a trip.
+        Task {
+            if await TypedEventPlaceResolver.shared.resolvePending(near: weather.homeCoordinate?.location) {
+                reloadTripsAndEvents()
+            }
+        }
     }
 
     private func reloadDayEvents() {

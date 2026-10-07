@@ -418,10 +418,20 @@ final class CalendarContextService {
                 isAllDay: event.isAllDay,
                 kind: kind,
                 isEvening: isEvening,
-                place: Self.taggedPlace(on: event)
+                place: Self.place(on: event, kind: kind)
             )
         }
         .sorted { $0.start < $1.start }
+    }
+
+    /// The map pin, else (for a trip or an all-day event only) the typed
+    /// location once it has been looked up. A meeting's typed "office" never counts.
+    private static func place(on event: EKEvent, kind: CalendarEventUnderstanding.Kind) -> EventPlace? {
+        if let pinned = taggedPlace(on: event) { return pinned }
+        guard event.isAllDay || kind == .travel else { return nil }
+        let typed = (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return nil }
+        return TypedEventPlaceResolver.shared.place(for: typed)
     }
 
     /// The place the user picked on the map. A typed note like "office" has no coordinate.
@@ -459,7 +469,7 @@ final class CalendarContextService {
                     calendarTitle: event.calendar?.title ?? ""
                 )
             )
-            let place = Self.taggedPlace(on: event)
+            let place = Self.place(on: event, kind: kind)
             let locationName = place?.name.isEmpty == false
                 ? place!.name
                 : (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

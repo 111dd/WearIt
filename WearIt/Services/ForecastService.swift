@@ -291,8 +291,11 @@ final class ForecastService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var usedMockData: Bool = false
     @Published private(set) var locationName: String?
-    /// Last device fix, so a calendar pin can be compared with home.
-    private(set) var homeCoordinate: DeviceCoordinate?
+    /// Last device fix, so a calendar pin can be compared with home. Kept across
+    /// launches so a pin works before the first location fix (or when it fails).
+    private(set) var homeCoordinate: DeviceCoordinate? = DeviceCoordinate.saved {
+        didSet { homeCoordinate?.save() }
+    }
     
     private var provider: WeatherProvider = WeatherKitProvider()
     private var fallbackProvider: WeatherProvider = MockWeatherProvider()
@@ -458,9 +461,21 @@ final class ForecastService: ObservableObject {
 
 /// The device's last known point. Compared with a calendar pin to see if the
 /// event is somewhere else.
-struct DeviceCoordinate: Equatable {
+struct DeviceCoordinate: Equatable, Codable {
     var latitude: Double
     var longitude: Double
+
+    private static let defaultsKey = "weather.lastDeviceCoordinate"
+
+    static var saved: DeviceCoordinate? {
+        guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return nil }
+        return try? JSONDecoder().decode(DeviceCoordinate.self, from: data)
+    }
+
+    func save() {
+        guard self != Self.saved, let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+    }
 
     var location: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
