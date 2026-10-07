@@ -1142,3 +1142,4 @@
 "onboarding_back" = "Back";
 "wardrobe_restoring_title" = "Restoring your wardrobe";
 "wardrobe_restoring_message" = "Your items are coming in from iCloud. This can take a minute on a new device.";
+"settings_show_intro" = "Show the intro again";

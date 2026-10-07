@@ -26,6 +26,13 @@ struct OnboardingView: View {
     @AppStorage(OnboardingState.completedKey) private var didCompleteOnboarding = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
 
+    /// Set when replayed from Settings: finishing closes the intro instead of passing the gate.
+    private let onFinish: (() -> Void)?
+
+    init(onFinish: (() -> Void)? = nil) {
+        self.onFinish = onFinish
+    }
+
     private enum Step: Int, CaseIterable {
         case welcome, aboutYou, permissions, account
     }
@@ -71,6 +78,20 @@ struct OnboardingView: View {
     var body: some View {
         VStack(spacing: DS.Spacing.md) {
             progressDots
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .leading) {
+                    if let onFinish {
+                        Button(action: onFinish) {
+                            Image(systemName: "xmark")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 36, height: 36)
+                                .liquidGlassPill(interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(String(localized: "action_close"))
+                        .padding(.leading, DS.Spacing.md)
+                    }
+                }
                 .padding(.top, DS.Spacing.sm)
 
             ScrollView {
@@ -228,35 +249,49 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .dsCard()
 
-            VStack(spacing: DS.Spacing.sm) {
-                SignInWithAppleButton(.continue) { request in
-                    request.requestedScopes = [.fullName, .email]
-                } onCompletion: { result in
-                    switch result {
-                    case .success(let authorization):
-                        finish(signedIn: true)
-                        auth.handleAuthorization(authorization, context: context)
-                    case .failure(let error):
-                        print("Sign in with Apple failed:", error.localizedDescription)
-                    }
-                }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 52)
-                .clipShape(Capsule())
-
+            if auth.isSignedIn {
                 Button {
-                    finish(signedIn: false)
+                    finish(signedIn: true)
                 } label: {
-                    Text(String(localized: "onboarding_skip_sign_in"))
+                    Text(String(localized: "action_done"))
                         .frame(maxWidth: .infinity)
                 }
-                .dsSecondaryButton()
-
-                Text(String(localized: "onboarding_sign_in_later"))
-                    .font(.caption)
-                    .foregroundStyle(DS.Text.secondary)
-                    .multilineTextAlignment(.center)
+                .dsPrimaryButton()
+            } else {
+                signInButtons
             }
+        }
+    }
+
+    private var signInButtons: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            SignInWithAppleButton(.continue) { request in
+                request.requestedScopes = [.fullName, .email]
+            } onCompletion: { result in
+                switch result {
+                case .success(let authorization):
+                    finish(signedIn: true)
+                    auth.handleAuthorization(authorization, context: context)
+                case .failure(let error):
+                    print("Sign in with Apple failed:", error.localizedDescription)
+                }
+            }
+            .signInWithAppleButtonStyle(.black)
+            .frame(height: 52)
+            .clipShape(Capsule())
+
+            Button {
+                finish(signedIn: false)
+            } label: {
+                Text(String(localized: "onboarding_skip_sign_in"))
+                    .frame(maxWidth: .infinity)
+            }
+            .dsSecondaryButton()
+
+            Text(String(localized: "onboarding_sign_in_later"))
+                .font(.caption)
+                .foregroundStyle(DS.Text.secondary)
+                .multilineTextAlignment(.center)
         }
     }
 
@@ -406,6 +441,10 @@ struct OnboardingView: View {
 
     private func finish(signedIn: Bool) {
         saveAnswers()
+        if let onFinish {
+            onFinish()
+            return
+        }
         didSkipSignIn = !signedIn
         didCompleteOnboarding = true
     }
@@ -425,7 +464,18 @@ struct OnboardingView: View {
         let profile = UserProfile.current(in: context)
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { profile.displayName = trimmed }
-        if let workDressCode { profile.workDressCode = workDressCode }
+        if let workDressCode, workDressCode != profile.workDressCode {
+            let hadAnswer = profile.workDressCode != nil
+            profile.workDressCode = workDressCode
+            if hadAnswer {
+                // Replayed from Settings with a new answer: re-plan work days, as Settings does.
+                NotificationCenter.default.post(
+                    name: .calendarUnderstandingChanged,
+                    object: nil,
+                    userInfo: ["replanWorkDays": true]
+                )
+            }
+        }
         // Keep a finer value from Settings when the user didn't move off "about average".
         if warmth != .average || Warmth(rawValue: profile.warmthSensitivity) != nil {
             profile.warmthSensitivity = warmth.rawValue
