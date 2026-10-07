@@ -32,6 +32,7 @@ struct SettingsView: View {
     @State private var showSignOutDialog = false
     @State private var showResetLearningDialog = false
     @State private var showBackdropPicker = false
+    @State private var showIntro = false
     /// Async-loaded preview for the custom backdrop chip — avoids decoding the
     /// full-resolution photo on the main thread inside `body`.
     @State private var backdropPreviewImage: UIImage?
@@ -60,6 +61,7 @@ struct SettingsView: View {
                 notificationsSection
                 dataManagementSection
                 languageSection
+                introSection
 
                 #if DEBUG
                 debugSection
@@ -115,6 +117,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+        }
+        .fullScreenCover(isPresented: $showIntro, onDismiss: loadTasteValues) {
+            OnboardingView(onFinish: { showIntro = false })
         }
         .sheet(isPresented: $showBackdropPicker) {
             // Full-frame photo (no square crop) — backdrop is always blurred full-screen.
@@ -657,6 +662,18 @@ struct SettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .dsCard()
+    }
+
+    private var introSection: some View {
+        Button {
+            showIntro = true
+        } label: {
+            Label(String(localized: "settings_show_intro"), systemImage: "sparkles.rectangle.stack")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .dsSecondaryButton()
         .dsCard()
     }
 

@@ -416,8 +416,7 @@ struct OutfitPlannerView: View {
     }
 
     private var emptyWardrobeCard: some View {
-        DSEmptyState(
-            icon: "tshirt",
+        EmptyWardrobeState(
             title: String(localized: "planner_empty_wardrobe_title"),
             message: String(localized: "planner_empty_wardrobe_message"),
             actionTitle: String(localized: "planner_empty_wardrobe_action")

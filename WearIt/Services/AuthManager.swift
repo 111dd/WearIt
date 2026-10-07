@@ -93,25 +93,13 @@ final class AuthManager: NSObject, ObservableObject {
         email: String?,
         context: ModelContext
     ) -> UserProfile {
-        // נסה לאתר פרופיל קיים
-        let fetch = FetchDescriptor<UserProfile>(
-            predicate: #Predicate { $0.userIdentifier == userIdentifier },
-            sortBy: []
-        )
-        if let existing = try? context.fetch(fetch).first {
-            // לא לדרוס ערכים קיימים ב-nil
-            if let fn = fullName, !fn.isEmpty { existing.displayName = fn }
-            if let em = email, !em.isEmpty { existing.email = em }
-            try? context.save()
-            return existing
-        }
-
-        // לא קיים — ניצור חדש
-        let profile = UserProfile()
-        profile.userIdentifier = userIdentifier
-        if let fn = fullName, !fn.isEmpty { profile.displayName = fn }
+        // Signing in claims the current profile (even one made while skipping sign-in),
+        // so nothing the app learned is left behind on an orphaned profile.
+        let profile = CurrentUser.adopt(userIdentifier: userIdentifier, in: context)
+        // Apple's name only fills a name the user hasn't set.
+        let defaultNames: Set<String> = ["", "Me", String(localized: "profile_default_name")]
+        if let fn = fullName, !fn.isEmpty, defaultNames.contains(profile.displayName) { profile.displayName = fn }
         if let em = email, !em.isEmpty { profile.email = em }
-        context.insert(profile)
         try? context.save()
         return profile
     }

@@ -578,22 +578,10 @@ struct ProfileView: View {
     }
 
     private func fetchOrCreateProfile(userIdentifier uid: String?) -> UserProfile {
-        let fd = FetchDescriptor<UserProfile>(
-            sortBy: [SortDescriptor(\.createdAt)]
-        )
-
-        if let results = try? context.fetch(fd),
-           let existing = results.first(where: { $0.userIdentifier == uid }) {
-            return existing
+        if let profile = CurrentUser.activeProfile(in: context, userIdentifier: uid) {
+            return profile
         }
-
-        let new = UserProfile()
-        new.userIdentifier = uid
-        new.displayName = auth.displayName ?? String(localized: "profile_default_name")
-        new.email = auth.email
-        context.insert(new)
-        try? context.save()
-        return new
+        return UserProfile.current(in: context)
     }
 }
 
