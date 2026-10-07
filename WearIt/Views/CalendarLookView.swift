@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import PhotosUI
 import UIKit
+import EventKit
 
 //
 //  CalendarLookView.swift
@@ -17,6 +18,7 @@ struct CalendarLookView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutDirection) private var layoutDirection
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var weather: WeatherCenter
 
     @State private var selectedDate: Date = Date()
     @State private var isStripExpanded = false
@@ -29,6 +31,12 @@ struct CalendarLookView: View {
     @State private var currentDate: Date = Date()
     /// Drives the card's directional transition when swiping between days.
     @State private var lastDayStep: Int = 1
+    @State private var dayEvents: [DayJournalEvent] = []
+    @State private var horizonEvents: [CalendarDisplayEvent] = []
+    @State private var detectedTrips: [TripSpan] = []
+    @State private var manualTrips: [TripSpan] = []
+    @State private var packingTrip: TripSpan?
+    @State private var showPlanTrip = false
 
     @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
@@ -102,7 +110,8 @@ struct CalendarLookView: View {
             temperatureFeedback: plan?.temperatureFeedback,
             notes: plan?.notes ?? "",
             weather: weatherSummary(for: plan),
-            photoPaths: lookForSelectedDay?.photoPaths ?? []
+            photoPaths: lookForSelectedDay?.photoPaths ?? [],
+            events: dayEvents
         )
     }
 
@@ -128,6 +137,11 @@ struct CalendarLookView: View {
                     isExpanded: $isStripExpanded,
                     indicators: dayIndicators
                 )
+
+                if let trip = featuredTrip {
+                    tripBanner(trip)
+                }
+                planTripButton
 
                 DayJournalCard(
                     model: journalModel,
@@ -169,9 +183,38 @@ struct CalendarLookView: View {
         .onChange(of: photosPickerItems) { _, _ in
             handlePhotosPicker()
         }
-        .onAppear { refreshCurrentDate() }
+        .onAppear {
+            refreshCurrentDate()
+            reloadTripsAndEvents()
+        }
+        .onChange(of: selectedDate) { _, _ in
+            reloadDayEvents()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             refreshCurrentDate()
+            reloadTripsAndEvents()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            reloadTripsAndEvents()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { _ in
+            reloadTripsAndEvents()
+        }
+        .sheet(item: $packingTrip) { trip in
+            TripPackingView(
+                trip: trip,
+                garments: allGarments,
+                onDelete: trip.isManual ? { deleteManualTrip(trip) } : nil
+            )
+        }
+        .sheet(isPresented: $showPlanTrip) {
+            PlanTripSheet { trip in
+                var trips = TripPackingStore.manualTrips().filter { $0.id != trip.id }
+                trips.append(trip)
+                TripPackingStore.saveManual(trips)
+                manualTrips = TripPackingStore.manualTrips()
+                packingTrip = trip
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             refreshCurrentDate()
@@ -265,6 +308,114 @@ struct CalendarLookView: View {
         withAnimation(reduceMotion ? nil : DS.Animation.standard) {
             selectedDate = date
         }
+    }
+
+    private var featuredTrip: TripSpan? {
+        TripFinder.featured(
+            in: detectedTrips + manualTrips,
+            selectedDay: selectedDay,
+            today: currentDate
+        )
+    }
+
+    private func tripBanner(_ trip: TripSpan) -> some View {
+        let range = tripRangeText(trip)
+        let onThisDay = trip.contains(selectedDay)
+        return VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                Image(systemName: "suitcase")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(trip.placeName.isEmpty ? trip.title : trip.placeName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(onThisDay ? String(localized: "calendar_trip_includes_day") : range)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    if onThisDay {
+                        Text(range)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            Button {
+                DS.haptic(0.4)
+                packingTrip = trip
+            } label: {
+                Label(String(localized: "calendar_trip_pack"), systemImage: "checklist")
+                    .frame(maxWidth: .infinity)
+            }
+            .dsSecondaryButton()
+        }
+        .padding(DS.Spacing.md)
+        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+    }
+
+    private var planTripButton: some View {
+        Button {
+            DS.haptic(0.3)
+            showPlanTrip = true
+        } label: {
+            Label(
+                String(localized: featuredTrip == nil ? "calendar_plan_trip" : "calendar_plan_another_trip"),
+                systemImage: "plus"
+            )
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+    }
+
+    private func tripRangeText(_ trip: TripSpan) -> String {
+        let start = trip.start.formatted(.dateTime.day().month(.abbreviated))
+        let end = trip.end.formatted(.dateTime.day().month(.abbreviated))
+        if calendar.isDate(trip.start, inSameDayAs: trip.end) { return start }
+        return "\(start)–\(end)"
+    }
+
+    private func reloadTripsAndEvents() {
+        manualTrips = TripPackingStore.manualTrips()
+        let today = calendar.startOfDay(for: currentDate)
+        let start = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+        let end = calendar.date(byAdding: .day, value: 45, to: today) ?? today
+        horizonEvents = CalendarContextService.shared.displayEvents(from: start, to: end)
+        detectedTrips = TripFinder.trips(
+            from: horizonEvents.map(\.tripInput),
+            home: weather.homeCoordinate?.location
+        )
+        reloadDayEvents()
+    }
+
+    private func reloadDayEvents() {
+        dayEvents = horizonEvents
+            .filter { covers($0, day: selectedDay) }
+            .map { event in
+                DayJournalEvent(id: event.id, title: event.title, detail: event.detail, icon: event.icon)
+            }
+    }
+
+    private func covers(_ event: CalendarDisplayEvent, day: Date) -> Bool {
+        let start = calendar.startOfDay(for: event.start)
+        var end = calendar.startOfDay(for: event.end)
+        if event.isAllDay, end > start {
+            end = calendar.date(byAdding: .day, value: -1, to: end) ?? start
+        }
+        let day = calendar.startOfDay(for: day)
+        return day >= start && day <= end
+    }
+
+    private func deleteManualTrip(_ trip: TripSpan) {
+        let remaining = TripPackingStore.manualTrips().filter { $0.id != trip.id }
+        TripPackingStore.saveManual(remaining)
+        manualTrips = remaining
+        packingTrip = nil
     }
 
     private func refreshCurrentDate() {

@@ -34,6 +34,8 @@ enum LookReasonBuilder {
         case favoriteColor(ColorTag)
         /// Neutral fallback: the temperature range it was planned for.
         case weatherRange(low: Int, high: Int)
+        /// The look follows the forecast at a calendar event's tagged place.
+        case dressedForPlace(name: String, low: Int, high: Int)
 
         var garmentID: UUID? {
             switch self {
@@ -54,6 +56,8 @@ enum LookReasonBuilder {
         /// Colors that carry a real share of the user's taste (most-loved first).
         var favoriteColors: [ColorTag] = []
         var now = Date()
+        /// Set when this look was scored on the forecast at a tagged place.
+        var placeName: String? = nil
     }
 
     static let rotationDays = 14
@@ -65,6 +69,16 @@ enum LookReasonBuilder {
         let garments = input.garments
         guard !garments.isEmpty else { return [] }
         var result: [Reason] = []
+
+        if let place = input.placeName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !place.isEmpty,
+           let profile = input.profile {
+            result.append(.dressedForPlace(
+                name: place,
+                low: Int(profile.lowTemp.rounded()),
+                high: Int(profile.highTemp.rounded())
+            ))
+        }
 
         if let profile = input.profile {
             if profile.rainProbability >= rainThreshold, garments.contains(where: handlesRain) {

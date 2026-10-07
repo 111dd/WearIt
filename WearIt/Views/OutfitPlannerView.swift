@@ -70,6 +70,8 @@ struct OutfitPlannerView: View {
     @State private var calendarContextsVersion = 0
     /// Days to re-plan on the next generation pass (dress code / correction changed).
     @State private var pendingCalendarReplan: Set<Int> = []
+    /// Forecasts at tagged calendar places, keyed by place + day.
+    @State private var eventPlaceForecasts: [String: DayForecast] = [:]
     @State private var calendarConnectDismissed = UserDefaults.standard.bool(forKey: "calendar.connectCardDismissed")
     @State private var workQuestionDismissedDay = UserDefaults.standard.double(forKey: "calendar.workQuestionDismissedDay")
     /// Answers to "short with a jacket, or long?", for the learned thresholds.
@@ -635,6 +637,7 @@ struct OutfitPlannerView: View {
             reminderLine: calendarReminder(for: dayIndex).map { reminder in
                 ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
             },
+            placeWeather: placeWeatherSignature(for: dayIndex),
             question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
@@ -889,8 +892,8 @@ struct OutfitPlannerView: View {
                     .foregroundStyle(dayIndex == selectedDayIndex ? Color.accentColor : .primary)
                     .lineLimit(1)
 
-                if let forecast = state.forecast {
-                    dayWeatherLine(forecast)
+                if let forecast = forecastForLook(dayIndex: dayIndex, isEvening: false) {
+                    dayWeatherLine(forecast, placeName: dressedPlaceName(for: dayIndex, isEvening: false))
                 }
 
                 if let event {
@@ -1126,14 +1129,16 @@ struct OutfitPlannerView: View {
         }
     }
 
-    private func dayWeatherLine(_ forecast: DayForecast) -> some View {
+    private func dayWeatherLine(_ forecast: DayForecast, placeName: String? = nil) -> some View {
         let low = Int(forecast.lowTempC.rounded())
         let high = Int(forecast.highTempC.rounded())
         let rain = Int((forecast.rainProbability * 100).rounded())
+        let range = "\(forecast.condition.description) · \(low)°–\(high)°"
+        let line = placeName.map { "\($0) · \(range)" } ?? range
         return HStack(spacing: DS.Spacing.xxs) {
             Image(systemName: forecast.condition.icon)
                 .foregroundStyle(weatherIconColor(for: forecast.condition))
-            Text("\(forecast.condition.description) · \(low)°–\(high)°")
+            Text(line)
                 .lineLimit(1)
             if rain >= 30 {
                 Image(systemName: "umbrella.fill")
@@ -1230,7 +1235,7 @@ struct OutfitPlannerView: View {
             let state = boardState.days[index]
             guard state.overrides.temperatureC == nil,
                   ComfortPreferences.answer(for: state.date) == nil,
-                  let forecast = state.forecast else { continue }
+                  let forecast = forecastForLook(dayIndex: index, isEvening: false) else { continue }
             let profile = DayTemperatureProfile(from: forecast)
             // Rain decides the layer on its own.
             guard profile.rainProbability <= 0.5,
@@ -1433,16 +1438,18 @@ struct OutfitPlannerView: View {
         let habit = habitOccasion(calendar, isEvening: false, dressCode: dressCode)
         let followsHabit = !occasionTitle(habit).isEmpty
             && cachedOccasionStyle.lookFollowsHabit(garments, occasion: habit)
+        let dayForecast = forecastForLook(dayIndex: dayIndex, isEvening: false)
         return LookReasonBuilder.reasons(
             LookReasonBuilder.Input(
                 garments: garments,
-                profile: state.forecast.map { DayTemperatureProfile(from: $0) },
+                profile: dayForecast.map { DayTemperatureProfile(from: $0) },
                 occasion: calendar.occasion(isEvening: false, workDressCode: dressCode),
                 habitOccasion: followsHabit ? habit : nil,
                 lastWorn: cachedLatestWearByGarmentID,
                 combination: cachedCombination,
                 favoriteColors: favoriteColors,
-                now: state.date
+                now: state.date,
+                placeName: dressedPlaceName(for: dayIndex, isEvening: false)
             ),
             limit: 4
         )
@@ -1488,6 +1495,8 @@ struct OutfitPlannerView: View {
             return format("look_reason_favorite_color_format", color.title)
         case .weatherRange(let low, let high):
             return format("look_reason_weather_range_format", low, high)
+        case .dressedForPlace(let name, let low, let high):
+            return format("look_reason_place_format", name, low, high)
         }
     }
 
@@ -1506,6 +1515,7 @@ struct OutfitPlannerView: View {
         case .balancedProportions: return "figure.stand"
         case .favoriteColor: return "paintpalette"
         case .weatherRange: return "thermometer.medium"
+        case .dressedForPlace: return "mappin.and.ellipse"
         }
     }
 
@@ -1546,7 +1556,7 @@ struct OutfitPlannerView: View {
         }
 
         var weatherInfo: LookExplanationRequest.WeatherInfo?
-        if let forecast = state.forecast {
+        if let forecast = forecastForLook(dayIndex: dayIndex, isEvening: false) {
             let profile = DayTemperatureProfile(from: forecast)
             weatherInfo = LookExplanationRequest.WeatherInfo(
                 morningTemp: profile.morningTemp,
@@ -1779,7 +1789,7 @@ struct OutfitPlannerView: View {
         let state = boardState.days[dayIndex]
         var hints: [PlannerHint] = []
 
-        if let forecast = state.forecast {
+        if let forecast = forecastForLook(dayIndex: dayIndex, isEvening: false) {
             hints.append(contentsOf: DayTemperatureProfile(from: forecast).smartHints)
         }
 
@@ -2440,6 +2450,16 @@ struct OutfitPlannerView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
 
+            if showsSeparateEveningPlace(dayIndex),
+               let forecast = forecastForLook(dayIndex: dayIndex, isEvening: true),
+               let name = dressedPlaceName(for: dayIndex, isEvening: true) {
+                let low = Int(forecast.lowTempC.rounded())
+                let high = Int(forecast.highTempC.rounded())
+                Text("\(name) · \(low)°–\(high)°")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if boardState.days[dayIndex].eveningAssignedGarmentIDs.isEmpty {
                 outfitRow(for: dayIndex, lookTime: .evening)
             } else {
@@ -2465,13 +2485,14 @@ struct OutfitPlannerView: View {
         }
 
         // The user's answer for the day ("short with a jacket" / "short, no jacket").
+        let lookForecast = forecastForLook(dayIndex: dayIndex, isEvening: lookTime == .evening)
         if lookTime == .day, let choice = ComfortPreferences.answer(for: state.date) {
-            let rainy = state.forecast.map { DayTemperatureProfile(from: $0).rainProbability > 0.35 } ?? false
+            let rainy = lookForecast.map { DayTemperatureProfile(from: $0).rainProbability > 0.35 } ?? false
             if choice == .shortWithLayer { return true }
             if choice == .shortNoLayer, !rainy { return false }
         }
 
-        if let forecast = state.forecast {
+        if let forecast = lookForecast {
             let profile = DayTemperatureProfile(from: forecast)
             let diurnal = DiurnalTemps(profile: profile)
             let effective = lookTime == .evening ? profile.eveningTemp : profile.effectiveTemp
@@ -3659,12 +3680,13 @@ struct OutfitPlannerView: View {
         let desiredFormality = min(5, max(1, Int(formality.rounded())))
         let temperatureBias = calendar.temperatureBias(isEvening: isEvening)
 
+        let lookForecast = forecastForLook(dayIndex: dayIndex, isEvening: isEvening)
         let temperatureC: Double
         let diurnal: DiurnalTemps?
         if let override = state.overrides.temperatureC {
             diurnal = nil
             temperatureC = override + temperatureBias
-        } else if let forecast = state.forecast {
+        } else if let forecast = lookForecast {
             let profile = DayTemperatureProfile(from: forecast)
             diurnal = DiurnalTemps(profile: profile)
             if isEvening {
@@ -3680,7 +3702,7 @@ struct OutfitPlannerView: View {
         return RecoContext(
             desiredFormality: desiredFormality,
             temperatureC: temperatureC,
-            isRaining: state.effectiveIsRaining,
+            isRaining: state.overrides.isRaining ?? lookForecast?.isRaining ?? state.effectiveIsRaining,
             now: state.date,
             profileID: profile?.id,
             warmthSensitivity: profile?.warmthSensitivity ?? 3,
@@ -3691,7 +3713,7 @@ struct OutfitPlannerView: View {
             occasionKind: calendar.occasion(isEvening: isEvening, workDressCode: dressCode),
             diurnal: diurnal,
             thermalSamples: state.overrides.temperatureC == nil
-                ? (state.forecast?.thermalSamples(for: isEvening ? .evening : .day).map {
+                ? (lookForecast?.thermalSamples(for: isEvening ? .evening : .day).map {
                     ThermalWeatherSample(
                         date: $0.date,
                         temperatureC: $0.temperatureC + temperatureBias,
@@ -3705,6 +3727,120 @@ struct OutfitPlannerView: View {
             layerChoice: isEvening ? nil : ComfortPreferences.answer(for: state.date),
             shortSleeveFromC: ComfortPreferences.shortSleeveFromC(comfortSamples)
         )
+    }
+
+    /// Home forecast, or the forecast at a tagged place when that look is there.
+    private func forecastForLook(dayIndex: Int, isEvening: Bool) -> DayForecast? {
+        guard dayIndex < boardState.days.count else { return nil }
+        let date = boardState.days[dayIndex].date
+        if let pinned = eventPlaceAssignment(for: dayIndex).pinned(isEvening: isEvening),
+           let remote = eventPlaceForecasts[EventLocationForecastService.storageKey(for: pinned.place, on: date)] {
+            return Self.forecast(remote, around: pinned)
+        }
+        return boardState.days[dayIndex].forecast
+    }
+
+    /// A timed event uses the hours around it. An all-day trip keeps the whole day.
+    private static func forecast(_ forecast: DayForecast, around pinned: EventLocationDressing.Pinned) -> DayForecast {
+        guard !pinned.isAllDay else { return forecast }
+        let start = pinned.start.addingTimeInterval(-3600)
+        let end = pinned.start.addingTimeInterval(3 * 3600)
+        let window = forecast.thermalHours.filter {
+            $0.date >= start && $0.date < end && $0.temperatureC.isFinite
+        }
+        guard !window.isEmpty else { return forecast }
+        let temps = window.map(\.temperatureC)
+        let high = temps.max() ?? forecast.highTempC
+        let low = temps.min() ?? forecast.lowTempC
+        let rain = window.map(\.rainProbability).max() ?? forecast.rainProbability
+        return DayForecast(
+            date: forecast.date,
+            temperatureC: high,
+            highTempC: high,
+            lowTempC: low,
+            rainProbability: rain,
+            condition: forecast.condition,
+            thermalHours: window
+        )
+    }
+
+    private func eventPlaceAssignment(for dayIndex: Int) -> EventLocationDressing.Assignment {
+        guard dayIndex < boardState.days.count else { return .none }
+        return EventLocationDressing.assignment(
+            events: calendarContext(for: dayIndex).events,
+            home: weather.homeCoordinate?.location
+        )
+    }
+
+    /// Name shown only once the destination forecast is actually in use.
+    private func dressedPlaceName(for dayIndex: Int, isEvening: Bool) -> String? {
+        guard dayIndex < boardState.days.count else { return nil }
+        let date = boardState.days[dayIndex].date
+        guard let place = eventPlaceAssignment(for: dayIndex).pinned(isEvening: isEvening)?.place,
+              eventPlaceForecasts[EventLocationForecastService.storageKey(for: place, on: date)] != nil else {
+            return nil
+        }
+        let trimmed = place.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? String(localized: "event_place_unnamed") : trimmed
+    }
+
+    /// Evening gets its own line when it is a different place from the day look.
+    private func showsSeparateEveningPlace(_ dayIndex: Int) -> Bool {
+        let assignment = eventPlaceAssignment(for: dayIndex)
+        guard let evening = assignment.evening?.place else { return false }
+        guard let day = assignment.day?.place else { return true }
+        return EventLocationForecastService.placeKey(evening) != EventLocationForecastService.placeKey(day)
+    }
+
+    private func placeWeatherSignature(for dayIndex: Int) -> String? {
+        let day = dressedPlaceName(for: dayIndex, isEvening: false)
+        let evening = dressedPlaceName(for: dayIndex, isEvening: true)
+        guard day != nil || evening != nil else { return nil }
+        func part(_ name: String?, isEvening: Bool) -> String {
+            guard let name, let forecast = forecastForLook(dayIndex: dayIndex, isEvening: isEvening) else { return "" }
+            return "\(name)|\(Int(forecast.lowTempC.rounded()))|\(Int(forecast.highTempC.rounded()))"
+        }
+        return part(day, isEvening: false) + "#" + part(evening, isEvening: true)
+    }
+
+    /// Fetches missing place forecasts. Returns days whose destination weather
+    /// changed enough that an uncommitted look should be planned again.
+    private func refreshEventPlaceForecasts() async -> Set<Int> {
+        let before = placeSignatures()
+        var byPlace: [String: [DayForecast]] = [:]
+        var next: [String: DayForecast] = [:]
+        for index in boardState.days.indices {
+            let date = boardState.days[index].date
+            let assignment = eventPlaceAssignment(for: index)
+            for place in [assignment.day?.place, assignment.evening?.place].compactMap({ $0 }) {
+                let key = EventLocationForecastService.placeKey(place)
+                if byPlace[key] == nil {
+                    byPlace[key] = await EventLocationForecastService.shared.forecasts(for: place)
+                }
+                guard let match = EventLocationForecastService.match(byPlace[key] ?? [], to: date) else { continue }
+                next[EventLocationForecastService.storageKey(for: place, on: date)] = match
+            }
+        }
+        eventPlaceForecasts = next
+        let after = placeSignatures()
+        return Set(boardState.days.indices.filter { before[$0] != after[$0] })
+    }
+
+    private func placeSignatures() -> [Int: String] {
+        var signatures: [Int: String] = [:]
+        for index in boardState.days.indices {
+            let date = boardState.days[index].date
+            let assignment = eventPlaceAssignment(for: index)
+            func part(_ pinned: EventLocationDressing.Pinned?) -> String {
+                guard let pinned else { return "-" }
+                let key = EventLocationForecastService.storageKey(for: pinned.place, on: date)
+                guard let forecast = eventPlaceForecasts[key] else { return "?" }
+                let when = pinned.isAllDay ? "all" : String(Calendar.current.component(.hour, from: pinned.start))
+                return "\(when)|\(Int(forecast.lowTempC.rounded()))|\(Int(forecast.highTempC.rounded()))|\(Int((forecast.rainProbability * 100).rounded()))"
+            }
+            signatures[index] = part(assignment.day) + "#" + part(assignment.evening)
+        }
+        return signatures
     }
 
     private func calendarContext(for dayIndex: Int) -> DayCalendarContext {
@@ -4179,6 +4315,12 @@ struct OutfitPlannerView: View {
         // Days whose calendar meaning changed get a fresh look (locked pieces stay).
         // Kept pending until the pass finishes, so a cancelled pass doesn't lose them.
         pendingCalendarReplan.formUnion(refreshCalendarContextsAndApplyEvening())
+        let placeDays = await refreshEventPlaceForecasts()
+        guard !Task.isCancelled else {
+            pendingCalendarReplan.formUnion(placeDays.filter { canReplanForCalendar($0) })
+            return
+        }
+        pendingCalendarReplan.formUnion(placeDays.filter { canReplanForCalendar($0) })
         let replan = pendingCalendarReplan
         for i in 0..<boardState.days.count {
             guard !Task.isCancelled else { return }
@@ -5447,6 +5589,8 @@ private struct DayCardSignature: Equatable {
     let eventLine: String?
     /// Workout / work-clothes reminder text plus the suggested items.
     let reminderLine: String?
+    /// Destination forecast used for this card ("Jerusalem|8|14"), if any.
+    let placeWeather: String?
     /// The question shown on this card ("short with a jacket?" / "what is this event?").
     let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.

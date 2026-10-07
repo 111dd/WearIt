@@ -20,6 +20,8 @@ final class WeatherCenter: ObservableObject {
     @Published private(set) var isForecastLoading: Bool = false
     @Published private(set) var forecastLastUpdated: Date?
     @Published private(set) var locationName: String?
+    /// Last device fix. Nil until a forecast refresh resolves location.
+    @Published private(set) var homeCoordinate: DeviceCoordinate?
     
     private let forecastService = ForecastService.shared
     private let minRefreshInterval: TimeInterval = 3600
@@ -58,6 +60,7 @@ final class WeatherCenter: ObservableObject {
         updateIfChanged(&forecasts, forecastService.forecasts)
         updateIfChanged(&forecastLastUpdated, forecastService.lastUpdated)
         updateIfChanged(&locationName, forecastService.locationName)
+        updateIfChanged(&homeCoordinate, forecastService.homeCoordinate)
         
         // Update current weather from today's forecast if available
         if let today = forecasts.first {

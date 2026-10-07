@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// One-tap question inside a day card when the sleeve / jacket call is a toss-up.
 struct LayerQuestionCard: View {

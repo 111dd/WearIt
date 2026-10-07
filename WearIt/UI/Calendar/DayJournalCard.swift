@@ -18,6 +18,13 @@ enum DayTiming: Equatable {
     case future
 }
 
+struct DayJournalEvent: Equatable, Identifiable {
+    var id: String
+    var title: String
+    var detail: String
+    var icon: String
+}
+
 struct DayJournalModel {
     let date: Date
     let timing: DayTiming
@@ -32,6 +39,7 @@ struct DayJournalModel {
     let notes: String
     let weather: (text: String, icon: String)?
     let photoPaths: [String]
+    var events: [DayJournalEvent] = []
 
     var hasLook: Bool { !dayItems.isEmpty || !eveningItems.isEmpty }
 }
@@ -62,6 +70,9 @@ struct DayJournalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             header
+            if !model.events.isEmpty {
+                eventsSection
+            }
             lookSection
 
             if model.timing != .future {
@@ -182,6 +193,40 @@ struct DayJournalCard: View {
         .accessibilityLabel(String(localized: "planner_swipe_more_actions"))
     }
 
+    // MARK: Events
+
+    private var eventsSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            DSSectionHeader(String(localized: "calendar_on_this_day"), icon: "calendar")
+            ForEach(Array(model.events.prefix(4))) { event in
+                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+                    Image(systemName: event.icon)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 18)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(event.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        if !event.detail.isEmpty {
+                            Text(event.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if model.events.count > 4 {
+                Text(String(format: String(localized: "calendar_events_more_format"), model.events.count - 4))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     // MARK: Look
 
     @ViewBuilder
@@ -190,6 +235,11 @@ struct DayJournalCard: View {
             emptyLook
         } else {
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                if !model.events.isEmpty {
+                    Text(String(localized: "calendar_look_heading"))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 if model.hasEveningLook {
                     Picker("", selection: $lookTime) {
                         Text(String(localized: "calendar_segment_day")).tag(LookTime.day)
