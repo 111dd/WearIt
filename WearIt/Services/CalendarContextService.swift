@@ -70,6 +70,8 @@ struct CalendarDayEvent: Equatable {
     let isEvening: Bool
     /// Map pin, when the event has a tagged location. Nil for a text-only place.
     var place: EventPlace? = nil
+    /// When the event ends, so the app knows what comes after work.
+    var end: Date? = nil
 
     var occasion: CalendarOccasionKind {
         switch kind {
@@ -418,7 +420,8 @@ final class CalendarContextService {
                 isAllDay: event.isAllDay,
                 kind: kind,
                 isEvening: isEvening,
-                place: Self.place(on: event, kind: kind)
+                place: Self.place(on: event, kind: kind),
+                end: event.endDate
             )
         }
         .sorted { $0.start < $1.start }

@@ -130,6 +130,11 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - **Product links**: shop-specific sources go in `Services/ShopProductAdapters` (Zara also registered in
   `ProductURLResolverRegistry`) and build the result with `ProductPageMetadataService.makeProduct`; they return
   nil / fall back to the generic reader instead of failing. Never fill size from a product page.
+- **Uniform work days**: only when `UserProfile.workDressCode == .uniform` and the day has a timed work event.
+  `WorkDayAttirePreferences` (UserDefaults, per day, last answer inherited) holds "work clothes only" / "own clothes".
+  Work clothes only + nothing before work = no day look (`isUniformOnlyDay`; cleared once per day, never a worn or
+  committed one unless the user taps the choice). A plan before work dresses the day look; a non-workout plan
+  after work turns on the evening look, labeled "After work".
 - **Love is learned, never asked**: there is no love control in the UI. `Garment.loveScore` moves only through
   signals: confirmed wear (+1 live via `WearHistoryService` `loveScoreDelta`), look feedback, Style Swipe, and
   `LoveScoreLearner` (swaps, neglect decay; deferred bootstrap). Don't count wears twice.
@@ -158,6 +163,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-07 · Claude Code · Uniform work days: the work row asks "work clothes only / my own clothes" (per day, last answer carries over, `Logic/WorkDayAttire`). Work clothes only clears the day look (and its wears, so stats skip it), offers an "after work" look, and reads plans before/after the shift (`WorkDaySchedule`). Hebrew "תחתון" is now "מכנסיים"; wardrobe questions show the item's photo.
 - 2026-10-07 · Claude Code · Interactive place search (`UI/PlaceSearchField`, suggestions open while typing): used for a hand-made trip's destination and for an event's typed location from the calendar journal.
 - 2026-10-07 · Claude Code · Away-from-home polish: a trip or all-day event with a typed place ("Eilat", no map pin) now counts after a one-time cached lookup; the last device location is saved so pins work right after launch.
 - 2026-10-06 · Cursor · Calendar journal shows the day's events. A detected or hand-made trip opens a suitcase: a look per day, editable underwear/socks counts, swimwear when the destination is warm and a coat when it's cold.

@@ -22,8 +22,8 @@
 "planner_reco_guidance_evening_jacket" = "ערב קריר — מומלץ להוסיף מעיל";
 "planner_reco_guidance_rain" = "סיכוי לגשם — מומלץ לקחת שכבה";
 "planner_remove_outerwear" = "הסר עליון";
-"planner_evening_link_bottom" = "השתמש באותו תחתון כמו ביום";
-"planner_evening_unlink_bottom" = "הפסק להשתמש בתחתון של היום";
+"planner_evening_link_bottom" = "להשאיר את המכנסיים של היום";
+"planner_evening_unlink_bottom" = "מכנסיים אחרים לערב";
 "planner_evening_link_day" = "השתמש באותו פריט כמו ביום";
 "planner_evening_unlink_day" = "הפסק לקשר ליום";
 "signin_continue_offline" = "המשך במצב לא מקוון";
@@ -460,7 +460,7 @@
 
 // MARK: - Outfit Slots
 "slot_top" = "עליון";
-"slot_bottom" = "תחתון";
+"slot_bottom" = "מכנסיים";
 "slot_shoes" = "נעליים";
 "slot_outer" = "מעיל";
 "slot_accessory" = "אביזר";
@@ -1093,3 +1093,14 @@
 "event_place_save" = "שמירה";
 "event_place_clear" = "הסרת המקום שנבחר";
 "event_place_row_hint" = "בחירת המקום על המפה";
+
+/* Uniform work day */
+"work_attire_uniform" = "רק בגדי עבודה";
+"work_attire_own" = "בגדים שלי";
+"work_day_question" = "יום עבודה · מה לובשים היום?";
+"work_day_own_title" = "יום עבודה · בגדים משלי";
+"work_day_before_format" = "לפני העבודה: %@. הלוק כאן הוא בשביל זה.";
+"work_day_not_counted" = "רק בגדי עבודה, אז היום לא ייכנס לסטטיסטיקה של הבגדים.";
+"work_day_add_after" = "הצע לוק לאחרי העבודה";
+"work_day_add_after_format" = "הצע לוק לאחרי העבודה: %@";
+"planner_after_work_look" = "אחרי העבודה";

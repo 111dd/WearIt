@@ -1074,3 +1074,14 @@
 "event_place_save" = "Save";
 "event_place_clear" = "Remove the chosen place";
 "event_place_row_hint" = "Choose the place on the map";
+
+/* Uniform work day */
+"work_attire_uniform" = "Work clothes only";
+"work_attire_own" = "My own clothes";
+"work_day_question" = "Work day · what are you wearing?";
+"work_day_own_title" = "Work day · my own clothes";
+"work_day_before_format" = "Before work: %@. This look is for that.";
+"work_day_not_counted" = "Only work clothes, so today won't count in your clothes stats.";
+"work_day_add_after" = "Suggest a look for after work";
+"work_day_add_after_format" = "Suggest a look for after work: %@";
+"planner_after_work_look" = "After work";

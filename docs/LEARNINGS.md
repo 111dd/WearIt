@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Work clothes only days
+- **Did:** the uniform work row became a choice (`WorkDayAttire`), with before/after-work plans from `WorkDaySchedule` (needs `CalendarDayEvent.end`). Uniform-only days skip `generateDayOutfit` and drop the planned look once (`WorkDayAttirePreferences.markApplied`).
+- **Why:** dor wears a uniform: the day look was noise and polluted wear stats, and the real need is a look for after work.
+- **Watch:** the row's state lives in UserDefaults, so it is in `DayCardSignature.reminderLine` (the card is `.equatable()`). A manual look added on a uniform-only day must survive the next generation pass (that's what the applied flag is for).
+
 ## 2026-10-07 — Place search with live suggestions
 - **Did:** `PlaceSearchField` (MKLocalSearchCompleter + MKLocalSearch) in the manual trip sheet and in `EventPlacePickerSheet`, opened from an event row with a typed location and no map pin. A pick is saved in `TypedEventPlaceResolver` as `userPicked` and posts `.calendarUnderstandingChanged`.
 - **Why:** dor wanted to choose the place from a list instead of trusting a one-shot guess.

@@ -57,7 +57,8 @@ struct SleeveQuestionCard: View {
         QuestionCardShell(
             icon: "tshirt",
             title: String(format: String(localized: "micro_question_sleeve_format"), garment.displayTitle),
-            onDismiss: onDone
+            onDismiss: onDone,
+            garment: garment
         ) {
             HStack(spacing: DS.Spacing.xs) {
                 ForEach(SleeveLength.allCases) { sleeve in
@@ -85,7 +86,8 @@ struct OccasionFitQuestionCard: View {
         QuestionCardShell(
             icon: occasion.icon,
             title: String(format: String(localized: "fits_question_format"), garment.displayTitle, occasion.title),
-            onDismiss: onDone
+            onDismiss: onDone,
+            garment: garment
         ) {
             HStack(spacing: DS.Spacing.xs) {
                 QuestionChip(title: String(localized: "fits_question_yes"), icon: "checkmark") { answer(true) }
@@ -107,15 +109,22 @@ private struct QuestionCardShell<Choices: View>: View {
     let icon: String
     let title: String
     let onDismiss: () -> Void
+    /// The item the question is about, shown as a small photo so it's clear which one.
+    var garment: Garment? = nil
     @ViewBuilder let choices: () -> Choices
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            HStack(alignment: .top, spacing: DS.Spacing.sm) {
-                Image(systemName: icon)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 28)
+            HStack(alignment: garment == nil ? .top : .center, spacing: DS.Spacing.sm) {
+                if let garment {
+                    DSGarmentThumbnail(garment, size: .small)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: icon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: 28)
+                }
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
