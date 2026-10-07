@@ -1007,10 +1007,22 @@ final class AIRecommender {
             var pieces = look.garments
             var current = look
             for category in [Category.outer, .accessory] where category != lockedCategory {
-                if category == .outer, ctx.outerLayerPolicy == .suppress { continue }
+                // A warm, dry day has no weather layer; a light jacket over short
+                // sleeves is still offered on some days as a styling option.
+                var styleLayer = false
+                if category == .outer, ctx.outerLayerPolicy == .suppress {
+                    guard Self.offersStyleLayer(over: pieces, ctx: ctx) else { continue }
+                    styleLayer = true
+                }
                 let used = excludeSet.union(pieces.map(\.id))
+                let source = styleLayer
+                    ? garments.filter { g in
+                        g.category == .outer && !g.isBlocked && !excludeSet.contains(g.id)
+                            && !g.isCurrentlyUnavailable && g.recommendationWarmth <= Self.styleLayerMaxWarmth
+                    }
+                    : pool(for: category)
                 let candidates = rankedSuggestions(
-                    from: pool(for: category),
+                    from: source,
                     k: 4,
                     ctx: ctx,
                     modelContext: modelContext,
@@ -1031,6 +1043,7 @@ final class AIRecommender {
                 }
                 // Outer layers are weather-driven: add the best one whenever allowed.
                 // Accessories only when they don't drag the look down.
+                // A style layer is added on the days `offersStyleLayer` picks, whatever its weather score.
                 if let best, category == .outer || best.score >= current.score - 0.02 {
                     pieces = best.garments
                     current = best
@@ -1039,6 +1052,26 @@ final class AIRecommender {
             return current
         }
         .filter { !$0.garments.isEmpty }
+    }
+
+    // MARK: - Style layer
+
+    /// Light jackets only (denim jacket, overshirt, light bomber).
+    static let styleLayerMaxWarmth = 2
+    /// Mild enough that a light jacket over short sleeves is comfortable.
+    static let styleLayerTempRange: Range<Double> = 20..<25
+
+    /// A light jacket over a short-sleeve top on a mild, dry day, on about every
+    /// other such day (stable per day and top) so the looks vary. Not when the
+    /// user said "short, no jacket" for the day.
+    static func offersStyleLayer(over pieces: [Garment], ctx: RecoContext) -> Bool {
+        guard !ctx.isRaining, styleLayerTempRange.contains(ctx.temperatureC) else { return false }
+        if ctx.lookTime == .day, ctx.layerChoice == .shortNoLayer || ctx.layerChoice == .long { return false }
+        guard let top = pieces.first(where: { $0.category == .top }), top.sleeveLength == .short else { return false }
+        if ctx.lookTime == .day, ctx.layerChoice == .shortWithLayer { return true }
+        let day = Int(Calendar.current.startOfDay(for: ctx.now).timeIntervalSince1970 / 86_400)
+        let topSeed = top.id.uuidString.unicodeScalars.reduce(0) { ($0 &+ Int($1.value)) % 1_000 }
+        return (day + topSeed) % 2 == 0
     }
 
     /// Suggest a complete outfit, ranked as a whole look (see `rankLooks`).

@@ -15,15 +15,23 @@ enum WardrobeGapAnalyzer {
         var upcomingRainyDays = 0
         var upcomingColdDays = 0
         var upcomingHotDays = 0
+        /// In-between days (cool morning or evening, mild day): light-jacket weather.
+        var upcomingMildDays = 0
         /// Past context samples (from feedback events), used when the forecast is quiet.
         var pastSamples = 0
         var pastRainyShare = 0.0
         var pastColdShare = 0.0
         var pastHotShare = 0.0
+        var pastMildShare = 0.0
 
         static let rainProbabilityThreshold = 0.5
         static let coldThresholdC = 10.0
         static let hotThresholdC = 28.0
+        /// A day is "mild" when it reaches this but starts or ends below `mildLowBelowC`.
+        static let mildHighFromC = 18.0
+        static let mildLowBelowC = 20.0
+        /// Past samples in this range count as light-jacket weather.
+        static let mildPastRange: Range<Double> = 15..<24
         /// Below this many past samples, history alone never triggers a gap.
         static let minPastSamples = 8
     }
@@ -41,6 +49,8 @@ enum WardrobeGapAnalyzer {
         var pastFormalShare = 0.0
         var taste: TasteAffinityBuilder.Profile = .empty
         var now = Date()
+        /// Also flag categories too thin to rotate (Stats and the planner turn this on).
+        var checksRotation = false
     }
 
     // MARK: - Output
@@ -55,6 +65,10 @@ enum WardrobeGapAnalyzer {
         case formalBottom
         case formalShoes
         case workhorseBackup
+        /// Light jacket / overshirt for in-between days and to layer over short sleeves.
+        case lightLayer
+        /// So few items in a category that the planner keeps repeating them.
+        case thinRotation
     }
 
     /// Why the gap was raised. The view layer turns this into localized text.
@@ -70,6 +84,10 @@ enum WardrobeGapAnalyzer {
         case formalHabit(share: Double)
         /// One item carries a large share of all wear days and has no alternative.
         case heavyRotation(garmentID: UUID, share: Double)
+        case upcomingMild(days: Int)
+        case mildClimate(share: Double)
+        /// `have` usable items where about `target` keep a week of looks fresh.
+        case thinRotation(category: Category, have: Int, target: Int)
     }
 
     struct Suggestion: Equatable {
@@ -112,6 +130,8 @@ enum WardrobeGapAnalyzer {
         if let gap = hotWeatherGap(usable, input: input) { gaps.append(gap) }
         gaps += formalGaps(usable, input: input)
         gaps += workhorseGaps(usable, input: input)
+        if let gap = lightLayerGap(usable, input: input) { gaps.append(gap) }
+        gaps += thinRotationGaps(usable, input: input)
 
         return gaps.sorted { lhs, rhs in
             if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
@@ -312,6 +332,81 @@ enum WardrobeGapAnalyzer {
         }
     }
 
+    private static func lightLayerGap(_ garments: [Garment], input: Input) -> Gap? {
+        let climate = input.climate
+        let reason: Reason
+        if climate.upcomingMildDays > 0 {
+            reason = .upcomingMild(days: climate.upcomingMildDays)
+        } else if climate.pastSamples >= ClimateEvidence.minPastSamples, climate.pastMildShare >= 0.25 {
+            reason = .mildClimate(share: climate.pastMildShare)
+        } else {
+            return nil
+        }
+        let covered = garments.contains {
+            $0.category == .outer && !$0.isCurrentlyUnavailable
+                && $0.recommendationWarmth <= AIRecommender.styleLayerMaxWarmth
+        }
+        guard !covered else { return nil }
+        let suggestion = makeSuggestion(
+            category: .outer,
+            itemType: .jacket,
+            garments: garments,
+            taste: input.taste,
+            preferNeutral: true
+        )
+        return Gap(kind: .lightLayer, reason: reason, suggestion: suggestion, priority: urgency(reason, base: 0.55))
+    }
+
+    /// About a week of looks without repeating: the planner rotates through these.
+    static let rotationTargets: [Category: Int] = [.top: 7, .bottom: 4, .shoes: 3]
+
+    /// Usable items per category against its rotation target (the wardrobe at a glance).
+    struct Coverage: Identifiable, Equatable {
+        var category: Category
+        var have: Int
+        var target: Int
+        var id: String { category.rawValue }
+        var isShort: Bool { have < target }
+    }
+
+    static func coverage(_ garments: [Garment]) -> [Coverage] {
+        let usable = garments.filter { !$0.isBlocked && !$0.isCurrentlyUnavailable }
+        return [Category.top, .bottom, .shoes].map { category in
+            Coverage(
+                category: category,
+                have: usable.filter { $0.category == category }.count,
+                target: rotationTargets[category] ?? 0
+            )
+        }
+    }
+
+    private static func thinRotationGaps(_ garments: [Garment], input: Input) -> [Gap] {
+        guard input.checksRotation else { return [] }
+        return coverage(garments).compactMap { row -> Gap? in
+            // Zero items is `missingCore`.
+            guard row.have > 0, row.isShort else { return nil }
+            // The type the user owns most in this category is the safest next buy.
+            let types = garments.filter { $0.category == row.category }.compactMap(\.itemType)
+            let commonType = Dictionary(grouping: types, by: { $0 })
+                .max { $0.value.count < $1.value.count }?.key
+            let suggestion = makeSuggestion(
+                category: row.category,
+                itemType: commonType ?? defaultItemType(for: row.category),
+                garments: garments,
+                taste: input.taste,
+                preferNeutral: row.category != .top
+            )
+            let missingShare = Double(row.target - row.have) / Double(row.target)
+            return Gap(
+                kind: .thinRotation,
+                target: row.category.rawValue,
+                reason: .thinRotation(category: row.category, have: row.have, target: row.target),
+                suggestion: suggestion,
+                priority: 0.4 + 0.35 * missingShare
+            )
+        }
+    }
+
     // MARK: - Evidence helpers
 
     private static func rainReason(_ climate: ClimateEvidence) -> Reason? {
@@ -328,7 +423,7 @@ enum WardrobeGapAnalyzer {
     private static func urgency(_ reason: Reason, base: Double) -> Double {
         switch reason {
         case .upcomingRain(let days), .upcomingCold(let days),
-             .upcomingHeat(let days), .upcomingFormal(let days):
+             .upcomingHeat(let days), .upcomingFormal(let days), .upcomingMild(let days):
             return min(1, base + 0.05 * Double(min(days, 4)))
         default:
             return base * 0.8
@@ -452,6 +547,11 @@ extension WardrobeGapAnalyzer {
             if day.highTempC >= ClimateEvidence.hotThresholdC {
                 climate.upcomingHotDays += 1
             }
+            if day.highTempC >= ClimateEvidence.mildHighFromC,
+               day.highTempC < ClimateEvidence.hotThresholdC,
+               day.lowTempC < ClimateEvidence.mildLowBelowC {
+                climate.upcomingMildDays += 1
+            }
         }
 
         // One sample per plan/day so a burst of feedback on one day doesn't dominate.
@@ -468,6 +568,7 @@ extension WardrobeGapAnalyzer {
             climate.pastRainyShare = Double(values.filter { $0.rain }.count) / total
             climate.pastColdShare = Double(values.filter { $0.temp <= ClimateEvidence.coldThresholdC }.count) / total
             climate.pastHotShare = Double(values.filter { $0.temp >= ClimateEvidence.hotThresholdC }.count) / total
+            climate.pastMildShare = Double(values.filter { ClimateEvidence.mildPastRange.contains($0.temp) }.count) / total
         }
         return climate
     }

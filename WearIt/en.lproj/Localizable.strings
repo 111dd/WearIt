@@ -1085,3 +1085,12 @@
 "work_day_add_after" = "Suggest a look for after work";
 "work_day_add_after_format" = "Suggest a look for after work: %@";
 "planner_after_work_look" = "After work";
+
+/* Wardrobe analysis */
+"planner_change_to_format" = "Instead: %@";
+"planner_gap_add_format" = "Add a %@ to your wardrobe";
+"gap_title_light_layer" = "A light jacket";
+"gap_title_more_format" = "More %@";
+"gap_reason_upcoming_mild_format" = "In-between days coming: %d. A light jacket over short sleeves adds variety.";
+"gap_reason_mild_climate_format" = "About %d%% of your planned days were light-jacket weather.";
+"gap_reason_thin_rotation_format" = "You have %d %@; at least %d keep a week of looks from repeating.";

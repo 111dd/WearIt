@@ -163,6 +163,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-07 · Claude Code · Wardrobe analysis + variety: a light jacket over short sleeves on mild dry days (about every other day, `AIRecommender.offersStyleLayer`); new gaps `lightLayer` and `thinRotation` (tops 7 / bottoms 4 / shoes 3, `WardrobeGapAnalyzer.coverage` shown in Stats); the planner shows one "add to your wardrobe" card when the board repeats a thin category or the weather needs a missing layer. Swap suggestions name the item type and show the suggested piece; Hebrew top slot is "חולצה".
 - 2026-10-07 · Claude Code · Uniform work days: the work row asks "work clothes only / my own clothes" (per day, last answer carries over, `Logic/WorkDayAttire`). Work clothes only clears the day look (and its wears, so stats skip it), offers an "after work" look, and reads plans before/after the shift (`WorkDaySchedule`). Hebrew "תחתון" is now "מכנסיים"; wardrobe questions show the item's photo.
 - 2026-10-07 · Claude Code · Interactive place search (`UI/PlaceSearchField`, suggestions open while typing): used for a hand-made trip's destination and for an event's typed location from the calendar journal.
 - 2026-10-07 · Claude Code · Away-from-home polish: a trip or all-day event with a typed place ("Eilat", no map pin) now counts after a one-time cached lookup; the last device location is saved so pins work right after launch.

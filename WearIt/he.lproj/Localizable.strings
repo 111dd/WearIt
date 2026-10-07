@@ -459,7 +459,7 @@
 "success_updated" = "עודכן";
 
 // MARK: - Outfit Slots
-"slot_top" = "עליון";
+"slot_top" = "חולצה";
 "slot_bottom" = "מכנסיים";
 "slot_shoes" = "נעליים";
 "slot_outer" = "מעיל";
@@ -1104,3 +1104,12 @@
 "work_day_add_after" = "הצע לוק לאחרי העבודה";
 "work_day_add_after_format" = "הצע לוק לאחרי העבודה: %@";
 "planner_after_work_look" = "אחרי העבודה";
+
+/* Wardrobe analysis */
+"planner_change_to_format" = "במקום: %@";
+"planner_gap_add_format" = "הוספת %@ לארון";
+"gap_title_light_layer" = "ג׳קט קל";
+"gap_title_more_format" = "עוד %@";
+"gap_reason_upcoming_mild_format" = "ימי מעבר בתחזית: %d. ג׳קט קל מעל חולצה קצרה יגוון את הלוקים.";
+"gap_reason_mild_climate_format" = "בכ-%d%% מהימים שתכננת היה מזג אוויר של ג׳קט קל.";
+"gap_reason_thin_rotation_format" = "יש %d %@, וכדי לא לחזור על בגדים במשך שבוע כדאי שיהיו לפחות %d.";

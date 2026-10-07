@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Style layer and wardrobe depth
+- **Did:** `rankLooks` adds a light outer (warmth ≤ 2) over a short-sleeve top on dry 20–25° days when `offersStyleLayer` says so (stable per day + top, skipped for "short, no jacket" / "long"). `WardrobeGapAnalyzer` got `lightLayer`, `thinRotation` (only with `Input.checksRotation`) and `coverage`. Planner nudge: `computeWardrobeGapNudge`, snoozed 14 days per gap id.
+- **Why:** dor wanted varied looks (jacket + tee) and the app to say what's missing instead of repeating clothes, as groundwork for "what to buy".
+- **Watch:** the style layer bypasses the suppress-policy score penalty on purpose; don't "fix" it by letting the look score decide, or it never appears. Existing gap tests assume rotation checks are off by default.
+
 ## 2026-10-07 — Work clothes only days
 - **Did:** the uniform work row became a choice (`WorkDayAttire`), with before/after-work plans from `WorkDaySchedule` (needs `CalendarDayEvent.end`). Uniform-only days skip `generateDayOutfit` and drop the planned look once (`WorkDayAttirePreferences.markApplied`).
 - **Why:** dor wears a uniform: the day look was noise and polluted wear stats, and the real need is a look for after work.
