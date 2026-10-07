@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Design review phase 1: bugs and speed
+- **Did:** "Clear day" now persists; `WearEventStore` fetches one day by `#Predicate` instead of the whole table; wardrobe builds the wear map and its daily question once per rebuild; calendar day/period swipes use `HorizontalSwipeGesture` (which now ignores touches inside nested horizontal scroll views); journal notes save to the day they were typed on and commit on disappear; pushed screens use `compactNavBar()` so their back button never hides; sign-in banner is a `safeAreaInset`; leftover English strings localized. Full review: project `audits/design-review.md`.
+- **Why:** the planner fetched every `WearEvent` three times per redraw, cleared looks came back on the next hydrate, and the card `.id(selectedDay)` dropped a note being typed when the user swiped.
+- **Watch:** `hidesBarsOnSwipe` lives on the shared navigation controller: use `minimalCollapsingNavBar()` only on a tab's root screen and `compactNavBar()` on anything pushed or shown in a sheet. A card keyed by `.id(...)` is destroyed on change, so any draft it holds must carry its own key when saved.
+
 ## 2026-10-07 — Xcode Cloud export: "Could not find Info.plist for exported archive"
 - **Did:** renamed `WearIt/info.plist` to `WearIt/Info.plist` (git case-only rename) and added `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO`.
 - **Why:** git tracked the file in lowercase, but `INFOPLIST_FILE` and the synchronized-group membership exception use `Info.plist`. A fresh clone (Xcode Cloud) can treat the lowercase file as a resource and copy it over the generated Info.plist, so export finds no app version (inferred, not reproduced).

@@ -122,7 +122,7 @@ struct CalendarLookView: View {
             onOpenPlanner: { openInPlanner() },
             onSetStatus: { setWearStatus($0) },
             onSetTemperatureFeedback: { setTemperatureFeedback($0) },
-            onSaveNotes: { saveNotes($0) },
+            onSaveNotes: { notes, date in saveNotes(notes, on: date) },
             onOpenCamera: { showCamera = true },
             onRemovePhoto: { removePhoto(at: $0) },
             onPickEventPlace: { placePickerEvent = $0 }
@@ -291,14 +291,21 @@ struct CalendarLookView: View {
         )
     }
 
-    private var daySwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 32)
-            .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                let forward = value.translation.width < 0
-                let step = (layoutDirection == .rightToLeft ? !forward : forward) ? 1 : -1
-                shiftDay(by: step)
-            }
+    /// Same UIKit pan the planner uses: a SwiftUI `DragGesture` here fought the
+    /// vertical scroll and the day's horizontal photo strip.
+    private var daySwipeGesture: HorizontalSwipeGesture {
+        HorizontalSwipeGesture(
+            onChanged: { _ in },
+            onEnded: { travel, speed in
+                let isFling = abs(travel) >= 30 && speed >= 700
+                guard abs(travel) >= 72 || isFling else { return }
+                // Mirrored in Hebrew: a swipe to the left goes back, not forward.
+                let leftward = travel < 0
+                let forward = layoutDirection == .rightToLeft ? !leftward : leftward
+                shiftDay(by: forward ? 1 : -1)
+            },
+            onCancelled: {}
+        )
     }
 
     private func shiftDay(by step: Int) {
@@ -589,8 +596,10 @@ struct CalendarLookView: View {
         try? context.save()
     }
 
-    private func saveNotes(_ notes: String) {
-        let plan = planForSelectedDay ?? DayPlanService.shared.planFor(date: selectedDay, context: context)
+    /// `date` is the day the note was typed on, not the selected one: a note
+    /// committed while the user swipes away must still reach its own day.
+    private func saveNotes(_ notes: String, on date: Date) {
+        let plan = DayPlanService.shared.planFor(date: date, context: context)
         plan.notes = notes.isEmpty ? nil : notes
         plan.updatedAt = Date()
         try? context.save()

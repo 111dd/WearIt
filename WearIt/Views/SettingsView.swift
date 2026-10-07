@@ -80,7 +80,7 @@ struct SettingsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle(String(localized: "settings_title"))
-        .minimalCollapsingNavBar()
+        .compactNavBar()
         .onAppear {
             refreshCurrentDate()
             loadTasteValues()

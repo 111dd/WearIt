@@ -52,7 +52,9 @@ struct RootView: View {
                 .ignoresSafeArea()
         }
         .animation(reduceMotion ? nil : DS.Animation.transition, value: selected)
-        .overlay(alignment: .top) {
+        // An inset, not an overlay: as an overlay the banner sat under the
+        // Dynamic Island and covered the toolbar buttons of every tab.
+        .safeAreaInset(edge: .top, spacing: 0) {
             if shouldShowSignInCTA {
                 signInBanner
             }
@@ -136,37 +138,32 @@ struct RootView: View {
     }
 
     private var signInBanner: some View {
-        VStack {
-            HStack(spacing: DS.Spacing.sm) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(String(localized: "backup_cta_title"))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(backupCTASubtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Button {
-                    showSignInSheet = true
-                } label: {
-                    Text(String(localized: "backup_cta_action"))
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, DS.Spacing.sm)
-                        .padding(.vertical, 6)
-                        .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.12))
-                }
-                .buttonStyle(.plain)
+        HStack(spacing: DS.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "backup_cta_title"))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(backupCTASubtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.sm)
-            .liquidGlassSurface(cornerRadius: 0, tint: Color.accentColor.opacity(0.035))
 
-            Spacer()
+            Spacer(minLength: DS.Spacing.xs)
+
+            Button {
+                showSignInSheet = true
+            } label: {
+                Text(String(localized: "backup_cta_action"))
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .padding(.vertical, 6)
+                    .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.12))
+            }
+            .buttonStyle(.plain)
         }
-        .ignoresSafeArea(edges: .top)
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.sm)
+        .liquidGlassSurface(cornerRadius: 0, tint: Color.accentColor.opacity(0.035))
     }
 
     private var backupCTASubtitle: String {
