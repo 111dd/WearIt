@@ -1113,3 +1113,13 @@
 "gap_reason_upcoming_mild_format" = "ימי מעבר בתחזית: %d. ג׳קט קל מעל חולצה קצרה יגוון את הלוקים.";
 "gap_reason_mild_climate_format" = "בכ-%d%% מהימים שתכננת היה מזג אוויר של ג׳קט קל.";
 "gap_reason_thin_rotation_format" = "יש %d %@, וכדי לא לחזור על בגדים במשך שבוע כדאי שיהיו לפחות %d.";
+
+/* Planner: cool morning / evening jacket tip */
+"planner_layer_tip_morning_format" = "בוקר קריר (%d°)";
+"planner_layer_tip_evening_format" = "ערב קריר (%d°)";
+"planner_layer_tip_both_format" = "בוקר וערב קרירים (%d°)";
+"planner_layer_tip_take_format" = "לקחת %@ על החולצה הקצרה?";
+"planner_layer_tip_none" = "אין עדיין ג׳קט קל בארון";
+"planner_layer_tip_add" = "הוסף";
+"planner_layer_tip_add_wardrobe" = "הוספה לארון";
+"planner_layer_tip_dismiss" = "לא צריך";

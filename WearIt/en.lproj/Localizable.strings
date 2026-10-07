@@ -1094,3 +1094,13 @@
 "gap_reason_upcoming_mild_format" = "In-between days coming: %d. A light jacket over short sleeves adds variety.";
 "gap_reason_mild_climate_format" = "About %d%% of your planned days were light-jacket weather.";
 "gap_reason_thin_rotation_format" = "You have %d %@; at least %d keep a week of looks from repeating.";
+
+/* Planner: cool morning / evening jacket tip */
+"planner_layer_tip_morning_format" = "Cool morning (%d°)";
+"planner_layer_tip_evening_format" = "Cool evening (%d°)";
+"planner_layer_tip_both_format" = "Cool morning and evening (%d°)";
+"planner_layer_tip_take_format" = "Take %@ over the short sleeves?";
+"planner_layer_tip_none" = "No light jacket in your wardrobe yet";
+"planner_layer_tip_add" = "Add";
+"planner_layer_tip_add_wardrobe" = "Add one";
+"planner_layer_tip_dismiss" = "Not needed";

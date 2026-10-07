@@ -5,6 +5,22 @@ import Testing
 struct ComfortPreferencesTests {
     private typealias Sample = ComfortPreferences.Sample
 
+    @Test func coolHourJacketTemperatureFollowsAnswers() {
+        typealias Cool = ComfortPreferences.CoolHourSample
+        #expect(ComfortPreferences.coolHourJacketBelowC([]) == ComfortPreferences.defaultCoolHourJacketBelowC)
+        // Runs cold: wants a jacket a degree earlier.
+        #expect(ComfortPreferences.coolHourJacketBelowC([], warmthSensitivity: 4) == ComfortPreferences.defaultCoolHourJacketBelowC + 1)
+        // "Not needed" at 17° drops it under 17°; "yes" at 21° lifts it over 21°.
+        #expect(ComfortPreferences.coolHourJacketBelowC([Cool(temperatureC: 17, tookJacket: false)]) < 17)
+        #expect(ComfortPreferences.coolHourJacketBelowC([Cool(temperatureC: 21, tookJacket: true)]) > 21)
+        // Enough of both settles between them.
+        let both = [
+            Cool(temperatureC: 15, tookJacket: true), Cool(temperatureC: 16, tookJacket: true),
+            Cool(temperatureC: 19, tookJacket: false), Cool(temperatureC: 20, tookJacket: false)
+        ]
+        #expect(abs(ComfortPreferences.coolHourJacketBelowC(both) - 17.5) < 0.01)
+    }
+
     @Test func asksOnInBetweenDaysBeforeAnythingIsLearned() {
         #expect(ComfortPreferences.isBorderline(temperatureC: 20, low: 17, high: 23, samples: []))
         #expect(ComfortPreferences.isBorderline(temperatureC: 25, low: 14, high: 27, samples: []))   // big swing

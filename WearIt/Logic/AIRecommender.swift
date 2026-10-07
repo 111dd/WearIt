@@ -566,12 +566,13 @@ final class AIRecommender {
             case .suppress:
                 score -= ctx.isHot ? 0.35 : 0.28
             case .lightOnly:
-                if g.recommendationWarmth >= 4 {
+                if !TemperatureComfort.isLightLayer(g) {
                     score -= 0.3
                 } else if g.recommendationWarmth <= 2 {
                     score += 0.06
                 } else {
-                    score -= 0.12
+                    // A regular jacket (warmth 3) is the usual light layer.
+                    score += 0.03
                 }
             case .prefer:
                 if g.recommendationWarmth >= 4, ctx.temperatureC >= 16 {
@@ -1018,7 +1019,7 @@ final class AIRecommender {
                 let source = styleLayer
                     ? garments.filter { g in
                         g.category == .outer && !g.isBlocked && !excludeSet.contains(g.id)
-                            && !g.isCurrentlyUnavailable && g.recommendationWarmth <= Self.styleLayerMaxWarmth
+                            && !g.isCurrentlyUnavailable && TemperatureComfort.isLightLayer(g)
                     }
                     : pool(for: category)
                 let candidates = rankedSuggestions(
@@ -1056,10 +1057,9 @@ final class AIRecommender {
 
     // MARK: - Style layer
 
-    /// Light jackets only (denim jacket, overshirt, light bomber).
-    static let styleLayerMaxWarmth = 2
-    /// Mild enough that a light jacket over short sleeves is comfortable.
-    static let styleLayerTempRange: Range<Double> = 20..<25
+    /// Mild enough that a light jacket over short sleeves is comfortable
+    /// (the day's weighted temperature, so a 19–29° day lands near 26).
+    static let styleLayerTempRange: Range<Double> = 18..<27
 
     /// A light jacket over a short-sleeve top on a mild, dry day, on about every
     /// other such day (stable per day and top) so the looks vary. Not when the

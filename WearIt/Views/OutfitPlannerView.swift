@@ -80,6 +80,10 @@ struct OutfitPlannerView: View {
     @State private var workQuestionDismissedDay = UserDefaults.standard.double(forKey: "calendar.workQuestionDismissedDay")
     /// Answers to "short with a jacket, or long?", for the learned thresholds.
     @State private var comfortSamples = ComfortPreferences.samples()
+    /// Answers to "cool evening, take a jacket?" (when this user wants one).
+    @State private var coolHourSamples = ComfortPreferences.coolHourSamples()
+    /// Days whose jacket tip was answered (start-of-day timestamps).
+    @State private var layerTipAnsweredDays = OutfitPlannerView.storedLayerTipDays()
     /// Day (start-of-day stamp) a planner question was last answered or closed: one a day.
     @State private var plannerQuestionDay = UserDefaults.standard.double(forKey: "planner.questionDay")
     @State private var calendarRefreshTask: Task<Void, Never>?
@@ -158,6 +162,7 @@ struct OutfitPlannerView: View {
         var unwornNudge: (signature: String, value: UnwornNudge?)?
         var gapNudge: (signature: String, value: WardrobeGapAnalyzer.Gap?)?
         var availability: [String: (signature: String, value: AvailabilityStatus)] = [:]
+        var layerTipJacket: [String: (signature: String, value: UUID?)] = [:]
     }
     
     // MARK: - Computed Properties
@@ -219,6 +224,7 @@ struct OutfitPlannerView: View {
             updateAvailableGarments()
             advisorMemo.changeSuggestions.removeAll()
             advisorMemo.availability.removeAll()
+            advisorMemo.layerTipJacket.removeAll()
         }
         .alert(String(localized: "error_title"), isPresented: $boardState.showUnavailableAlert) {
             Button(String(localized: "action_confirm"), role: .cancel) { }
@@ -642,6 +648,7 @@ struct OutfitPlannerView: View {
     private func dayColumn(for dayIndex: Int) -> some View {
         let state = boardState.days[dayIndex]
         let reasons = lookReasons(for: dayIndex)
+        let tip = layerTip(for: dayIndex)
         let signature = DayCardSignature(
             dayIndex: dayIndex,
             state: state,
@@ -662,6 +669,7 @@ struct OutfitPlannerView: View {
                 workDaySignature(for: dayIndex)
             ].compactMap { $0 }.joined(separator: "#"),
             placeWeather: placeWeatherSignature(for: dayIndex),
+            layerTip: tip.map { "\($0.when.rawValue)|\(Int($0.temperatureC.rounded()))|\($0.jacketID?.uuidString ?? "-")" },
             question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
@@ -699,6 +707,10 @@ struct OutfitPlannerView: View {
                             .transition(.opacity)
                     }
                     availabilityHintsView(for: dayIndex, lookTime: .day)
+                    if let tip {
+                        layerTipRow(tip, dayIndex: dayIndex)
+                            .transition(.opacity)
+                    }
                 }
 
                 if state.useEveningLook {
@@ -2032,6 +2044,185 @@ struct OutfitPlannerView: View {
             parts.append(state.isEveningLocked(slot) ? "1" : "0")
         }
         return parts.joined(separator: "#")
+    }
+
+    // MARK: - Cool Hours Jacket Tip
+
+    /// A short-sleeve day look with no layer while the morning or evening is
+    /// cool for this user: offer their best jacket for it.
+    private struct LayerTip: Equatable {
+        enum When: String { case morning, evening, both }
+        let when: When
+        let temperatureC: Double
+        /// Nil when the wardrobe has no jacket for it.
+        let jacketID: UUID?
+    }
+
+    private static let layerTipDaysKey = "planner.layerTip.answeredDays"
+
+    private static func storedLayerTipDays() -> Set<Double> {
+        Set(UserDefaults.standard.array(forKey: layerTipDaysKey) as? [Double] ?? [])
+    }
+
+    private func layerTip(for dayIndex: Int) -> LayerTip? {
+        guard dayIndex < boardState.days.count else { return nil }
+        let timing = dayTiming(for: dayIndex)
+        guard timing != .past else { return nil }
+        let state = boardState.days[dayIndex]
+        let dayKey = Calendar.current.startOfDay(for: state.date).timeIntervalSince1970
+        guard !state.assignedGarmentIDs.isEmpty,
+              state.garmentID(for: .outer) == nil,
+              state.overrides.temperatureC == nil,
+              !layerTipAnsweredDays.contains(dayKey),
+              ComfortPreferences.answer(for: state.date) != .shortNoLayer,
+              lookWearStatus(dayIndex: dayIndex, lookTime: .day) != .worn,
+              let topID = state.garmentID(for: .top),
+              garment(for: topID)?.sleeveLength == .short,
+              let dayForecast = forecastForLook(dayIndex: dayIndex, isEvening: false) else { return nil }
+
+        let threshold = ComfortPreferences.coolHourJacketBelowC(
+            coolHourSamples,
+            warmthSensitivity: activeProfile?.warmthSensitivity ?? 3
+        )
+        // Today's morning is over by ten; an evening look dresses the evening itself.
+        let morningCounts = timing == .future || Calendar.current.component(.hour, from: Date()) < 10
+        let morning = DayTemperatureProfile(from: dayForecast).morningTemp
+        let morningCool = morningCounts && morning < threshold
+        var evening: Double?
+        if !state.useEveningLook {
+            let eveningForecast = forecastForLook(dayIndex: dayIndex, isEvening: true) ?? dayForecast
+            evening = DayTemperatureProfile(from: eveningForecast).eveningTemp
+        }
+        let eveningCool = evening.map { $0 < threshold } ?? false
+        guard morningCool || eveningCool else { return nil }
+
+        let when: LayerTip.When = morningCool && eveningCool ? .both : (eveningCool ? .evening : .morning)
+        let temperature = [morningCool ? morning : nil, eveningCool ? evening : nil].compactMap { $0 }.min() ?? morning
+        return LayerTip(
+            when: when,
+            temperatureC: temperature,
+            jacketID: bestJacket(for: dayIndex, temperatureC: temperature, isEvening: when == .evening)
+        )
+    }
+
+    /// The user's best-scoring jacket for those hours (a light one unless it's really cold).
+    private func bestJacket(for dayIndex: Int, temperatureC: Double, isEvening: Bool) -> UUID? {
+        let warmOnly = temperatureC < 14
+        let memoKey = "\(dayIndex)-\(isEvening)"
+        let signature = "\(advisorSignature(for: dayIndex))|\(warmOnly)"
+        if let cached = advisorMemo.layerTipJacket[memoKey], cached.signature == signature {
+            return cached.value
+        }
+        let candidates = availableGarments.filter {
+            $0.category == .outer && (warmOnly || TemperatureComfort.isLightLayer($0))
+        }
+        var value: UUID?
+        if !candidates.isEmpty {
+            let ctx = recoContext(for: dayIndex, isEvening: isEvening)
+            value = candidates
+                .map { ($0.id, AIRecommender.shared.score($0, ctx: ctx, modelContext: context)) }
+                .max { $0.1 < $1.1 }?.0
+        }
+        advisorMemo.layerTipJacket[memoKey] = (signature, value)
+        return value
+    }
+
+    private func layerTipRow(_ tip: LayerTip, dayIndex: Int) -> some View {
+        let jacket = tip.jacketID.flatMap { garment(for: $0) }
+        let degrees = Int(tip.temperatureC.rounded())
+        let titleKey: String
+        switch tip.when {
+        case .morning: titleKey = "planner_layer_tip_morning_format"
+        case .evening: titleKey = "planner_layer_tip_evening_format"
+        case .both: titleKey = "planner_layer_tip_both_format"
+        }
+        return HStack(spacing: DS.Spacing.sm) {
+            if let jacket {
+                DSGarmentThumbnail(jacket, size: .small)
+                    .scaleEffect(0.8)
+                    .frame(width: 40, height: 40)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: "jacket")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 40, height: 40)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(format: NSLocalizedString(titleKey, comment: ""), degrees))
+                    .font(.caption.weight(.semibold))
+                Text(
+                    jacket.map {
+                        String(format: NSLocalizedString("planner_layer_tip_take_format", comment: ""), $0.displayTitle)
+                    } ?? String(localized: "planner_layer_tip_none")
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                if jacket != nil {
+                    takeLayerTip(tip, dayIndex: dayIndex)
+                } else {
+                    DS.haptic(0.4)
+                    activeSheet = .addToWardrobe(.outer)
+                }
+            } label: {
+                Text(jacket != nil
+                     ? String(localized: "planner_layer_tip_add")
+                     : String(localized: "planner_layer_tip_add_wardrobe"))
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .frame(minHeight: 30)
+            }
+            .buttonStyle(SoftPressButtonStyle())
+            Button {
+                skipLayerTip(tip, dayIndex: dayIndex)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(String(localized: "planner_layer_tip_dismiss"))
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, DS.Spacing.xs)
+        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.08))
+    }
+
+    private func takeLayerTip(_ tip: LayerTip, dayIndex: Int) {
+        guard let id = tip.jacketID, dayIndex < boardState.days.count else { return }
+        ComfortPreferences.recordCoolHours(temperatureC: tip.temperatureC, tookJacket: true)
+        coolHourSamples = ComfortPreferences.coolHourSamples()
+        markLayerTipAnswered(dayIndex)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            boardState.days[dayIndex].setGarment(id, for: .outer)
+        }
+        persistDayPlan(dayIndex)
+        DS.haptic(0.4)
+    }
+
+    private func skipLayerTip(_ tip: LayerTip, dayIndex: Int) {
+        // "Not needed" with a jacket on hand teaches the threshold; without one it says nothing.
+        if tip.jacketID != nil {
+            ComfortPreferences.recordCoolHours(temperatureC: tip.temperatureC, tookJacket: false)
+            coolHourSamples = ComfortPreferences.coolHourSamples()
+        }
+        DS.haptic(0.3)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            markLayerTipAnswered(dayIndex)
+        }
+    }
+
+    private func markLayerTipAnswered(_ dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        let day = Calendar.current.startOfDay(for: boardState.days[dayIndex].date).timeIntervalSince1970
+        let weekAgo = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 - 7 * 86_400
+        layerTipAnsweredDays = layerTipAnsweredDays.filter { $0 >= weekAgo }.union([day])
+        UserDefaults.standard.set(Array(layerTipAnsweredDays), forKey: Self.layerTipDaysKey)
     }
 
     private func changeSuggestions(for dayIndex: Int, lookTime: LookTime) -> [OutfitChangeSuggestion] {
@@ -5989,6 +6180,8 @@ private struct DayCardSignature: Equatable {
     let reminderLine: String?
     /// Destination forecast used for this card ("Jerusalem|8|14"), if any.
     let placeWeather: String?
+    /// "Cool evening, take a jacket?" tip ("evening|17|<jacket id>"), if any.
+    let layerTip: String?
     /// The question shown on this card ("short with a jacket?" / "what is this event?").
     let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
