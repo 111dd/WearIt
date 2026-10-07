@@ -612,6 +612,7 @@
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_CFBundleVersion = 1;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
@@ -665,6 +666,7 @@
 				INFOPLIST_KEY_CFBundleShortVersionString = 1.0;
 				INFOPLIST_KEY_CFBundleVersion = 1;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "WearIt reads your calendar to match looks to your day: workouts, work, dinners, weddings and holiday evenings. Events never leave your device.";
