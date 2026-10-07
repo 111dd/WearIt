@@ -9,7 +9,10 @@ import Foundation
 @MainActor
 final class WeatherCenter: ObservableObject {
     static let shared = WeatherCenter()
-    private init() {}
+    private init() {
+        // Last saved fix, so calendar pins work before the first refresh.
+        homeCoordinate = forecastService.homeCoordinate
+    }
 
     // MARK: - Current Weather
     @Published var currentTempC: Double? = nil

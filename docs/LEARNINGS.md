@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Typed trip places and a saved home fix
+- **Did:** `TypedEventPlaceResolver` geocodes a typed event location (trips and all-day events only), cached for good in UserDefaults; the planner and calendar resolve the queue and re-read the calendar when something new is found. `DeviceCoordinate` is saved so `homeCoordinate` exists at launch.
+- **Why:** a vacation typed as "Eilat" without a map pin was ignored, and pins did nothing until the first location fix.
+- **Watch:** never geocode a timed meeting's typed location ("office" could land anywhere). Lookups are biased to 100 km around home so vague names stay local. Network errors are retried, "no result" waits a week.
+
 ## 2026-10-06 — Calendar journal plus a suitcase
 - **Did:** The calendar day lists its events. `TripFinder` turns a flight, or two-plus days at a far pin, into a trip. `TripPackingView` suggests a look per day and a checklist (counts for underwear/socks/swim, closet coats when it's cold). Manual trips are saved in UserDefaults.
 - **Why:** The calendar was only a worn-look journal, and a vacation had nowhere to become a packing list.
