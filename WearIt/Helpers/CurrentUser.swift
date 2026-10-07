@@ -124,6 +124,8 @@ extension CurrentUser {
         if keeper.avatarEmoji == nil { keeper.avatarEmoji = other.avatarEmoji }
         if keeper.email == nil { keeper.email = other.email }
         if keeper.phone == nil { keeper.phone = other.phone }
+        if keeper.username == nil { keeper.username = other.username }
+        if keeper.birthday == nil { keeper.birthday = other.birthday }
         if keeper.bio == nil { keeper.bio = other.bio }
         if keeper.workDressCodeRaw == nil { keeper.workDressCodeRaw = other.workDressCodeRaw }
         if keeper.topSizeRaw == nil { keeper.topSizeRaw = other.topSizeRaw }

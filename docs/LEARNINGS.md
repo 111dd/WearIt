@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Real profile, export and delete-all
+- **Did:** username/birthday on `UserProfile`, `EditProfileView` (saves on Save, not per keystroke), `AccountDataService` export (JSON + photos zipped with `NSFileCoordinator .forUploading`) and delete-all, privacy policy in app + `docs/privacy-policy.md`, `PrivacyInfo.xcprivacy` (UserDefaults CA92.1 + app group 1C8F.1).
+- **Why:** dor wants a real profile; App Store needs in-app deletion, a privacy policy and a privacy manifest.
+- **Watch:** delete row by row (batch deletes aren't mirrored to CloudKit) and clear `AIRecommender`'s state cache. Usernames are not unique until a server exists. If you add a file-timestamp or disk-space API, add its reason to both manifests.
+
 ## 2026-10-07 — Profile split on sign-in, sample items on new devices
 - **Did:** `CurrentUser` resolves "me" without ever returning nil when a profile exists; `adopt` on sign-in; `mergeDuplicateProfiles` in critical bootstrap (moves ownerID, RecommendationEvent.profileID, the RecoState with more signals, TasteProfile). Seed removed; `OnboardingView` added.
 - **Why:** skip-then-sign-in created an empty profile, so sizes, work dress code and learned weights vanished while the wardrobe stayed; seeding into an empty store on a new device pushed fake items into the real iCloud wardrobe.

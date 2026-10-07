@@ -68,9 +68,11 @@ struct OnboardingView: View {
 
     @State private var step: Step = .welcome
     @State private var name = ""
+    @State private var username = ""
     @State private var workDressCode: WorkDressCode?
     @State private var warmth: Warmth = .average
     @State private var didPrefill = false
+    @State private var showPrivacyPolicy = false
     @State private var locationState: PermissionState = .notAsked
     @State private var calendarState: PermissionState = .notAsked
     @State private var notificationState: PermissionState = .notAsked
@@ -163,6 +165,36 @@ struct OnboardingView: View {
                     .textContentType(.givenName)
                     .submitLabel(.done)
                     .dsFieldStyle()
+
+                Text(String(localized: "onboarding_username_label"))
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.top, DS.Spacing.xs)
+                HStack(spacing: 2) {
+                    Text("@")
+                        .foregroundStyle(DS.Text.secondary)
+                    TextField(String(localized: "edit_profile_username_placeholder"), text: $username)
+                        .textContentType(.username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.asciiCapable)
+                        .submitLabel(.done)
+                }
+                .dsFieldStyle()
+                .environment(\.layoutDirection, .leftToRight)
+                if let problem = UsernameRules.problem(with: UsernameRules.normalize(username)) {
+                    Text(problem)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if username.isEmpty, let suggestion = UsernameRules.suggestion(from: name) {
+                    Button {
+                        username = suggestion
+                    } label: {
+                        Text(String(format: String(localized: "edit_profile_username_suggestion_format"), suggestion))
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                }
             }
             .dsCard()
 
@@ -292,6 +324,21 @@ struct OnboardingView: View {
                 .font(.caption)
                 .foregroundStyle(DS.Text.secondary)
                 .multilineTextAlignment(.center)
+
+            Button {
+                showPrivacyPolicy = true
+            } label: {
+                Text(String(localized: "privacy_title"))
+                    .font(.caption.weight(.semibold))
+                    .underline()
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+        }
+        .sheet(isPresented: $showPrivacyPolicy) {
+            NavigationStack {
+                PrivacyPolicyView()
+            }
         }
     }
 
@@ -328,6 +375,7 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity)
             }
             .dsPrimaryButton()
+            .disabled(step == .aboutYou && UsernameRules.problem(with: UsernameRules.normalize(username)) != nil)
         }
     }
 
@@ -456,6 +504,7 @@ struct OnboardingView: View {
         guard let profile = CurrentUser.activeProfile(from: profiles, userIdentifier: auth.userIdentifier) else { return }
         let defaultNames: Set<String> = ["", "Me", String(localized: "profile_default_name")]
         if !defaultNames.contains(profile.displayName) { name = profile.displayName }
+        username = profile.username ?? ""
         workDressCode = profile.workDressCode
         warmth = Warmth(rawValue: profile.warmthSensitivity) ?? .average
     }
@@ -464,6 +513,8 @@ struct OnboardingView: View {
         let profile = UserProfile.current(in: context)
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { profile.displayName = trimmed }
+        let handle = UsernameRules.normalize(username)
+        if !handle.isEmpty, UsernameRules.problem(with: handle) == nil { profile.username = handle }
         if let workDressCode, workDressCode != profile.workDressCode {
             let hadAnswer = profile.workDressCode != nil
             profile.workDressCode = workDressCode

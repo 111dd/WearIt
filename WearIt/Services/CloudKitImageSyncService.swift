@@ -108,6 +108,20 @@ final class CloudKitImageSyncService {
         }
     }
 
+    /// Deletes the garments' photo records from the user's iCloud ("delete all my data").
+    func deleteImages(garmentIDs: [UUID]) async {
+        let ids = garmentIDs.map { CKRecord.ID(recordName: recordName(for: $0)) }
+        // CloudKit takes at most 400 records per request.
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let batch = Array(ids[start..<min(start + 400, ids.count)])
+            do {
+                _ = try await database.modifyRecords(saving: [], deleting: batch)
+            } catch {
+                logger.error("Image record delete failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     private func recordName(for garmentID: UUID) -> String {
         "garment-\(garmentID.uuidString)-main"
     }

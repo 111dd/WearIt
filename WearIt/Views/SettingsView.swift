@@ -33,6 +33,12 @@ struct SettingsView: View {
     @State private var showResetLearningDialog = false
     @State private var showBackdropPicker = false
     @State private var showIntro = false
+    @State private var exportURL: URL?
+    @State private var isExporting = false
+    @State private var exportFailed = false
+    @State private var showDeleteDialog = false
+    @State private var showDeleteFinalAlert = false
+    @AppStorage(OnboardingState.completedKey) private var didCompleteOnboarding = false
     /// Async-loaded preview for the custom backdrop chip — avoids decoding the
     /// full-resolution photo on the main thread inside `body`.
     @State private var backdropPreviewImage: UIImage?
@@ -60,6 +66,7 @@ struct SettingsView: View {
                 calendarContextSection
                 notificationsSection
                 dataManagementSection
+                yourDataSection
                 languageSection
                 introSection
 
@@ -117,6 +124,29 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+        }
+        .confirmationDialog(
+            String(localized: "settings_delete_title"),
+            isPresented: $showDeleteDialog,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "settings_delete_confirm"), role: .destructive) {
+                showDeleteFinalAlert = true
+            }
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "settings_delete_message"))
+        }
+        .alert(String(localized: "settings_delete_final_title"), isPresented: $showDeleteFinalAlert) {
+            Button(String(localized: "settings_delete_final_confirm"), role: .destructive) {
+                deleteEverything()
+            }
+            Button(String(localized: "action_cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "settings_delete_final_message"))
+        }
+        .alert(String(localized: "settings_export_failed"), isPresented: $exportFailed) {
+            Button(String(localized: "action_ok"), role: .cancel) {}
         }
         .fullScreenCover(isPresented: $showIntro, onDismiss: loadTasteValues) {
             OnboardingView(onFinish: { showIntro = false })
@@ -663,6 +693,85 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .dsCard()
+    }
+
+    private var yourDataSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            DSSectionHeader(String(localized: "settings_your_data_title"), icon: "hand.raised")
+
+            Text(String(localized: "settings_your_data_caption"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            NavigationLink {
+                PrivacyPolicyView()
+                    .withLocalAppBackdrop()
+            } label: {
+                Label(String(localized: "privacy_title"), systemImage: "lock.doc")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .dsSecondaryButton()
+
+            if let exportURL {
+                ShareLink(item: exportURL) {
+                    Label(String(localized: "settings_export_share"), systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .dsSecondaryButton()
+            } else {
+                Button {
+                    exportData()
+                } label: {
+                    HStack {
+                        Label(String(localized: "settings_export"), systemImage: "arrow.down.doc")
+                            .font(.subheadline.weight(.medium))
+                        Spacer()
+                        if isExporting { ProgressView() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .dsSecondaryButton()
+                .disabled(isExporting)
+            }
+
+            Button(role: .destructive) {
+                showDeleteDialog = true
+            } label: {
+                Label(String(localized: "settings_delete_button"), systemImage: "trash")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .dsSecondaryButton()
+        }
+        .dsCard()
+    }
+
+    private func exportData() {
+        isExporting = true
+        // Let the spinner draw before the synchronous copy and zip.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            do {
+                exportURL = try AccountDataService.makeExportArchive(context: context)
+            } catch {
+                exportFailed = true
+            }
+            isExporting = false
+        }
+    }
+
+    private func deleteEverything() {
+        let garmentIDs = AccountDataService.deleteStoredData(context: context)
+        // Same turn as the delete: the gate swaps to a fresh intro before anything
+        // renders a deleted model. The rest finishes in the background.
+        didSkipSignIn = false
+        didCompleteOnboarding = false
+        Task { @MainActor in
+            await AccountDataService.deleteCloudPhotos(garmentIDs: garmentIDs)
+        }
     }
 
     private var introSection: some View {
