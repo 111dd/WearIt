@@ -3,7 +3,7 @@
 Newest first. Written by agents, for agents. Keep each entry short.
 
 ## 2026-10-07 — Real profile, export and delete-all
-- **Did:** username/birthday on `UserProfile`, `EditProfileView` (saves on Save, not per keystroke), `AccountDataService` export (JSON + photos zipped with `NSFileCoordinator .forUploading`) and delete-all, privacy policy in app + `docs/privacy-policy.md`, `PrivacyInfo.xcprivacy` (UserDefaults CA92.1 + app group 1C8F.1).
+- **Did:** username/birthday on `UserProfile`, `EditProfileView` (saves on Save, not per keystroke), `AccountDataService` export (JSON + photos zipped with `NSFileCoordinator .forUploading`) and delete-all, privacy policy in app + `docs/privacy-policy.html` (GitHub Pages, regenerate with `scripts/make_privacy_page.py`), `PrivacyInfo.xcprivacy` (UserDefaults CA92.1 + app group 1C8F.1).
 - **Why:** dor wants a real profile; App Store needs in-app deletion, a privacy policy and a privacy manifest.
 - **Watch:** delete row by row (batch deletes aren't mirrored to CloudKit) and clear `AIRecommender`'s state cache. Usernames are not unique until a server exists. If you add a file-timestamp or disk-space API, add its reason to both manifests.
 

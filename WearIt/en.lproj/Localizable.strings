@@ -1193,3 +1193,5 @@
 "privacy_section_choices_body" = "In Settings > Your data you can export everything to a file, or delete all your data from this device and from iCloud.";
 "privacy_section_children_title" = "Children";
 "privacy_section_children_body" = "WearIt is not meant for children under 13.";
+"privacy_section_contact_title" = "Contact";
+"privacy_section_contact_body" = "Questions about privacy or your data: 111dordavid@gmail.com";
