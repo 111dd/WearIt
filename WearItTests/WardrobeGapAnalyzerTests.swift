@@ -99,6 +99,14 @@ struct WardrobeGapAnalyzerTests {
         #expect(WardrobeGapAnalyzer.analyze(input).map(\.kind) == [.lightLayer])
     }
 
+    @Test func regularJacketCountsAsLightLayer() {
+        var wardrobe = basicWardrobe().filter { $0.category != .outer }
+        wardrobe.append(garment(.outer, .jacket, warmth: 3))
+        var input = WardrobeGapAnalyzer.Input(garments: wardrobe)
+        input.climate.upcomingMildDays = 2
+        #expect(!WardrobeGapAnalyzer.analyze(input).map(\.kind).contains(.lightLayer))
+    }
+
     @Test func thinRotationOnlyWhenAsked() {
         var input = WardrobeGapAnalyzer.Input(garments: basicWardrobe())
         #expect(WardrobeGapAnalyzer.analyze(input).isEmpty)

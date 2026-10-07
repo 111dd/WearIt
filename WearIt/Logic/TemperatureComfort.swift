@@ -48,7 +48,7 @@ struct DiurnalTemps: Equatable, Sendable {
 enum OuterLayerPolicy: Equatable, Sendable {
     /// No outer layer (warm/hot and dry).
     case suppress
-    /// Only light / packable layers (warmth ≤ 2).
+    /// Only light layers: jackets up to warmth 3, never a winter coat.
     case lightOnly
     /// Outer layer is appropriate; prefer one when cool/cold.
     case prefer
@@ -191,9 +191,21 @@ enum TemperatureComfort {
         case .suppress:
             return false
         case .lightOnly:
-            return garment.recommendationWarmth <= 2
+            return isLightLayer(garment)
         case .prefer:
             return true
         }
+    }
+
+    /// Heavy coats never count as a light layer, whatever their rating.
+    private static let heavyOuterTypes: Set<ItemType> = [.coat, .parka, .puffer]
+    /// Jackets, denim jackets, overshirts and blazers are rated 2–3: all light enough
+    /// to carry or wear over a tee on a mild day.
+    static let lightLayerMaxWarmth = 3
+
+    /// A jacket you'd throw over short sleeves (not a winter coat).
+    static func isLightLayer(_ garment: Garment) -> Bool {
+        guard garment.category == .outer, garment.recommendationWarmth <= lightLayerMaxWarmth else { return false }
+        return garment.itemType.map { !heavyOuterTypes.contains($0) } ?? true
     }
 }

@@ -343,8 +343,7 @@ enum WardrobeGapAnalyzer {
             return nil
         }
         let covered = garments.contains {
-            $0.category == .outer && !$0.isCurrentlyUnavailable
-                && $0.recommendationWarmth <= AIRecommender.styleLayerMaxWarmth
+            !$0.isCurrentlyUnavailable && TemperatureComfort.isLightLayer($0)
         }
         guard !covered else { return nil }
         let suggestion = makeSuggestion(

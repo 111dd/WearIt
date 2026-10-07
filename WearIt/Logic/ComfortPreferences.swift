@@ -102,6 +102,52 @@ enum ComfortPreferences {
         return (17...23).contains(temperatureC) || swings
     }
 
+    // MARK: - Cool hours ("cool evening, take a jacket?")
+
+    /// One answer to the cool-hours tip: the coolest morning/evening temperature
+    /// of a short-sleeve day and whether the user took a jacket for it.
+    struct CoolHourSample: Codable, Equatable {
+        var temperatureC: Double
+        var tookJacket: Bool
+    }
+
+    private static let coolHourSamplesKey = "comfortCoolHourSamples"
+    /// Before any answers: below this a cool morning or evening gets the tip.
+    static let defaultCoolHourJacketBelowC: Double = 19
+
+    static func coolHourSamples(defaults: UserDefaults = .standard) -> [CoolHourSample] {
+        guard let data = defaults.data(forKey: coolHourSamplesKey),
+              let decoded = try? JSONDecoder().decode([CoolHourSample].self, from: data) else { return [] }
+        return decoded
+    }
+
+    static func recordCoolHours(temperatureC: Double, tookJacket: Bool, defaults: UserDefaults = .standard) {
+        var all = coolHourSamples(defaults: defaults)
+        all.append(CoolHourSample(temperatureC: temperatureC, tookJacket: tookJacket))
+        if all.count > maxSamples { all.removeFirst(all.count - maxSamples) }
+        if let data = try? JSONEncoder().encode(all) {
+            defaults.set(data, forKey: coolHourSamplesKey)
+        }
+    }
+
+    /// The temperature below which this user takes a jacket for the cool hours.
+    /// Starts from the default (shifted for people who run cold or warm) and
+    /// follows their answers: a "no" at 17° drops it under 17°, a "yes" at 20°
+    /// lifts it over 20°, and enough of both settles between them.
+    static func coolHourJacketBelowC(_ samples: [CoolHourSample], warmthSensitivity: Int = 3) -> Double {
+        let start = defaultCoolHourJacketBelowC + Double(min(max(warmthSensitivity, 1), 5) - 3)
+        let took = samples.filter(\.tookJacket).map(\.temperatureC)
+        let skipped = samples.filter { !$0.tookJacket }.map(\.temperatureC)
+        if let learned = threshold(warmSide: skipped, coolSide: took) {
+            return learned
+        }
+        var value = start
+        // Recent answers only, so an old "no" on a mild evening doesn't block it for good.
+        if let warmestTaken = took.suffix(6).max() { value = max(value, warmestTaken + 0.5) }
+        if let coolestSkipped = skipped.suffix(6).min() { value = min(value, coolestSkipped - 0.5) }
+        return value
+    }
+
     /// The outer-layer policy after the user's answer for the day.
     static func adjusted(_ policy: OuterLayerPolicy, choice: DayLayerChoice?, isRaining: Bool) -> OuterLayerPolicy {
         switch choice {

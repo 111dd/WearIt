@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Jackets were filtered out by a warmth ≤ 2 rule
+- **Did:** one `TemperatureComfort.isLightLayer` (outer, warmth ≤ 3, not coat/parka/puffer) for `.lightOnly`, the style layer and the light-layer gap; style-layer range 18..<27; planner jacket tip for cool mornings/evenings on short-sleeve day looks, learning from yes/no.
+- **Why:** most jackets are rated 3, so `.lightOnly` penalized them and the style layer never had candidates; the day's weighted temperature also sat above the old 20..<25 range on 19–29° days.
+- **Watch:** the tip's samples (`comfortCoolHourSamples`) are separate from the day-question samples on purpose: one is the coolest hour, the other the day's weighted temperature. Don't mix them.
+
 ## 2026-10-07 — Style layer and wardrobe depth
 - **Did:** `rankLooks` adds a light outer (warmth ≤ 2) over a short-sleeve top on dry 20–25° days when `offersStyleLayer` says so (stable per day + top, skipped for "short, no jacket" / "long"). `WardrobeGapAnalyzer` got `lightLayer`, `thinRotation` (only with `Input.checksRotation`) and `coverage`. Planner nudge: `computeWardrobeGapNudge`, snoozed 14 days per gap id.
 - **Why:** dor wanted varied looks (jacket + tee) and the app to say what's missing instead of repeating clothes, as groundwork for "what to buy".
