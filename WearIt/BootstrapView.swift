@@ -55,7 +55,6 @@ struct BootstrapView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
 
-    @AppStorage("didSeed") private var didSeed = false
     @State private var loadState: AppLoadState = .loading
     @State private var loadingMessage: String = String(localized: "loading_ready")
 
@@ -101,14 +100,11 @@ struct BootstrapView: View {
                 await DataMigrationService.shared.runCriticalMigrationsAndWait(context: context)
             }
 
-            // First-launch seed must complete before UI to avoid an empty wardrobe flash.
-            if !didSeed {
-                let interval = signposter.beginInterval("initial-seed", id: signposter.makeSignpostID())
-                defer { signposter.endInterval("initial-seed", interval) }
-                loadingMessage = String(localized: "loading_setting_up")
-                SeedData.load(context: context)
-                didSeed = true
-            }
+            // One "me": fold duplicate profiles (two devices, older sign-in splits) before any
+            // view resolves the active profile. A handful of rows, so it stays on the critical path.
+            // No sample items are seeded: on a new device they would land in the user's real
+            // wardrobe before iCloud finishes restoring it, then sync everywhere.
+            CurrentUser.mergeDuplicateProfiles(in: context)
         }
 
         withAnimation(.easeOut(duration: 0.35)) {
@@ -127,11 +123,15 @@ struct BootstrapView: View {
 
             await DataMigrationService.shared.runDeferredBackfills(context: modelContext)
 
-            async let locationWeather: Void = Self.refreshWeatherFromLocation(weather: weatherCenter)
-            async let forecast: Void = weatherCenter.refreshForecast(source: "BootstrapView.deferred")
-            _ = await (locationWeather, forecast)
+            // A new user is still in the intro, which asks for location and notifications
+            // with a reason; the planner loads the forecast when it first appears.
+            if OnboardingState.isCompleted {
+                async let locationWeather: Void = Self.refreshWeatherFromLocation(weather: weatherCenter)
+                async let forecast: Void = weatherCenter.refreshForecast(source: "BootstrapView.deferred")
+                _ = await (locationWeather, forecast)
 
-            await NotificationService.shared.scheduleDailyNotifications(context: modelContext)
+                await NotificationService.shared.scheduleDailyNotifications(context: modelContext)
+            }
 
             // How much each item is loved is learned, not asked.
             LoveScoreLearner.run(context: modelContext)

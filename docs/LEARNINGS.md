@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Profile split on sign-in, sample items on new devices
+- **Did:** `CurrentUser` resolves "me" without ever returning nil when a profile exists; `adopt` on sign-in; `mergeDuplicateProfiles` in critical bootstrap (moves ownerID, RecommendationEvent.profileID, the RecoState with more signals, TasteProfile). Seed removed; `OnboardingView` added.
+- **Why:** skip-then-sign-in created an empty profile, so sizes, work dress code and learned weights vanished while the wardrobe stayed; seeding into an empty store on a new device pushed fake items into the real iCloud wardrobe.
+- **Watch:** the keeper order (`isPreferred`) must stay data-only so every device merges into the same profile. Old users have `didCompleteOnboarding` set already; don't rename the key.
+
 ## 2026-10-07 — Jackets were filtered out by a warmth ≤ 2 rule
 - **Did:** one `TemperatureComfort.isLightLayer` (outer, warmth ≤ 3, not coat/parka/puffer) for `.lightOnly`, the style layer and the light-layer gap; style-layer range 18..<27; planner jacket tip for cool mornings/evenings on short-sleeve day looks, learning from yes/no.
 - **Why:** most jackets are rated 3, so `.lightOnly` penalized them and the style layer never had candidates; the day's weighted temperature also sat above the old 20..<25 range on 19–29° days.

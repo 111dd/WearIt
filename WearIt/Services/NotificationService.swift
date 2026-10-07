@@ -19,7 +19,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         registerCategories()
-        Task { await requestAuthorization() }
+        // A new user is asked inside the intro, next to the reason.
+        if OnboardingState.isCompleted {
+            Task { await requestAuthorization() }
+        }
     }
 
     func requestAuthorization() async {

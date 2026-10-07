@@ -265,11 +265,20 @@ struct WardrobeView: View {
                 }
 
                 if visibleGarments.isEmpty {
-                    DSEmptyState(
-                        icon: "tshirt",
-                        title: String(localized: "wardrobe_empty_title"),
-                        message: String(localized: "wardrobe_empty_message")
-                    )
+                    Group {
+                        if allGarments.isEmpty {
+                            EmptyWardrobeState(
+                                title: String(localized: "wardrobe_empty_title"),
+                                message: String(localized: "wardrobe_empty_message")
+                            )
+                        } else {
+                            DSEmptyState(
+                                icon: "tshirt",
+                                title: String(localized: "wardrobe_empty_title"),
+                                message: String(localized: "wardrobe_empty_message")
+                            )
+                        }
+                    }
                     .padding(DS.Spacing.lg)
                     .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
                     .padding(.horizontal, DS.Spacing.md)
