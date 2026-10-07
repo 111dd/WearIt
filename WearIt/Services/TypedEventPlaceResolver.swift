@@ -2,9 +2,10 @@ import Foundation
 import CoreLocation
 
 /// Turns a typed event location ("Eilat", "London") into a place, for events
-/// with no map pin. Only trips and all-day events use it, so "office" on a
-/// meeting never moves a look. Answers are cached for good, so each text is
-/// looked up once.
+/// with no map pin. A guessed place counts only for trips and all-day events,
+/// so "office" on a meeting never moves a look; a place the user picked from
+/// the search list counts for any event. Answers are cached for good, so each
+/// text is looked up once.
 @MainActor
 final class TypedEventPlaceResolver {
     static let shared = TypedEventPlaceResolver()
@@ -15,6 +16,8 @@ final class TypedEventPlaceResolver {
         var longitude: Double?
         /// Set when the geocoder found nothing; retried after `missRetry`.
         var missedAt: Date?
+        /// Chosen by the user from the place search. Never replaced by a guess.
+        var userPicked: Bool?
     }
 
     private let defaultsKey = "calendar.typedPlaces.v1"
@@ -33,10 +36,14 @@ final class TypedEventPlaceResolver {
         }
     }
 
-    /// Cached place for a typed location, or nil. A text not looked up yet is
-    /// queued for `resolvePending()`.
-    func place(for rawText: String) -> EventPlace? {
+    /// Cached place for a typed location, or nil. With `allowGuess`, a text not
+    /// looked up yet is queued for `resolvePending()`; without it only the
+    /// user's own pick counts.
+    func place(for rawText: String, allowGuess: Bool = true) -> EventPlace? {
         guard let key = Self.key(rawText) else { return nil }
+        if !allowGuess {
+            guard let hit = stored[key], hit.userPicked == true else { return nil }
+        }
         if let hit = stored[key] {
             if let lat = hit.latitude, let lon = hit.longitude {
                 return EventPlace(name: hit.name ?? rawText.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -46,6 +53,32 @@ final class TypedEventPlaceResolver {
         }
         if !pending.contains(key) { pending.append(key) }
         return nil
+    }
+
+    /// Whether this text can be given a place (not a link or a video call).
+    static func canPick(_ rawText: String) -> Bool { key(rawText) != nil }
+
+    func isUserPicked(_ rawText: String) -> Bool {
+        guard let key = Self.key(rawText) else { return false }
+        return stored[key]?.userPicked == true
+    }
+
+    /// The user's pick for a typed location. Nil clears it, so the text is
+    /// guessed again (trips and all-day events only).
+    func setUserPlace(_ place: EventPlace?, for rawText: String) {
+        guard let key = Self.key(rawText) else { return }
+        if let place {
+            stored[key] = Stored(
+                name: place.name,
+                latitude: place.latitude,
+                longitude: place.longitude,
+                userPicked: true
+            )
+        } else {
+            stored[key] = nil
+        }
+        pending.removeAll { $0 == key }
+        save()
     }
 
     /// Looks up queued texts. Returns true when a new place was found, so the
@@ -59,9 +92,11 @@ final class TypedEventPlaceResolver {
         // Prefer matches near home, so a vague name stays local (and on the home forecast).
         let region = home.map { CLCircularRegion(center: $0, radius: 100_000, identifier: "home") }
         var found = false
-        for text in batch {
+        for text in batch where stored[text]?.userPicked != true {
             do {
                 let marks = try await CLGeocoder().geocodeAddressString(text, in: region)
+                // The user picked a place while this lookup ran: theirs wins.
+                if stored[text]?.userPicked == true { continue }
                 if let mark = marks.first, let location = mark.location {
                     stored[text] = Stored(
                         name: mark.locality ?? mark.administrativeArea ?? mark.country ?? text,

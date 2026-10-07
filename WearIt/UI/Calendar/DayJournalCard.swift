@@ -23,6 +23,10 @@ struct DayJournalEvent: Equatable, Identifiable {
     var title: String
     var detail: String
     var icon: String
+    /// Typed location without a map pin: the row opens a place search for it.
+    var placeQuery: String? = nil
+    /// The event already has a place (map pin, pick or lookup).
+    var hasPlace = false
 }
 
 struct DayJournalModel {
@@ -52,6 +56,7 @@ struct DayJournalActions {
     let onSaveNotes: (String) -> Void
     let onOpenCamera: () -> Void
     let onRemovePhoto: (Int) -> Void
+    var onPickEventPlace: ((DayJournalEvent) -> Void)? = nil
 }
 
 // MARK: - Card
@@ -199,25 +204,16 @@ struct DayJournalCard: View {
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             DSSectionHeader(String(localized: "calendar_on_this_day"), icon: "calendar")
             ForEach(Array(model.events.prefix(4))) { event in
-                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
-                    Image(systemName: event.icon)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 18)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(event.title)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        if !event.detail.isEmpty {
-                            Text(event.detail)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                if event.placeQuery != nil, let onPick = actions.onPickEventPlace {
+                    Button { onPick(event) } label: {
+                        eventRow(event)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(String(localized: "event_place_row_hint"))
+                } else {
+                    eventRow(event)
                 }
-                .accessibilityElement(children: .combine)
             }
             if model.events.count > 4 {
                 Text(String(format: String(localized: "calendar_events_more_format"), model.events.count - 4))
@@ -225,6 +221,34 @@ struct DayJournalCard: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func eventRow(_ event: DayJournalEvent) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+            Image(systemName: event.icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(event.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if !event.detail.isEmpty {
+                    Text(event.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            if event.placeQuery != nil {
+                Spacer(minLength: DS.Spacing.xs)
+                Image(systemName: event.hasPlace ? "mappin.circle.fill" : "mappin.circle")
+                    .font(.body)
+                    .foregroundStyle(event.hasPlace ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Look

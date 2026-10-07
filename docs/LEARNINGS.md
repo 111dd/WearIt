@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-07 — Place search with live suggestions
+- **Did:** `PlaceSearchField` (MKLocalSearchCompleter + MKLocalSearch) in the manual trip sheet and in `EventPlacePickerSheet`, opened from an event row with a typed location and no map pin. A pick is saved in `TypedEventPlaceResolver` as `userPicked` and posts `.calendarUnderstandingChanged`.
+- **Why:** dor wanted to choose the place from a list instead of trusting a one-shot guess.
+- **Watch:** a user pick is never overwritten by a geocode guess, and counts for timed events too (guesses don't). `await` can't sit on the right of `??` (autoclosure).
+
 ## 2026-10-07 — Typed trip places and a saved home fix
 - **Did:** `TypedEventPlaceResolver` geocodes a typed event location (trips and all-day events only), cached for good in UserDefaults; the planner and calendar resolve the queue and re-read the calendar when something new is found. `DeviceCoordinate` is saved so `homeCoordinate` exists at launch.
 - **Why:** a vacation typed as "Eilat" without a map pin was ignored, and pins did nothing until the first location fix.

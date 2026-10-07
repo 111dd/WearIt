@@ -1065,3 +1065,12 @@
 "my_sizes_hips" = "Hips";
 "my_sizes_inseam" = "Inseam (pants length)";
 "my_sizes_cm" = "cm";
+
+/* Place search */
+"place_search_clear" = "Clear";
+"event_place_title" = "Event place";
+"event_place_search_placeholder" = "City, address or place";
+"event_place_search_footer" = "Pick from the list so the look and the suitcase follow the weather there. Events with the same typed location use this place too.";
+"event_place_save" = "Save";
+"event_place_clear" = "Remove the chosen place";
+"event_place_row_hint" = "Choose the place on the map";

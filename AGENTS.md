@@ -146,6 +146,8 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - **Away from home**: a map pin (`EKEvent.structuredLocation.geoLocation`) ≥ 40 km from home
   changes a look's forecast; for a trip or all-day event a typed location also counts once
   `TypedEventPlaceResolver` has geocoded it (cached in UserDefaults, nearby matches preferred).
+  Tapping such an event in the calendar journal opens `EventPlacePickerSheet` (live `PlaceSearchField`,
+  MapKit suggestions); a user pick counts for any event with that typed text, timed ones too.
   "Home" is the last device fix, saved across launches (`DeviceCoordinate.saved`). A failed remote fetch must not fall through to mock weather, and a
   confirmed or worn look is not replanned. A flight, or two-plus days at one far pin, is a trip
   (`TripFinder`). Suitcase checks and counts live in UserDefaults (`tripPacking.list.<id>`);
@@ -156,6 +158,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-07 · Claude Code · Interactive place search (`UI/PlaceSearchField`, suggestions open while typing): used for a hand-made trip's destination and for an event's typed location from the calendar journal.
 - 2026-10-07 · Claude Code · Away-from-home polish: a trip or all-day event with a typed place ("Eilat", no map pin) now counts after a one-time cached lookup; the last device location is saved so pins work right after launch.
 - 2026-10-06 · Cursor · Calendar journal shows the day's events. A detected or hand-made trip opens a suitcase: a look per day, editable underwear/socks counts, swimwear when the destination is warm and a coat when it's cold.
 - 2026-10-06 · Cursor · A calendar event with a tagged place ~40 km from home dresses that look for the forecast there (day pin → day look, evening pin → evening look, all-day trip covers both).

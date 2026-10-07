@@ -424,14 +424,14 @@ final class CalendarContextService {
         .sorted { $0.start < $1.start }
     }
 
-    /// The map pin, else (for a trip or an all-day event only) the typed
-    /// location once it has been looked up. A meeting's typed "office" never counts.
+    /// The map pin, else the place the user picked for the typed location, else
+    /// (for a trip or an all-day event only) the typed location once it has been
+    /// looked up. A meeting's typed "office" is never guessed.
     private static func place(on event: EKEvent, kind: CalendarEventUnderstanding.Kind) -> EventPlace? {
         if let pinned = taggedPlace(on: event) { return pinned }
-        guard event.isAllDay || kind == .travel else { return nil }
         let typed = (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return nil }
-        return TypedEventPlaceResolver.shared.place(for: typed)
+        return TypedEventPlaceResolver.shared.place(for: typed, allowGuess: event.isAllDay || kind == .travel)
     }
 
     /// The place the user picked on the map. A typed note like "office" has no coordinate.
@@ -470,9 +470,11 @@ final class CalendarContextService {
                 )
             )
             let place = Self.place(on: event, kind: kind)
-            let locationName = place?.name.isEmpty == false
-                ? place!.name
-                : (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let typedLocation = (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let locationName = place?.name.isEmpty == false ? place!.name : typedLocation
+            // Without a map pin, the user can pick the typed place from a search list.
+            let placeQuery = Self.taggedPlace(on: event) == nil && TypedEventPlaceResolver.canPick(typedLocation)
+                ? typedLocation : nil
             let startDate = event.startDate ?? rangeStart
             let endDate = event.endDate ?? startDate
             return CalendarDisplayEvent(
@@ -483,7 +485,8 @@ final class CalendarContextService {
                 isAllDay: event.isAllDay,
                 locationName: locationName,
                 place: place,
-                kind: kind
+                kind: kind,
+                placeQuery: placeQuery
             )
         }
         .sorted { $0.start < $1.start }
@@ -500,6 +503,8 @@ struct CalendarDisplayEvent: Identifiable, Equatable {
     var locationName: String
     var place: EventPlace?
     var kind: CalendarEventUnderstanding.Kind
+    /// The typed location, when there is no map pin and the user may pick it on a list.
+    var placeQuery: String? = nil
 
     var tripInput: TripEventInput {
         TripEventInput(

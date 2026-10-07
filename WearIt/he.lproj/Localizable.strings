@@ -1084,3 +1084,12 @@
 "my_sizes_hips" = "היקף ירכיים";
 "my_sizes_inseam" = "אורך מכנס פנימי";
 "my_sizes_cm" = "ס״מ";
+
+/* Place search */
+"place_search_clear" = "ניקוי";
+"event_place_title" = "מיקום האירוע";
+"event_place_search_placeholder" = "עיר, כתובת או מקום";
+"event_place_search_footer" = "בחרו מהרשימה, והלוק והמזוודה יותאמו למזג האוויר שם. אירועים עם אותו מיקום כתוב ישתמשו גם הם במקום הזה.";
+"event_place_save" = "שמירה";
+"event_place_clear" = "הסרת המקום שנבחר";
+"event_place_row_hint" = "בחירת המקום על המפה";
