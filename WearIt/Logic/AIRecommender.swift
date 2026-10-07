@@ -1312,6 +1312,13 @@ final class AIRecommender {
     }
     
     /// Reset learned weights (start fresh)
+    /// Drops cached learning states, e.g. after "delete all my data" removed them from the store.
+    func clearStateCache() {
+        stateCacheLock.lock()
+        cachedStates.removeAll()
+        stateCacheLock.unlock()
+    }
+
     func resetLearning(profileID: UUID? = nil, modelContext: ModelContext) {
         let state = ensureState(context: modelContext, profileID: profileID)
         state.weights = Array(repeating: 0.0, count: FeatureSpace.total)

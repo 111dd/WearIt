@@ -8,8 +8,18 @@ struct SignInView: View {
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
     @AppStorage("didCompleteOnboarding") private var didCompleteOnboarding = false
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
+    @State private var showPrivacyPolicy = false
 
     var body: some View {
+        content
+            .sheet(isPresented: $showPrivacyPolicy) {
+                NavigationStack {
+                    PrivacyPolicyView()
+                }
+            }
+    }
+
+    private var content: some View {
         ZStack {
             VStack(spacing: 32) {
                 Spacer()
@@ -37,7 +47,7 @@ struct SignInView: View {
                         )
                         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
 
-                    Text("Sign in to keep your wardrobe\npersonalized across devices.")
+                    Text(String(localized: "signin_subtitle"))
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white.opacity(0.9))
                         .font(.headline)
@@ -50,7 +60,7 @@ struct SignInView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.shield.fill")
                             .foregroundStyle(.secondary)
-                        Text("Fast & Private")
+                        Text(String(localized: "signin_badge"))
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
@@ -101,12 +111,18 @@ struct SignInView: View {
 
                 Spacer()
 
-                Text("By continuing, you agree to our Terms and Privacy Policy.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 20)
+                Button {
+                    showPrivacyPolicy = true
+                } label: {
+                    Text(String(localized: "signin_privacy_footer"))
+                        .font(.footnote)
+                        .underline()
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 40)
+                .padding(.bottom, 20)
             }
         }
     }

@@ -77,6 +77,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   shared state in `WeatherCenter`.
 - Images are files under `Documents/WearItImages` (`ImageStore`: disk + downsample +
   cache), synced separately by `CloudKitImageSyncService`. `Garment.imageData` is legacy.
+- Privacy policy: in-app `PrivacyPolicyView` from `privacy_*` strings; the public copy is `docs/privacy-policy.html`
+  (GitHub Pages from `main` /docs, `https://111dd.github.io/WearIt/privacy-policy.html`). After editing a `privacy_*`
+  string run `python3 scripts/make_privacy_page.py`.
 - No CI, no third-party packages (Mantis cropper has a stub fallback).
 
 ## Architecture facts
@@ -84,6 +87,8 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - **One "me" per iCloud account**: always get the profile through `CurrentUser` (exact Apple ID match, else the
   main profile: signed-in first, then oldest). Signing in adopts it (`CurrentUser.adopt`), signing out keeps it,
   and `CurrentUser.mergeDuplicateProfiles` folds duplicates at launch. Never create a `UserProfile` elsewhere.
+- "Delete all my data" (`AccountDataService.deleteStoredData`) must delete and reset the gate in one main-actor turn;
+  a new `@Model` type has to be added there and to the export.
 - No sample wardrobe is seeded. New installs see `OnboardingView` (gate in `AppGateView`); launch work that would
   prompt for permissions waits for `OnboardingState.isCompleted`.
 - Outfit identity lives on `DayPlan` **slots** (`slotAssignments` / `eveningSlotAssignments`),
@@ -168,6 +173,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-07 · Claude Code · Real profile + users step 3: `UserProfile.username` (`UsernameRules`, local until sharing has a server) and `birthday`; "Edit profile" sheet (`Views/EditProfileView`: name, @username, bio, private email/phone/birthday); username in the intro. Settings > Your data: privacy policy (`Views/PrivacyPolicyView`, published from `docs/privacy-policy.html` via GitHub Pages, built by `scripts/make_privacy_page.py`), export to zip (`Services/AccountDataService`), delete all my data (store rows, iCloud photos, local files, defaults, sign-in). `PrivacyInfo.xcprivacy` for app + widget; sign-in screen localized and no longer claims sign-in is what syncs.
 - 2026-10-07 · Claude Code · Users step 1+2 (`plans/users-analysis.md`): one stable profile (sign-in adopts the current profile instead of starting an empty one, sign-out keeps it, duplicate profiles merged at launch); no sample items seeded; first-run intro (`Views/OnboardingView`: welcome, name / work clothes / runs cold, permissions with reasons, optional Sign in with Apple); "restoring from iCloud" empty state; "Show the intro again" in Settings; removed dead `WelcomeView` and `SeedData`.
 - 2026-10-07 · Claude Code · Jackets actually show up: a "light layer" is any outer up to warmth 3 that isn't a coat/parka/puffer (`TemperatureComfort.isLightLayer`, used by `.lightOnly`, the style layer and the `lightLayer` gap); style-layer days are 18–27°. A short-sleeve day look with no layer gets a "cool evening/morning (17°) · take your jacket?" row (`layerTip`); yes/no answers learn the user's own cool-hours threshold (`ComfortPreferences.coolHourJacketBelowC`).
 - 2026-10-07 · Claude Code · Wardrobe analysis + variety: a light jacket over short sleeves on mild dry days (about every other day, `AIRecommender.offersStyleLayer`); new gaps `lightLayer` and `thinRotation` (tops 7 / bottoms 4 / shoes 3, `WardrobeGapAnalyzer.coverage` shown in Stats); the planner shows one "add to your wardrobe" card when the board repeats a thin category or the weather needs a missing layer. Swap suggestions name the item type and show the suggested piece; Hebrew top slot is "חולצה".

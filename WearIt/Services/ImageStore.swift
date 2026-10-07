@@ -218,6 +218,18 @@ enum ImageStore {
     }
 
     /// מוחק קובץ תמונה (לא חובה להשתמש בזה ביום-יום).
+    /// Removes every stored photo and clears the in-memory caches ("delete all my data").
+    static func deleteAll() {
+        imageCache.removeAllObjects()
+        thumbnailCache.removeAllObjects()
+        cacheKeyRegistryLock.lock()
+        cacheKeysByPath.removeAll()
+        cacheKeyRegistryLock.unlock()
+        if let dir = try? baseURL() {
+            try? FileManager.default.removeItem(at: dir)
+        }
+    }
+
     static func delete(path: String) {
         evictCacheKeys(for: path)
         guard let url = try? baseURL().appendingPathComponent(path) else { return }

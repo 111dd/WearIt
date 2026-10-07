@@ -13,6 +13,10 @@ final class UserProfile {
     var rainTolerance: Int = 3
     var email: String?
     var phone: String?
+    /// Public handle without the "@", normalized by `UsernameRules`. Local until sharing has a server.
+    var username: String?
+    /// Date of birth (only the day matters). Private, never shown on the public profile.
+    var birthday: Date?
     /// Short personal style tagline shown on the profile page.
     var bio: String?
     /// ImageStore-relative path for a photo avatar; falls back to `avatarEmoji`.
@@ -82,6 +86,47 @@ final class UserProfile {
         self.rainTolerance = rainTolerance
         self.email = email
         self.phone = phone
+    }
+}
+
+/// Handle rules shared by the edit-profile screen and the intro: 3–24 characters,
+/// lowercase English letters, digits, "." and "_", not starting or ending with a dot.
+enum UsernameRules {
+    static let minLength = 3
+    static let maxLength = 24
+    private static let allowed = Set("abcdefghijklmnopqrstuvwxyz0123456789._")
+
+    /// Lowercased, "@" and spaces removed. Does not drop other characters, so errors stay visible.
+    static func normalize(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "@", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .lowercased()
+    }
+
+    /// Localized problem with a normalized handle, or nil when it is fine (or empty: a handle is optional).
+    static func problem(with username: String) -> String? {
+        guard !username.isEmpty else { return nil }
+        if username.contains(where: { !allowed.contains($0) }) {
+            return String(localized: "username_error_characters")
+        }
+        if username.count < minLength || username.count > maxLength {
+            return String(format: String(localized: "username_error_length_format"), minLength, maxLength)
+        }
+        if username.hasPrefix(".") || username.hasSuffix(".") || username.contains("..") {
+            return String(localized: "username_error_dots")
+        }
+        return nil
+    }
+
+    /// A handle made from the name when it is written in English letters ("Dor David" → "dor.david").
+    static func suggestion(from name: String) -> String? {
+        let words = name.lowercased()
+            .split(whereSeparator: { $0 == " " || $0 == "-" })
+            .map { String($0.filter { allowed.contains($0) && $0 != "." }) }
+            .filter { !$0.isEmpty }
+        let candidate = String(words.joined(separator: ".").prefix(maxLength))
+        return problem(with: candidate) == nil && !candidate.isEmpty ? candidate : nil
     }
 }
 

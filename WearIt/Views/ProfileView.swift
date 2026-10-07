@@ -6,14 +6,13 @@ import UIKit
 //  ProfileView.swift
 //  WearIt
 //
-//  Identity-first profile page: editable avatar/name/bio, social-style stats
+//  Identity-first profile page: avatar, name, @username and bio (edited in EditProfileView), social-style stats
 //  row, style identity chips (from the persisted TasteProfile), and a grid of
 //  recent looks. App configuration lives in SettingsView (toolbar gear).
 //
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var context
-    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: AuthManager
 
     @Query<UserProfile> private var users: [UserProfile]
@@ -24,15 +23,12 @@ struct ProfileView: View {
     @Query private var recoStates: [RecoState]
     @Query private var wearEvents: [WearEvent]
 
-    @State private var displayName: String = ""
-    @State private var bio: String = ""
     @State private var avatarEmoji: String = "🧑🏻"
     @State private var avatarImagePath: String?
     @State private var avatarImage: UIImage?
-    @State private var didLoadProfile = false
+    @State private var showEditProfile = false
     @State private var showAvatarDialog = false
     @State private var showAvatarPicker = false
-    @State private var profileSaveDebouncer = Debouncer(interval: 1.5)
     @State private var showStyleSwipe = false
 
     init() {
@@ -88,14 +84,9 @@ struct ProfileView: View {
         }
         .onAppear { loadOrCreateUser() }
         .onChange(of: auth.userIdentifier) { _, _ in loadOrCreateUser() }
-        .onChange(of: displayName) { _, _ in scheduleProfileSave() }
-        .onChange(of: bio) { _, _ in scheduleProfileSave() }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .background {
-                saveProfile()
-            }
+        .sheet(isPresented: $showEditProfile) {
+            EditProfileView(profile: fetchOrCreateProfile(userIdentifier: auth.userIdentifier))
         }
-        .onDisappear { saveProfile() }
         .sheet(isPresented: $showAvatarPicker) {
             PhotoLibraryPickerWrapper { image in
                 applyAvatarImage(image)
@@ -148,19 +139,35 @@ struct ProfileView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "profile_avatar_change"))
 
-            TextField(String(localized: "profile_display_name_placeholder"), text: $displayName)
-                .font(.title3.weight(.semibold))
-                .multilineTextAlignment(.center)
-                .textInputAutocapitalization(.words)
-                .submitLabel(.done)
-                .accessibilityLabel(String(localized: "profile_display_name"))
+            VStack(spacing: 2) {
+                Text(heroName)
+                    .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                if let username = activeProfile?.username {
+                    Text("@\(username)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .environment(\.layoutDirection, .leftToRight)
+                }
+            }
 
-            TextField(String(localized: "profile_bio_placeholder"), text: $bio, axis: .vertical)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(1...3)
-                .accessibilityLabel(String(localized: "profile_bio_placeholder"))
+            if let bio = activeProfile?.bio, !bio.isEmpty {
+                Text(bio)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+
+            Button {
+                showEditProfile = true
+            } label: {
+                Text(String(localized: "edit_profile_title"))
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .dsSecondaryButton()
+            .padding(.top, DS.Spacing.xs)
 
             HStack(spacing: DS.Spacing.xs) {
                 if let memberSince {
@@ -199,6 +206,11 @@ struct ProfileView: View {
             Text(avatarEmoji)
                 .font(.system(size: 44))
         }
+    }
+
+    private var heroName: String {
+        let name = activeProfile?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? String(localized: "profile_default_name") : name
     }
 
     private var memberSince: String? {
@@ -517,28 +529,8 @@ struct ProfileView: View {
 
     private func loadOrCreateUser() {
         let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
-        didLoadProfile = false
         avatarEmoji = me.avatarEmoji ?? "🧑🏻"
         avatarImagePath = me.avatarImagePath
-        displayName = me.displayName
-        bio = me.bio ?? ""
-        didLoadProfile = true
-    }
-
-    private func scheduleProfileSave() {
-        guard didLoadProfile else { return }
-        profileSaveDebouncer.schedule {
-            saveProfile()
-        }
-    }
-
-    private func saveProfile() {
-        guard didLoadProfile else { return }
-        let me = fetchOrCreateProfile(userIdentifier: auth.userIdentifier)
-        me.displayName = displayName.isEmpty ? (auth.displayName ?? String(localized: "profile_default_name")) : displayName
-        let trimmedBio = bio.trimmingCharacters(in: .whitespacesAndNewlines)
-        me.bio = trimmedBio.isEmpty ? nil : trimmedBio
-        try? context.save()
     }
 
     private func applyAvatarImage(_ image: UIImage) {
