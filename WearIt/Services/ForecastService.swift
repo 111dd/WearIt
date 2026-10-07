@@ -143,6 +143,12 @@ final class WeatherKitProvider: WeatherProvider {
     private let appleWeatherService = WeatherKit.WeatherService.shared
     
     func forecastNext3Days(for location: CLLocation) async throws -> [DayForecast] {
+        try await forecast(for: location, days: 3)
+    }
+
+    /// WeatherKit daily runs about 10 days ahead. Home forecasts ask for 3.
+    func forecast(for location: CLLocation, days: Int) async throws -> [DayForecast] {
+        let limit = max(1, min(days, 10))
         // Request daily forecast from Apple WeatherKit
         let daily: Forecast<DayWeather> = try await appleWeatherService.weather(
             for: location,
@@ -162,8 +168,7 @@ final class WeatherKitProvider: WeatherProvider {
             )
         } ?? []
 
-        // Get next 3 days
-        let next3 = daily.prefix(3).map { day in
+        let next3 = daily.prefix(limit).map { day in
             DayForecast(
                 date: day.date,
                 temperatureC: day.highTemperature.converted(to: UnitTemperature.celsius).value,
@@ -286,6 +291,8 @@ final class ForecastService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var usedMockData: Bool = false
     @Published private(set) var locationName: String?
+    /// Last device fix, so a calendar pin can be compared with home.
+    private(set) var homeCoordinate: DeviceCoordinate?
     
     private var provider: WeatherProvider = WeatherKitProvider()
     private var fallbackProvider: WeatherProvider = MockWeatherProvider()
@@ -319,6 +326,7 @@ final class ForecastService: ObservableObject {
             // Get current location
             let location = try await LocationManager.shared.requestLocation()
             let clLocation = CLLocation(latitude: location.latitude, longitude: location.longitude)
+            homeCoordinate = DeviceCoordinate(latitude: location.latitude, longitude: location.longitude)
             
             // Resolve location name for UI display
             updateIfChanged(&locationName, await resolveLocationName(for: clLocation))
@@ -445,5 +453,16 @@ final class ForecastService: ObservableObject {
             }
         }
         return true
+    }
+}
+
+/// The device's last known point. Compared with a calendar pin to see if the
+/// event is somewhere else.
+struct DeviceCoordinate: Equatable {
+    var latitude: Double
+    var longitude: Double
+
+    var location: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 }

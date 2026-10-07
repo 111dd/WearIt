@@ -2,6 +2,16 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-06 — Calendar journal plus a suitcase
+- **Did:** The calendar day lists its events. `TripFinder` turns a flight, or two-plus days at a far pin, into a trip. `TripPackingView` suggests a look per day and a checklist (counts for underwear/socks/swim, closet coats when it's cold). Manual trips are saved in UserDefaults.
+- **Why:** The calendar was only a worn-look journal, and a vacation had nowhere to become a packing list.
+- **Watch:** All-day EventKit end dates are exclusive (the morning after the last day). A single far meeting is not a trip; a one-day flight is. Don't regenerate a saved suitcase on every open — checks and counts live under `tripPacking.list.<id>`. WeatherKit covers about 10 days; longer trips use Open-Meteo, and dates past the forecast get no swim/coat guess.
+
+## 2026-10-06 — Dress for a calendar pin's weather
+- **Did:** `EventLocationDressing` picks a tagged place only when it is ≥ 40 km from the device fix. `EventLocationForecastService` loads that forecast (WeatherKit, else Open-Meteo). A timed event scores the hours around it; an all-day trip uses the whole day.
+- **Why:** a trip or a meeting in another city was still dressed for home.
+- **Watch:** only `EKEvent.structuredLocation.geoLocation` counts — a typed "London" with no map pin is ignored. Same-city pins stay on the home forecast. A failed fetch must not fall through to mock temperatures. Confirmed or worn looks are not replanned.
+
 ## 2026-10-06 — Readable glass and a backdrop-aware accent
 - **Did:** Untinted glass uses the planner card veil (`DS.Glass.cardTint`). AccentColor is a deep teal in light and a light teal in dark. Labels on a solid accent fill use `DS.Accent.onFill`. Washed `.tertiary` captions on cards are `.secondary`.
 - **Why:** The accent asset was empty, so system teal sat on light wallpapers (soft sky and the card glass) and failed contrast. The app already flips `preferredColorScheme` from the backdrop.

@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import CoreLocation
 
 // MARK: - Preferences
 
@@ -67,6 +68,8 @@ struct CalendarDayEvent: Equatable {
     let kind: CalendarEventUnderstanding.Kind
     /// Starts at 16:30 or later (or an all-day formal event): shapes the evening look.
     let isEvening: Bool
+    /// Map pin, when the event has a tagged location. Nil for a text-only place.
+    var place: EventPlace? = nil
 
     var occasion: CalendarOccasionKind {
         switch kind {
@@ -321,7 +324,7 @@ final class CalendarContextService {
         )
     }
 
-    static func icon(for occasion: CalendarOccasionKind) -> String {
+    nonisolated static func icon(for occasion: CalendarOccasionKind) -> String {
         switch occasion {
         case .work: return "briefcase"
         case .sport: return "figure.run"
@@ -414,10 +417,121 @@ final class CalendarContextService {
                 start: event.startDate ?? day,
                 isAllDay: event.isAllDay,
                 kind: kind,
-                isEvening: isEvening
+                isEvening: isEvening,
+                place: Self.taggedPlace(on: event)
             )
         }
         .sorted { $0.start < $1.start }
+    }
+
+    /// The place the user picked on the map. A typed note like "office" has no coordinate.
+    private static func taggedPlace(on event: EKEvent) -> EventPlace? {
+        guard let geo = event.structuredLocation?.geoLocation else { return nil }
+        let coordinate = geo.coordinate
+        guard coordinate.latitude.isFinite, coordinate.longitude.isFinite else { return nil }
+        let raw = event.structuredLocation?.title ?? event.location ?? ""
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return EventPlace(name: name, latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    /// Events to show on the calendar day, including ones that don't change the outfit.
+    /// Also the input for trip detection across a range.
+    func displayEvents(from start: Date, to end: Date) -> [CalendarDisplayEvent] {
+        guard CalendarContextPreferences.deviceCalendarEnabled,
+              authorizationStatus == .fullAccess else { return [] }
+        let rangeStart = Calendar.current.startOfDay(for: start)
+        guard let rangeEnd = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: end)),
+              rangeEnd > rangeStart else { return [] }
+        let predicate = store.predicateForEvents(withStart: rangeStart, end: rangeEnd, calendars: nil)
+        return store.events(matching: predicate).compactMap { event -> CalendarDisplayEvent? in
+            if event.status == .canceled { return nil }
+            if let me = event.attendees?.first(where: \.isCurrentUser), me.participantStatus == .declined {
+                return nil
+            }
+            if let type = event.calendar?.type, type == .birthday || type == .subscription { return nil }
+            let title = (event.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            let kind = CalendarEventUnderstanding.classify(
+                CalendarEventUnderstanding.EventInput(
+                    title: title,
+                    location: event.location ?? "",
+                    notes: event.notes ?? "",
+                    calendarTitle: event.calendar?.title ?? ""
+                )
+            )
+            let place = Self.taggedPlace(on: event)
+            let locationName = place?.name.isEmpty == false
+                ? place!.name
+                : (event.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let startDate = event.startDate ?? rangeStart
+            let endDate = event.endDate ?? startDate
+            return CalendarDisplayEvent(
+                id: event.eventIdentifier ?? "\(title)-\(startDate.timeIntervalSince1970)",
+                title: title,
+                start: startDate,
+                end: endDate,
+                isAllDay: event.isAllDay,
+                locationName: locationName,
+                place: place,
+                kind: kind
+            )
+        }
+        .sorted { $0.start < $1.start }
+    }
+}
+
+/// A calendar row for the journal, and the source of a trip span.
+struct CalendarDisplayEvent: Identifiable, Equatable {
+    var id: String
+    var title: String
+    var start: Date
+    var end: Date
+    var isAllDay: Bool
+    var locationName: String
+    var place: EventPlace?
+    var kind: CalendarEventUnderstanding.Kind
+
+    var tripInput: TripEventInput {
+        TripEventInput(
+            title: title,
+            start: start,
+            end: end,
+            isAllDay: isAllDay,
+            kind: kind,
+            place: place
+        )
+    }
+
+    var icon: String {
+        CalendarContextService.icon(for: kind.occasion(isEvening: false))
+    }
+
+    /// "18:00 · Eilat", or "All day" when there is no clock time.
+    var detail: String {
+        var parts: [String] = []
+        if isAllDay {
+            parts.append(String(localized: "calendar_all_day"))
+        } else {
+            parts.append(start.formatted(date: .omitted, time: .shortened))
+        }
+        if !locationName.isEmpty { parts.append(locationName) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private extension CalendarEventUnderstanding.Kind {
+    func occasion(isEvening: Bool) -> CalendarOccasionKind {
+        switch self {
+        case .work: return .work
+        case .sport: return .sport
+        case .travel: return .travel
+        case .outdoor: return .outdoor
+        case .social: return isEvening ? .socialEvening : .socialDay
+        case .formal: return .formal
+        case .blackTie: return .blackTie
+        case .mourning: return .mourning
+        case .none, .personal: return .none
+        }
     }
 }
 

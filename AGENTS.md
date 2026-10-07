@@ -44,7 +44,9 @@ Tabs (`WearIt/RootView.swift`):
    slots, locking, drag and drop, replace/confirm/not worn, AI look explanations.
    Profile and Stats open from its toolbar; Settings opens from Profile.
 2. **Calendar** (`CalendarLookView` + `UI/Calendar/*`): date strip (week/month),
-   `DayJournalCard`, `DayLookEditorSheet`. Shares DayPlan data with the planner.
+   `DayJournalCard` (the day's events plus the look, if one was planned), `DayLookEditorSheet`.
+   A flight, or two-plus days at a far pin, opens `TripPackingView` (looks per day, underwear/socks
+   counts, swimwear or a coat from the destination forecast). Manual trips live in UserDefaults.
 3. **Wardrobe** (`WardrobeView`): grid with filters, edit item (`EditGarmentView`).
 4. **Add** (`AddGarmentView`): photo → crop/cutout → details; barcode / QR / product
    URL / clothing-label scan to auto-fill fields.
@@ -69,6 +71,8 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Calendar: `CalendarEventUnderstanding.classify` (pure, tested) → `CalendarContextService.build`
   → `DayCalendarContext` with separate day / evening occasions. Use `occasion(isEvening:workDressCode:)`
   and `formalityBump(isEvening:workDressCode:)`, never the headline `occasionKind`, for a look.
+  A tagged place ≥ 40 km from home (`EventLocationDressing`) replaces that look's forecast
+  (`EventLocationForecastService`: WeatherKit, else Open-Meteo — never mock).
 - Weather: WeatherKit (`ForecastService`) plus Open-Meteo (`WeatherService`),
   shared state in `WeatherCenter`.
 - Images are files under `Documents/WearItImages` (`ImageStore`: disk + downsample +
@@ -97,7 +101,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 | Folder | What lives there |
 |---|---|
 | `Models/` | SwiftData `@Model`s: `Garment`, `DayPlan` (+ `DayPlanService`), `WearEvent`, `RecommendationEvent`, `UserProfile`, `TasteProfile`, `NotificationPreferences`, `Brand`, `Outfit`, `DailyLook`. Taxonomy enums in `GarmentTypes.swift`; per-type defaults in `ItemTypeDefaults.swift`. |
-| `Logic/` | Recommendation: `AIRecommender` (online logistic model + heuristics, `RecoState` weights per profile, `FeatureSpace`), `TemperatureComfort` + `GarmentThermalProfile`, `TasteAffinity`, `CombinationAffinity`, `OutfitComposer`, `OutfitChangeAdvisor`, `WardrobeGapAnalyzer`, `LoveScoreLearner`. `Recommender.swift` (root) is the rule-based fallback. |
+| `Logic/` | Recommendation: `AIRecommender` (online logistic model + heuristics, `RecoState` weights per profile, `FeatureSpace`), `TemperatureComfort` + `GarmentThermalProfile`, `TasteAffinity`, `CombinationAffinity`, `OutfitComposer`, `OutfitChangeAdvisor`, `WardrobeGapAnalyzer`, `LoveScoreLearner`. Away-from-home: `EventLocationDressing`, `TripFinder`, `TripPackingBuilder`. `Recommender.swift` (root) is the rule-based fallback. |
 | `Services/` | Weather, calendar context (incl. Hebrew/Jewish holiday rules), notifications, CloudKit monitor/image sync, migrations, widget snapshot, auth (Sign in with Apple + keychain), product enrichment (`BarcodeLookupService`, `ProductPageMetadataService`, `DigimarcProductIDService`, `LabelScanService`, `ProductFieldMapper`, `GarmentEnrichmentService`), `LookExplanationService` (FoundationModels). |
 | `Services/imgML`, `ImageProcessing/` | Add-garment AI: `GarmentCutoutService` (instance cutout with choices, selfie top/bottom/shoes bands, quality hints), `GarmentVisionClassifier` (built-in `VNClassifyImageRequest`), `ColorExtractor`, `AutoFillService` (instant `suggest` + Foundation Models `refine`). `ImageCutout` is the Simulator/no-subject fallback. `Models/DeepLabV3.mlmodel` + `DeepLabSegmenter` are unused. |
 | `UI/` | Design system (`DesignSystem.swift` = `DS` tokens, `GlassKit.swift` liquid-glass), backdrop presets, shared components. |
@@ -139,11 +143,19 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Widget types (`TodaySnapshot`, `WidgetCommand`) are duplicated in
   `WearItWidget/WidgetShared.swift` and `Services/Widget*`; keep both in sync.
 - `OutfitPlannerView.swift` is ~4.7k lines; use its `// MARK:` sections to navigate.
+- **Away from home**: only a map pin (`EKEvent.structuredLocation.geoLocation`) ≥ 40 km from home
+  changes a look's forecast. A failed remote fetch must not fall through to mock weather, and a
+  confirmed or worn look is not replanned. A flight, or two-plus days at one far pin, is a trip
+  (`TripFinder`). Suitcase checks and counts live in UserDefaults (`tripPacking.list.<id>`);
+  hand-made trips are `tripPacking.manualTrips`. Do not rebuild a saved suitcase on open.
+  All-day EventKit end dates are exclusive (the morning after the last day).
 
 ## Progress log
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-06 · Cursor · Calendar journal shows the day's events. A detected or hand-made trip opens a suitcase: a look per day, editable underwear/socks counts, swimwear when the destination is warm and a coat when it's cold.
+- 2026-10-06 · Cursor · A calendar event with a tagged place ~40 km from home dresses that look for the forecast there (day pin → day look, evening pin → evening look, all-day trip covers both).
 - 2026-10-06 · Cursor · Shared the planner's readable glass veil with every untinted card, and made the accent a deep teal on light backdrops / light teal on dark photos (`DS.Accent.onFill` for glyphs on a fill).
 - 2026-10-06 · Claude Code · Love is learned, sizes are the user's: the love slider is gone from add/edit
   (`Logic/LoveScoreLearner` in deferred bootstrap adds swap signals and slow neglect decay on top of the live
@@ -250,7 +262,7 @@ Newest first. One line per meaningful change: date, tool, what.
 Ideas, not commitments. The owner picks what to do next.
 
 Agreed direction (2026-10-04): understand the user better with low-effort, on-device signals,
-and recommend from that. Order: wardrobe gaps → smarter stats → trip packing list.
+and recommend from that. Wardrobe gaps and the trip packing list have shipped; smarter stats is next.
 
 - User understanding: feed implicit signals (`.replaced`, not-worn looks, dismissed outfits,
   feedback kinds) into `TasteAffinityBuilder` as soft negatives; today taste uses only
@@ -262,7 +274,6 @@ and recommend from that. Order: wardrobe gaps → smarter stats → trip packing
   cached "style portrait" and natural-language gap explanations. No server, no per-tap calls.
 - Smarter stats: optional purchase price → cost per wear; owned vs actually worn per
   category/style; items to donate; too-cold/too-warm trends; most swapped-out items.
-- Trip packing list: dates + destination forecast → planned looks.
 - Split `OutfitPlannerView.swift` into smaller files (variety, persistence, drag & drop).
 - Remove the unused `DeepLabV3.mlmodel` / `DeepLabSegmenter`, `VisionAutoCropper`, `ImagePostprocess`.
 - AI plan steps 3–6 (`plans/ai-everywhere.md`): background AI queue + nightly backfill, best-photo
