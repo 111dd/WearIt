@@ -115,14 +115,15 @@ struct OutfitPlannerView: View {
     }
 
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
+    /// Localized templates, not fixed patterns: "MMM d" reads wrong in Hebrew.
     private static let dayNameFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEEE"
+        formatter.setLocalizedDateFormatFromTemplate("EEEE")
         return formatter
     }()
     private static let shortDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         return formatter
     }()
     
@@ -672,6 +673,9 @@ struct OutfitPlannerView: View {
             question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
+            },
+            isBusy: LookTime.allCases.contains { lookTime in
+                swipeBusyKeys.contains(swipeBusyKey(dayIndex: dayIndex, lookTime: lookTime))
             }
         )
 
@@ -1055,7 +1059,9 @@ struct OutfitPlannerView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(header)
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(dayIndex == selectedDayIndex ? Color.accentColor : .primary)
+                    // Today is the accented one. Tinting whatever card was last
+                    // tapped looked like a selection that does nothing.
+                    .foregroundStyle(dayIndex == 0 ? Color.accentColor : .primary)
                     .lineLimit(1)
 
                 if let forecast = forecastForLook(dayIndex: dayIndex, isEvening: false) {
@@ -1070,10 +1076,6 @@ struct OutfitPlannerView: View {
             Spacer(minLength: DS.Spacing.xs)
 
             dayActionMenu(for: dayIndex)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            selectedDayIndex = dayIndex
         }
     }
 
@@ -1144,7 +1146,7 @@ struct OutfitPlannerView: View {
                 Label(String(localized: "planner_evening_look"), systemImage: "moon.stars")
             }
             Button {
-                boardState.clearDay(dayIndex)
+                clearDay(dayIndex)
             } label: {
                 Label(String(localized: "planner_clear_day"), systemImage: "xmark")
             }
@@ -1156,27 +1158,6 @@ struct OutfitPlannerView: View {
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "planner_day_options"))
-    }
-
-    private func dayActionPill(
-        title: String,
-        systemImage: String,
-        tint: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, DS.Spacing.xs)
-                .padding(.vertical, 6)
-                .foregroundStyle(tint)
-                .liquidGlassPill(interactive: true, tint: tint.opacity(0.10))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var bottomActionBar: some View {
-        AnyView(EmptyView())
     }
 
     private enum DayTiming {
@@ -3446,28 +3427,13 @@ struct OutfitPlannerView: View {
     
     // MARK: - Day Actions
     
-    private func dayActions(for dayIndex: Int) -> some View {
-        HStack(spacing: DS.Spacing.sm) {
-            Button {
-                DS.haptic(0.4)
-                refreshDay(dayIndex)
-            } label: {
-                Label(String(localized: "planner_refresh_day"), systemImage: "arrow.clockwise")
-                    .font(.caption.weight(.medium))
-            }
-            .dsSecondaryButton()
-            
-            Button {
-                DS.haptic(0.3)
-                boardState.clearDay(dayIndex)
-            } label: {
-                Label(String(localized: "planner_clear_day"), systemImage: "xmark")
-                    .font(.caption.weight(.medium))
-            }
-            .dsSecondaryButton()
-        }
+    /// Clearing a day must reach storage: without it `hydrateFromPlans`
+    /// (launch, or any wardrobe change) brings the old look straight back.
+    private func clearDay(_ dayIndex: Int) {
+        boardState.clearDay(dayIndex)
+        persistDayPlan(dayIndex, immediate: true)
     }
-    
+
     private var plannerProfileAvatar: some View {
         let emoji = activeProfile?.avatarEmoji ?? "🧑🏻"
         return ZStack {
@@ -6185,6 +6151,8 @@ private struct DayCardSignature: Equatable {
     let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
+    /// A look on this card is mid-action, so the row renders dimmed and disabled.
+    let isBusy: Bool
 }
 
 private struct DayCardContainer<Content: View>: View, Equatable {

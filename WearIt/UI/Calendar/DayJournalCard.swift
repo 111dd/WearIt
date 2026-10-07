@@ -53,7 +53,10 @@ struct DayJournalActions {
     let onOpenPlanner: () -> Void
     let onSetStatus: (LookWearStatus?) -> Void
     let onSetTemperatureFeedback: (TemperatureFeedback) -> Void
-    let onSaveNotes: (String) -> Void
+    /// Carries the day the note was typed on: the card is rebuilt by `.id`
+    /// when the user swipes, so the save must not land on whatever day is
+    /// selected by the time it runs.
+    let onSaveNotes: (String, Date) -> Void
     let onOpenCamera: () -> Void
     let onRemovePhoto: (Int) -> Void
     var onPickEventPlace: ((DayJournalEvent) -> Void)? = nil
@@ -101,6 +104,9 @@ struct DayJournalCard: View {
         .onChange(of: notesFocused) { _, focused in
             if !focused { commitNotes() }
         }
+        // Swiping to another day replaces this card outright; without this the
+        // note the user was typing was silently dropped.
+        .onDisappear { commitNotes() }
     }
 
     private func syncDrafts() {
@@ -508,7 +514,7 @@ struct DayJournalCard: View {
     private func commitNotes() {
         let trimmed = notesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != model.notes else { return }
-        actions.onSaveNotes(trimmed)
+        actions.onSaveNotes(trimmed, model.date)
     }
 
     // MARK: Primary Action
