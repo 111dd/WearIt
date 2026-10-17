@@ -185,7 +185,58 @@ struct OutfitPlannerView: View {
     
     // MARK: - Body
     
+    // The modifier chain is split across properties so each piece type-checks on its own.
     var body: some View {
+        plannerWithSheets
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshCurrentDate()
+                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                // Events may have changed while the app was in the background.
+                if CalendarContextPreferences.deviceCalendarEnabled {
+                    calendarUnderstandingDidChange()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+                // EventKit posts this in bursts (sync, edits); re-read once it settles.
+                calendarRefreshTask?.cancel()
+                calendarRefreshTask = Task {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    guard !Task.isCancelled else { return }
+                    calendarUnderstandingDidChange()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { note in
+                handleCalendarUnderstandingChanged(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                refreshCurrentDate()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .background {
+                    flushDirtyPlans()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
+                flushDirtyPlans()
+            }
+            .onChange(of: appIntentRouter.pendingAction) { _, newAction in
+                if newAction != nil {
+                    performPendingIntentAction()
+                }
+            }
+    }
+
+    private func handleCalendarUnderstandingChanged(_ note: Notification) {
+        // The work dress code changed in Settings: work days get a fresh look.
+        let replan = note.userInfo?["replanWorkDays"] as? Bool == true
+        let workDays: Set<Int> = replan
+            ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
+            : []
+        calendarUnderstandingDidChange(replanning: workDays)
+        learnOccasionsFromHistory()
+    }
+
+    private var plannerStack: some View {
         NavigationStack {
             plannerContent
                 .navigationTitle(String(localized: "planner_board_title"))
@@ -239,100 +290,68 @@ struct OutfitPlannerView: View {
         } message: {
             Text(boardState.alertMessage)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
-            confirmWorn(dayIndex: 0)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .dayPlanChangedOutside)) { notification in
-            // Already saved by the widget / notification path; reload that day so the
-            // board (and its next save) matches the store.
-            guard let date = notification.userInfo?["date"] as? Date,
-                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
-            else { return }
-            var usedIDs: Set<UUID> = []
-            applyPlan(DayPlanService.shared.planFor(date: date, context: context), dayIndex: index, usedIDs: &usedIDs)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .widgetFeedbackPending)) { _ in
-            applyWidgetFeedback()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
-            guard let date = notification.userInfo?["date"] as? Date,
-                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
-            else { return }
-            selectedDayIndex = index
-            expandedDayDetails.insert(index)
-        }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .garmentMenu(let garment):
-                garmentSheet(garment)
-            case .addPicker(let dayIndex, let slots, let lookTime, let initialSlot):
-                addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
-            case .addNewItem(let dayIndex, let slot, let lookTime):
-                addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-            case .addToWardrobe(let category):
-                AddGarmentView(initialCategory: category) { _ in
-                    activeSheet = nil
-                    // The new item can fill tomorrow's looks; today's stay as they are.
-                    scheduleGenerateAllOutfits(fillMissingOnly: true)
+    }
+
+    private var plannerWithSheets: some View {
+        plannerStack
+            .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
+                confirmWorn(dayIndex: 0)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dayPlanChangedOutside)) { notification in
+                // Already saved by the widget / notification path; reload that day so the
+                // board (and its next save) matches the store.
+                guard let date = notification.userInfo?["date"] as? Date,
+                      let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+                else { return }
+                var usedIDs: Set<UUID> = []
+                applyPlan(DayPlanService.shared.planFor(date: date, context: context), dayIndex: index, usedIDs: &usedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .widgetFeedbackPending)) { _ in
+                applyWidgetFeedback()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
+                guard let date = notification.userInfo?["date"] as? Date,
+                      let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+                else { return }
+                selectedDayIndex = index
+                expandedDayDetails.insert(index)
+            }
+            .sheet(item: $activeSheet) { sheet in
+                plannerSheet(sheet)
+            }
+            .fullScreenCover(isPresented: $showStyleSwipe) {
+                StyleSwipeView(deckSize: styleSwipeDeckSize) {
+                    styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                    styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                    refreshAffinityCaches()
                 }
-            case .captureLook(let dayIndex, let lookTime):
-                let day = boardState.days[dayIndex]
-                let slots = lookTime == .evening ? day.eveningSlots : day.slots
-                LookCaptureView(
-                    lookDate: day.date,
-                    isEvening: lookTime == .evening,
-                    garmentIDs: OutfitSlot.allCases.compactMap { slots[$0]?.garmentID }
-                )
+                .environmentObject(auth)
             }
-        }
-        .fullScreenCover(isPresented: $showStyleSwipe) {
-            StyleSwipeView(deckSize: styleSwipeDeckSize) {
-                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
-                styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
-                refreshAffinityCaches()
+    }
+
+    @ViewBuilder
+    private func plannerSheet(_ sheet: PlannerSheet) -> some View {
+        switch sheet {
+        case .garmentMenu(let garment):
+            garmentSheet(garment)
+        case .addPicker(let dayIndex, let slots, let lookTime, let initialSlot):
+            addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
+        case .addNewItem(let dayIndex, let slot, let lookTime):
+            addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+        case .addToWardrobe(let category):
+            AddGarmentView(initialCategory: category) { _ in
+                activeSheet = nil
+                // The new item can fill tomorrow's looks; today's stay as they are.
+                scheduleGenerateAllOutfits(fillMissingOnly: true)
             }
-            .environmentObject(auth)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            refreshCurrentDate()
-            styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
-            // Events may have changed while the app was in the background.
-            if CalendarContextPreferences.deviceCalendarEnabled {
-                calendarUnderstandingDidChange()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
-            // EventKit posts this in bursts (sync, edits); re-read once it settles.
-            calendarRefreshTask?.cancel()
-            calendarRefreshTask = Task {
-                try? await Task.sleep(for: .milliseconds(800))
-                guard !Task.isCancelled else { return }
-                calendarUnderstandingDidChange()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { note in
-            // The work dress code changed in Settings: work days get a fresh look.
-            let workDays = note.userInfo?["replanWorkDays"] as? Bool == true
-                ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
-                : []
-            calendarUnderstandingDidChange(replanning: workDays)
-            learnOccasionsFromHistory()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
-            refreshCurrentDate()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .background {
-                flushDirtyPlans()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
-            flushDirtyPlans()
-        }
-        .onChange(of: appIntentRouter.pendingAction) { _, newAction in
-            if newAction != nil {
-                performPendingIntentAction()
-            }
+        case .captureLook(let dayIndex, let lookTime):
+            let day = boardState.days[dayIndex]
+            let slots = lookTime == .evening ? day.eveningSlots : day.slots
+            LookCaptureView(
+                lookDate: day.date,
+                isEvening: lookTime == .evening,
+                garmentIDs: OutfitSlot.allCases.compactMap { slots[$0]?.garmentID }
+            )
         }
     }
 
