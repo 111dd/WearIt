@@ -87,6 +87,11 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   Product/ProductGroup + Open Graph, or `/products.json` for Shopify. It stores raw fields only; the app maps them through
   `ProductPageMetadataService.makeProduct` / `ProductFieldMapper`. Published nightly to the `catalog-data` branch
   (`https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/catalog.json`, plus `il/report.json`).
+  In the app: `ShopCatalogService` (download with ETag, cache in Caches, map off the main thread) →
+  `PurchaseScorer` (taste + looks with the user's most-worn pieces via `AIRecommender.lookScore` + gap fit + size
+  filter − "already have plenty", then `ShopPreferenceModel` learns from save/open/not for me/bought in
+  `ShopFeedbackStore`, UserDefaults only) → `Views/ShopPicksView` (full list) and `ShopPicksSection` (Stats), also
+  linked from the planner's gap card. Products are scored as transient `Garment`s that are never inserted.
 
 ## Architecture facts
 
@@ -183,6 +188,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Shop picks step 2–4 (`plans/shopping-israel.md`): the app downloads the Israeli catalog and ranks it on the device by how much the user would wear each piece (taste, looks with their most-worn items, wardrobe gaps, usual size, a penalty for duplicates), with an "about N× a month" estimate and reasons. "Picks for you" screen (women/men/all, category and saved filters, open in shop, save, not for me, I bought it) feeding a small on-device preference model; top 3 in Stats and a link on the planner's gap card.
 - 2026-10-17 · Claude Code · Shop catalog step 1 (`plans/shopping-israel.md`): nightly GitHub Action builds an Israeli product catalog (Terminal X + Castro pilot) from sitemaps and product-page JSON-LD, incremental, robots-aware, published to the `catalog-data` branch. The app doesn't read it yet.
 - 2026-10-17 · Claude Code · Interactive widget: ↻ cycles two ready alternatives per day look (planner `widgetAlternatives`, memoized `rankLooks`, locked items kept; the pick becomes the day's look), Today / Evening / Tomorrow tabs in medium + large, ✓ / ✕ (not today) and a one-time 😍🥶🥵 "how was it?" after wearing, learned by the planner.
 - 2026-10-17 · Claude Code · Social phase A step 1 (`plans/profile-social-direction.md`): `LookPost` model (mirrors the future server table, private by default, photo synced as `photoData` external storage), "Snap the look" (`Views/LookPosts/LookCaptureView`: camera/library, `LookPhotoProcessor` 4:5 crop around the person, hide face, blur background, metadata-free JPEG) offered once under a worn look and in the day ⋯ menu; profile photo grid (3 columns, pinned first, zoom into a post with caption, private item tags, pin, share, delete). Calendar day photos are now posts; old `DailyLook.photoPaths` are imported at launch (`LookPostStore.importLegacyDayPhotos`).
@@ -322,6 +328,9 @@ and recommend from that. Wardrobe gaps and the trip packing list have shipped; s
   pick + duplicates, look photo → wardrobe items, "ask the wardrobe".
 - Remove legacy `OutfitView` / `ContentView` if confirmed unused.
 - Sizes: use body measurements for brand size advice and in-stock matching (needs a product/stock source).
+- Shop picks next: close the loop (an item marked "I bought it" or added from a catalog link → count its wears as
+  the real label), visual similarity on the top picks, price-drop alerts on saved items (subscription idea), more
+  stores (Zara, Factory 54, Renuar) after checking `il/report.json`.
 - Show the learned love on the item (read-only) or use it in Stats ("items you love but rarely wear").
 
 ## When you finish a task

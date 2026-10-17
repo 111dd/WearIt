@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Shop picks ranked on the device
+- **Did:** `ShopCatalogService`, `PurchaseScorer`, `ShopFeedback`, `Views/ShopPicksView` (+ Stats section, planner gap link).
+- **Why:** suggest purchases the user will actually wear, using the wardrobe without sending it anywhere.
+- **Watch:** catalog fields are raw; map only through `ShopCatalogService.map` (→ `makeProduct`). Products become transient `Garment`s for scoring: never insert them. Only ~70 products get the look-building pass after a cheap taste pass, keep it that way (it runs on the main actor). `ShopPreferenceModel` features are append-only.
+
 ## 2026-10-17 — Shop catalog crawler
 - **Did:** `scripts/catalog/build_catalog.py` + `.github/workflows/catalog.yml` publish `il/catalog.json` on the `catalog-data` branch.
 - **Why:** personalized purchase suggestions need a product source; no server yet, so GitHub Actions + a data branch.
