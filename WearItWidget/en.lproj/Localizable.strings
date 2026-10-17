@@ -1,8 +1,15 @@
 /* WearItWidget Localizable (English) */
-"location_unavailable" = "Location unavailable";
-"widget_open_planner" = "Open Planner";
-"widget_mark_worn" = "Mark worn";
-"widget_confirmed" = "Confirmed";
-"widget_not_confirmed" = "Not confirmed";
-"widget_empty_title" = "No outfit yet";
-"widget_empty_body" = "Open WearIt to generate today’s look.";
+"widget_display_name" = "Today's Look";
+"widget_display_description" = "Today's outfit with the weather, the evening look and tomorrow's.";
+"widget_role_today" = "Today";
+"widget_role_evening" = "This evening";
+"widget_role_tomorrow" = "Tomorrow";
+"widget_mark_worn" = "I wore it";
+"widget_status_worn" = "Worn";
+"widget_status_not_worn" = "Not worn";
+"widget_empty_title" = "Nothing planned for today";
+"widget_empty_body" = "Open WearIt to plan your look.";
+"widget_intent_confirm_title" = "I wore it";
+"widget_intent_confirm_description" = "Marks the look shown in the widget as worn.";
+"widget_intent_param_date" = "Date";
+"widget_intent_param_look" = "Look";

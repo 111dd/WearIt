@@ -240,6 +240,17 @@ struct OutfitPlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
             confirmWorn(dayIndex: 0)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .lookMarkedWornOutside)) { notification in
+            // Already saved by the widget / notification path; keep the board in step.
+            guard let date = notification.userInfo?["date"] as? Date,
+                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+            else { return }
+            if notification.userInfo?["isEvening"] as? Bool == true {
+                boardState.days[index].eveningLookWearStatus = .worn
+            } else {
+                boardState.days[index].dayLookWearStatus = .worn
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
             guard let date = notification.userInfo?["date"] as? Date,
                   let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
@@ -492,6 +503,7 @@ struct OutfitPlannerView: View {
         lastForecastSignature = signature
         boardState.updateForecasts(newForecasts)
         scheduleGenerateAllOutfits(fillMissingOnly: true)
+        saveWidgetSnapshot()
     }
 
     private func handleGarmentChange(_ _: Int) {
@@ -5285,14 +5297,34 @@ struct OutfitPlannerView: View {
         plan.eveningLookWearStatus = day.eveningLookWearStatus
         try? context.save()
 
-        if Calendar.current.isDateInToday(day.date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
+        if isWidgetDay(day.date) {
+            saveWidgetSnapshot()
         }
+    }
+
+    /// The widget shows today and tomorrow (day + evening looks).
+    private func isWidgetDay(_ date: Date) -> Bool {
+        let calendar = Calendar.current
+        return calendar.isDateInToday(date) || calendar.isDateInTomorrow(date)
+    }
+
+    private func saveWidgetSnapshot() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+        var reasons: [Date: String] = [:]
+        for index in boardState.days.indices where isWidgetDay(boardState.days[index].date) {
+            if let reason = lookReasons(for: index).first {
+                reasons[calendar.startOfDay(for: boardState.days[index].date)] = reasonText(reason)
+            }
+        }
+        WidgetSnapshotService.saveSnapshot(
+            plans: DayPlanService.shared.plans(from: today, to: tomorrow, context: context),
+            garments: allGarments,
+            forecasts: weather.forecasts,
+            locationName: weather.locationName,
+            dayReasons: reasons
+        )
     }
 
     private func persistPlans(for indices: [Int], immediate: Bool = false) {
@@ -5598,15 +5630,7 @@ struct OutfitPlannerView: View {
         )
         learnFromPlannerFeedback(dayIndex: dayIndex, kind: .worn, reward: 0.82)
         DS.haptic(0.4)
-
-        if Calendar.current.isDateInToday(date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
-        }
+        // Saving also refreshes the widget for today / tomorrow.
         persistDayPlan(dayIndex, immediate: true)
     }
 
@@ -5630,19 +5654,15 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count else { return }
         let date = boardState.days[dayIndex].date
         let plan = DayPlanService.shared.planFor(date: date, context: context)
-        plan.wasWornConfirmed = false
-        plan.updatedAt = Date()
+        // Clear the status too, or the next save writes "worn" back (and the widget keeps it).
+        plan.applyDayLookWearStatus(nil)
+        boardState.days[dayIndex].dayLookWearStatus = nil
         try? context.save()
         WearEventStore.unmarkWorn(date: date, source: .planner, context: context)
         DS.haptic(0.3)
 
-        if Calendar.current.isDateInToday(date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
+        if isWidgetDay(date) {
+            saveWidgetSnapshot()
         }
     }
 

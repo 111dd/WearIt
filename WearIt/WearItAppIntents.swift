@@ -134,18 +134,13 @@ struct ShowTodayOutfitIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let today = DateFormatter.widgetDate.string(from: Date())
-        guard let snapshot = WidgetSnapshotService.loadSnapshot(),
-              snapshot.date == today,
-              !snapshot.items.isEmpty else {
+        guard let look = WidgetSnapshotService.loadSnapshot()?.look(date: today, kind: WidgetLook.kindDay),
+              !look.items.isEmpty else {
             return .result(dialog: "No outfit is planned for today yet.")
         }
 
-        let slotOrder = ["top", "bottom", "shoes", "outer", "accessory"]
-        let titles = snapshot.items
-            .sorted { lhs, rhs in
-                (slotOrder.firstIndex(of: lhs.slot) ?? slotOrder.count)
-                    < (slotOrder.firstIndex(of: rhs.slot) ?? slotOrder.count)
-            }
+        // Items are stored in slot order (top, bottom, shoes, outer, accessory).
+        let titles = look.items
             .map(\.title)
             .joined(separator: ", ")
 
