@@ -1286,3 +1286,30 @@
 "shop_reason_size_format" = "יש במלאי במידה שלך (%@)";
 "shop_reason_already_have_format" = "יש לך כבר %1$d כאלה (%2$@)";
 "planner_gap_shop" = "הצעות מהחנויות";
+
+/* Background garment image persistence */
+"add_garment_preparing_photo" = "מכין את התמונה…";
+"add_garment_saving" = "שומר…";
+"add_garment_retry_photo" = "נסה לשמור את התמונה שוב";
+"add_garment_batch_partial_failure" = "חלק מהפריטים לא נשמרו. הם נשארו כאן כדי שתוכל לנסות שוב.";
+
+/* Garment photo gallery */
+"garment_photo_gallery_title" = "גלריית תמונות";
+"garment_photo_gallery_hint" = "בחר את התמונה שתופיע בארון וסמן מה רואים בכל תמונה. הכוכב מסמן את התמונה הראשית.";
+"garment_photo_primary" = "תמונה ראשית";
+"garment_photo_additional" = "תמונה נוספת";
+"garment_photo_make_primary" = "הגדר כתמונה ראשית";
+"garment_photo_role_title" = "מה רואים בתמונה";
+"garment_photo_actions" = "אפשרויות תמונה";
+"garment_photo_open_hint" = "פתח גלריה במסך מלא";
+"garment_photo_unavailable" = "התמונה אינה זמינה במכשיר הזה";
+"garment_photo_role_other" = "בחר סוג תמונה";
+"garment_photo_role_front" = "צד קדמי";
+"garment_photo_role_back" = "צד אחורי";
+"garment_photo_role_side" = "מבט מהצד";
+"garment_photo_role_inside" = "החלק הפנימי";
+"garment_photo_role_sole" = "סוליה";
+"garment_photo_role_detail" = "תקריב";
+"garment_photo_role_label" = "תווית";
+"garment_photo_role_on_body" = "על הגוף";
+"garment_photo_role_clasp" = "סוגר או אבזם";

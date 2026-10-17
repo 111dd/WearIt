@@ -2,6 +2,24 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-18 — Calendar destination date and item photo roles
+- **Did:** A02 captures `selectedDay` before the calendar's first photo-load await. Item editor gallery now includes main + additional photos with stable path identity, primary selection and per-photo roles tailored to garment category/type. Optional JSON `Garment.photoMetadataRaw` stores role/source/thumb paths; AccountDataService exports primary and roles. No agent build/tests/simulator. Dor later reported the changes work; a detailed validation matrix and timings were not supplied.
+- **Why:** photo imports could land on a later selected day; item photos previously had no primary-selection or view semantics.
+- **Watch:** role and primary are independent. Before promoting/replacing main, remember its original/thumb metadata and retain it in additional paths; recrop must use the promoted photo's own source. Media preparation uses `GarmentImagePersistence`, model changes/save stay on UI actor, failed photo transactions restore only photo fields. Cleanup subtracts still-referenced paths and runs after save. Main changes evict cached garment thumb and refresh widget. CloudKit main upload coalesces the newest pending path and uses changedKeys to replace an existing asset. Extra/original image files remain local-only; synced metadata does not fetch those assets. Legacy inline data is prepared on editor open, not a full-store migration. Owner checks and details: audit's Gallery handoff section.
+
+
+## 2026-10-18 — A01: Add media persistence outside the main actor
+- **Did:** `GarmentImagePersistence` serial actor encodes/writes main, original, thumbnail and extra photos; Add uses task cancellation and generation guards, localized progress/retry, draft-only cleanup and batch staging before SwiftData insertion. Failed batch cards remain reviewable, with pending analysis resumed. No build, tests, simulator or runtime measurements.
+- **Why:** synchronous image encoding and writes ran before details transitions and inside Save, especially costly for large photos/batches.
+- **Watch:** the media worker accepts images/paths only, never live SwiftData objects. All three main-image files must succeed; cancellation/failure deletes only files created by that request. Files transfer to model ownership only after context save, so reset cannot delete committed media. Leaving cancels tasks and discards uncommitted files, recreated from the retained draft on return. Keep generation checks after awaits; the UI save stays synchronous after media preparation. Device checks remain pending.
+
+
+## 2026-10-18 — Code-based design and performance audit
+- **Did:** `WearIt/Docs/iOS-Design-Performance-Audit-2026-10-18.md`: 12 scoped packets with current code references, ordering, acceptance criteria and device-measurement handoff. No application code changed or runtime verification performed.
+- **Why:** prioritize real interaction bottlenecks and clearer visual hierarchy before optional platform adoption.
+- **Watch:** Add persists image encodings synchronously before details; calendar photo import captures selected day after loading; widget alternative ranking happens before the existing async snapshot coordinator. Count-only rebuilds and the widget memo key need input coverage review. Preserve existing thumbnail workers, deferred bootstrap, gesture fixes and save debouncing. Apple's retrieved SwiftUI overview labels Xcode 27 changes as 2027 releases: verify installed SDK declarations before adopting them.
+
+
 ## 2026-10-17 — Planner body type-check limit, sheets need a painted backdrop
 - **Did:** split `OutfitPlannerView.body` into `plannerStack` → `plannerWithSheets` → `body` (sheet switch in `plannerSheet(_:)`); `LookCaptureView` uses `withLocalAppBackdropPainted()`.
 - **Why:** two PRs each added modifiers to one chain → "unable to type-check in reasonable time"; `withLocalAppBackdrop()` clears the hosting background, so a sheet showed the screen behind it.

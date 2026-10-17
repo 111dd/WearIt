@@ -611,6 +611,8 @@ struct CalendarLookView: View {
     private func handlePhotosPicker() {
         guard !photosPickerItems.isEmpty else { return }
         let items = photosPickerItems
+        // Bind the import to its originating day before transferable loading suspends.
+        let destinationDay = selectedDay
         photosPickerItems = []
         Task {
             var images: [UIImage] = []
@@ -620,13 +622,12 @@ struct CalendarLookView: View {
                     images.append(img)
                 }
             }
-            await save(images: images)
+            await save(images: images, on: destinationDay)
         }
     }
 
-    private func save(images: [UIImage]) async {
+    private func save(images: [UIImage], on day: Date) async {
         guard !images.isEmpty else { return }
-        let day = selectedDay
         // Framed 4:5 around the person and re-encoded without location, like "Snap the look".
         let encoded: [Data] = await Task.detached(priority: .userInitiated) {
             images.compactMap { image in
@@ -634,6 +635,10 @@ struct CalendarLookView: View {
             }
         }.value
 
+        guard !encoded.isEmpty else {
+            showStatusToast(String(localized: "error_save_failed"))
+            return
+        }
         do {
             for jpg in encoded {
                 try LookPostStore.create(jpeg: jpg, lookDate: day, isEvening: false, context: context)

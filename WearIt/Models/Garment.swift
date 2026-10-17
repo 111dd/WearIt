@@ -59,6 +59,8 @@ final class Garment {
     var thumbnailPath: String?
     var originalImagePath: String?
     var additionalImagePaths: [String]?
+    /// Per-photo roles and source paths. Optional JSON for additive CloudKit compatibility.
+    var photoMetadataRaw: String?
     var imageData: Data?  // Legacy
 
     // MARK: - AI Metadata (Phase 3 - unused in Phase 1)

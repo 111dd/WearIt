@@ -191,6 +191,14 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-18 · Codex · Dor reports the Add/calendar/gallery changes work and authorized publication via a focused PR to main. Automated tests, builds and simulator were not run by the agent; performance measurements remain unrecorded.
+- 2026-10-18 · Codex · Item photo gallery: choose the main photo, assign category/type-specific views (front/back, shoe side/sole, bag inside, detail/label/on-body), full-screen path-based viewer; preserve previous covers and crop sources, process media off-main, invalidate thumbnails/refresh widget and export photo roles. Optional `Garment.photoMetadataRaw`; additional image files still local-only. Owner runtime review pending.
+- 2026-10-18 · Codex · Audit A02: calendar photo import captures its destination day before transferable loading and passes it to post creation, so switching dates during loading cannot change the destination; empty processing results no longer show success. No build/tests/simulator.
+
+- 2026-10-18 · Codex · Audit A01: Add now prepares main/original/thumbnail and additional photos through a serial media actor, with progress, cancellation/generation guards, uncommitted-file cleanup and recoverable partial batch saves; SwiftData stays on the UI actor. No build, tests or simulator; device validation pending.
+
+- 2026-10-18 · Codex · Code-based iOS design/performance audit: `WearIt/Docs/iOS-Design-Performance-Audit-2026-10-18.md` with 12 prioritized implementation packets, source evidence, acceptance criteria and pending device measurement; no app changes, build, tests or simulator. iOS 27 candidates require SDK verification because the retrieved Apple overview describes 2027 releases.
+
 - 2026-10-17 · Claude Code · Look posts follow-ups: "Snap the look" sheet paints its own backdrop (`withLocalAppBackdropPainted`, was see-through), `DSGarmentThumbnail(garment, size:)` call fixed, `OutfitPlannerView.body` split into `plannerStack` → `plannerWithSheets` → `body` + `plannerSheet(_:)` (type-checker timeout). Social feed (phase B) paused by Dor: CloudKit public can only do an all-public feed; private accounts / followers / moderation need a real server (Supabase recommended).
 - 2026-10-17 · Claude Code · Shop picks step 2–4 (`plans/shopping-israel.md`): the app downloads the Israeli catalog and ranks it on the device by how much the user would wear each piece (taste, looks with their most-worn items, wardrobe gaps, usual size, a penalty for duplicates), with an "about N× a month" estimate and reasons. "Picks for you" screen (women/men/all, category and saved filters, open in shop, save, not for me, I bought it) feeding a small on-device preference model; top 3 in Stats and a link on the planner's gap card.
 - 2026-10-17 · Claude Code · Shop catalog step 1 (`plans/shopping-israel.md`): nightly GitHub Action builds an Israeli product catalog (Terminal X + Castro pilot) from sitemaps and product-page JSON-LD, incremental, robots-aware, published to the `catalog-data` branch. The app doesn't read it yet.
@@ -310,6 +318,8 @@ Newest first. One line per meaningful change: date, tool, what.
 - 2025-09-05 · Initial commit.
 
 ## Next steps (backlog)
+
+- Audit A01/A02 and the item photo gallery are implemented locally, owner reports the changes work; detailed scenario checks remain: large-photo Add flows, calendar date switch during import, gallery primary/angle selection, recrop after promotion, removal, legacy inline photos and missing local gallery files. See `WearIt/Docs/iOS-Design-Performance-Audit-2026-10-18.md`; suggested next packet A05 (planner content hierarchy), once selected by Dor. Gallery asset sync remains a separate future task (additional files are local-only today).
 
 Ideas, not commitments. The owner picks what to do next.
 

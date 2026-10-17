@@ -10,6 +10,8 @@ final class CloudKitImageSyncService {
     private let logger = Logger(subsystem: "WearIt", category: "CloudKitImages")
 
     private var inFlightUploads: Set<String> = []
+    private var activeUploadPaths: [UUID: String] = [:]
+    private var pendingUploadPaths: [UUID: String] = [:]
     private var inFlightDownloads: Set<String> = []
 
     private init() {}
@@ -17,13 +19,22 @@ final class CloudKitImageSyncService {
     func enqueueUpload(garmentID: UUID, imagePath: String?) {
         guard let imagePath else { return }
         let recordName = recordName(for: garmentID)
-        guard !inFlightUploads.contains(recordName) else { return }
+        if inFlightUploads.contains(recordName) {
+            if activeUploadPaths[garmentID] != imagePath {
+                pendingUploadPaths[garmentID] = imagePath
+            } else {
+                // The newest selection is already uploading; discard an older queued choice.
+                pendingUploadPaths.removeValue(forKey: garmentID)
+            }
+            return
+        }
         inFlightUploads.insert(recordName)
+        activeUploadPaths[garmentID] = imagePath
 
         Task.detached(priority: .utility) { [database] in
             defer {
                 Task { @MainActor in
-                    CloudKitImageSyncService.shared.inFlightUploads.remove(recordName)
+                    CloudKitImageSyncService.shared.finishUpload(garmentID: garmentID, recordName: recordName)
                 }
             }
 
@@ -37,7 +48,11 @@ final class CloudKitImageSyncService {
             record["image"] = CKAsset(fileURL: fileURL)
 
             do {
-                _ = try await database.save(record)
+                // Replacing the cover updates the asset even when this record already exists.
+                let result = try await database.modifyRecords(
+                    saving: [record], deleting: [], savePolicy: .changedKeys
+                )
+                if let saved = result.saveResults[recordID] { _ = try saved.get() }
                 #if DEBUG
                 await MainActor.run {
                     CloudKitImageSyncService.shared.logger.debug("Uploaded image asset for \(recordName, privacy: .private)")
@@ -50,6 +65,14 @@ final class CloudKitImageSyncService {
                 }
                 #endif
             }
+        }
+    }
+
+    private func finishUpload(garmentID: UUID, recordName: String) {
+        inFlightUploads.remove(recordName)
+        activeUploadPaths.removeValue(forKey: garmentID)
+        if let path = pendingUploadPaths.removeValue(forKey: garmentID) {
+            enqueueUpload(garmentID: garmentID, imagePath: path)
         }
     }
 
@@ -110,6 +133,7 @@ final class CloudKitImageSyncService {
 
     /// Deletes the garments' photo records from the user's iCloud ("delete all my data").
     func deleteImages(garmentIDs: [UUID]) async {
+        for id in garmentIDs { pendingUploadPaths.removeValue(forKey: id) }
         let ids = garmentIDs.map { CKRecord.ID(recordName: recordName(for: $0)) }
         // CloudKit takes at most 400 records per request.
         for start in stride(from: 0, to: ids.count, by: 400) {
