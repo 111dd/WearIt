@@ -1,8 +1,15 @@
 /* WearItWidget Localizable (Hebrew) */
-"location_unavailable" = "המיקום לא זמין";
-"widget_open_planner" = "פתח מתכנן";
-"widget_mark_worn" = "סמן כנלבש";
-"widget_confirmed" = "אושר";
-"widget_not_confirmed" = "לא אושר";
-"widget_empty_title" = "אין לוק עדיין";
-"widget_empty_body" = "פתח את WearIt כדי ליצור את לוק היום.";
+"widget_display_name" = "הלוק של היום";
+"widget_display_description" = "הלוק של היום עם מזג האוויר, לוק הערב ושל מחר.";
+"widget_role_today" = "היום";
+"widget_role_evening" = "הערב";
+"widget_role_tomorrow" = "מחר";
+"widget_mark_worn" = "לבשתי";
+"widget_status_worn" = "נלבש";
+"widget_status_not_worn" = "לא נלבש";
+"widget_empty_title" = "לא תוכנן לוק להיום";
+"widget_empty_body" = "פתח את WearIt כדי לתכנן את הלוק.";
+"widget_intent_confirm_title" = "לבשתי";
+"widget_intent_confirm_description" = "מסמן את הלוק שבווידג'ט כנלבש.";
+"widget_intent_param_date" = "תאריך";
+"widget_intent_param_look" = "לוק";
