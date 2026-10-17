@@ -507,6 +507,11 @@ def probe_store(store):
                 mentionsMagento="magento" in page.lower() or "mage/" in page.lower(),
                 parsed=bool(parse_product_page(page, url)),
             )
+            if info["parsed"] and "product" not in out:
+                out["product"] = parse_product_page(page, url)
+                product_node = next((n for n in nodes if types_of(n) & {"Product", "ProductGroup"}), {})
+                out["productKeys"] = sorted(product_node.keys())
+                out["breadcrumbHtml"] = bool(re.search(r"breadcrumb", page, re.I))
         except Exception as error:  # noqa: BLE001
             info["error"] = str(error)
         pages.append(info)
