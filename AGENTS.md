@@ -51,8 +51,11 @@ Tabs (`WearIt/RootView.swift`):
 4. **Add** (`AddGarmentView`): photo → crop/cutout → details; barcode / QR / product
    URL / clothing-label scan to auto-fill fields.
 
-Also: a home-screen widget (`WearItWidget/`) showing today's outfit with a "confirm
-worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
+Also: a home-screen widget (`WearItWidget/`: small / medium / large) showing today's, tonight's and
+tomorrow's look with ✓ / ✕, ↻ another look, tabs and a "how was it?" reaction (files: `WearItWidget/WearItWidget.swift`
+views + timeline, `AppIntent.swift` button intents, `WidgetShared.swift` shared types; app side
+`Services/WidgetSnapshotStore.swift` writes the snapshot + thumbs, `Services/WidgetCommandService.swift` applies taps,
+the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 ## Tech facts
 
@@ -332,6 +335,9 @@ and recommend from that. Wardrobe gaps and the trip packing list have shipped; s
   the real label), visual similarity on the top picks, price-drop alerts on saved items (subscription idea), more
   stores (Zara, Factory 54, Renuar) after checking `il/report.json`.
 - Show the learned love on the item (read-only) or use it in Stats ("items you love but rarely wear").
+- Widget next steps (`plans/widget-review.md`): lock-screen widgets, Control Center / Action button controls
+  ("add item", "mark today worn"), swapping a single item from the widget, Smart Stack relevance in the morning.
+  The widget can't run the recommender or write SwiftData: the app prepares everything and applies taps on open.
 
 ## When you finish a task
 
