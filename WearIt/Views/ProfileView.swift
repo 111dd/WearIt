@@ -7,8 +7,8 @@ import UIKit
 //  WearIt
 //
 //  Identity-first profile page: avatar, name, @username and bio (edited in EditProfileView), social-style stats
-//  row, style identity chips (from the persisted TasteProfile), and a grid of
-//  recent looks. App configuration lives in SettingsView (toolbar gear).
+//  row, the grid of look photos (`LookPost`), and style identity chips (from the
+//  persisted TasteProfile). App configuration lives in SettingsView (toolbar gear).
 //
 
 struct ProfileView: View {
@@ -18,7 +18,7 @@ struct ProfileView: View {
     @Query<UserProfile> private var users: [UserProfile]
     @Query(sort: \Garment.createdAt, order: .reverse) private var garments: [Garment]
     @Query private var dayPlans: [DayPlan]
-    @Query private var dailyLooks: [DailyLook]
+    @Query(sort: \LookPost.lookDate, order: .reverse) private var lookPosts: [LookPost]
     @Query private var tasteProfiles: [TasteProfile]
     @Query private var recoStates: [RecoState]
     @Query private var wearEvents: [WearEvent]
@@ -30,6 +30,8 @@ struct ProfileView: View {
     @State private var showAvatarDialog = false
     @State private var showAvatarPicker = false
     @State private var showStyleSwipe = false
+    @State private var showLookCapture = false
+    @Namespace private var lookTransition
 
     init() {
         _users = Query(FetchDescriptor<UserProfile>())
@@ -39,12 +41,6 @@ struct ProfileView: View {
         )
         plans.fetchLimit = 90
         _dayPlans = Query(plans)
-
-        var looks = FetchDescriptor<DailyLook>(
-            sortBy: [SortDescriptor(\DailyLook.date, order: .reverse)]
-        )
-        looks.fetchLimit = 30
-        _dailyLooks = Query(looks)
 
         var wears = FetchDescriptor<WearEvent>(
             sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)]
@@ -58,11 +54,15 @@ struct ProfileView: View {
             VStack(spacing: DS.Spacing.lg) {
                 heroCard
                 statsRow
+                LookPostGridSection(
+                    posts: LookPostStore.gridOrder(lookPosts),
+                    namespace: lookTransition,
+                    onAdd: { showLookCapture = true }
+                )
                 styleIdentitySection
                 formulasSection
                 styleSwipeRow
                 mySizesRow
-                myLooksSection
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.top, DS.Spacing.sm)
@@ -113,6 +113,9 @@ struct ProfileView: View {
         .fullScreenCover(isPresented: $showStyleSwipe) {
             StyleSwipeView(deckSize: StyleSwipeSchedule.nextDeckSize)
                 .environmentObject(auth)
+        }
+        .sheet(isPresented: $showLookCapture) {
+            LookCaptureView(lookDate: Date())
         }
     }
 
@@ -473,52 +476,6 @@ struct ProfileView: View {
             if map[key] == nil { map[key] = brand }
         }
         return map
-    }
-
-    // MARK: - My Looks
-
-    private var recentLookPhotos: [(id: String, path: String)] {
-        var photos: [(id: String, path: String)] = []
-        for look in dailyLooks {
-            for path in look.photoPaths {
-                photos.append((id: path, path: path))
-                if photos.count >= 9 { return photos }
-            }
-        }
-        return photos
-    }
-
-    private var myLooksSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            DSSectionHeader(String(localized: "profile_my_looks"), icon: "photo.stack")
-
-            let photos = recentLookPhotos
-            if photos.isEmpty {
-                Text(String(localized: "profile_looks_empty"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, DS.Spacing.md)
-            } else {
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: DS.Spacing.xxs), count: 3),
-                    spacing: DS.Spacing.xxs
-                ) {
-                    ForEach(photos, id: \.id) { photo in
-                        DSAsyncStoredImage(path: photo.path, height: 110, displayWidth: 120)
-                            .contextMenu {
-                                if let url = ImageStore.fileURL(path: photo.path) {
-                                    ShareLink(item: url) {
-                                        Label(String(localized: "action_share"), systemImage: "square.and.arrow.up")
-                                    }
-                                }
-                            }
-                    }
-                }
-            }
-        }
-        .padding(DS.Spacing.sm)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
     }
 
     // MARK: - Data

@@ -75,6 +75,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   (`EventLocationForecastService`: WeatherKit, else Open-Meteo — never mock).
 - Weather: WeatherKit (`ForecastService`) plus Open-Meteo (`WeatherService`),
   shared state in `WeatherCenter`.
+- Look photos are `LookPost`s (profile grid, calendar day photos), created only through `LookPostStore`; the local file is a cache of the synced `photoData`. `DailyLook.photoPaths` is legacy.
 - Images are files under `Documents/WearItImages` (`ImageStore`: disk + downsample +
   cache), synced separately by `CloudKitImageSyncService`. `Garment.imageData` is legacy.
 - Privacy policy: in-app `PrivacyPolicyView` from `privacy_*` strings; the public copy is `docs/privacy-policy.html`
@@ -173,6 +174,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Social phase A step 1 (`plans/profile-social-direction.md`): `LookPost` model (mirrors the future server table, private by default, photo synced as `photoData` external storage), "Snap the look" (`Views/LookPosts/LookCaptureView`: camera/library, `LookPhotoProcessor` 4:5 crop around the person, hide face, blur background, metadata-free JPEG) offered once under a worn look and in the day ⋯ menu; profile photo grid (3 columns, pinned first, zoom into a post with caption, private item tags, pin, share, delete). Calendar day photos are now posts; old `DailyLook.photoPaths` are imported at launch (`LookPostStore.importLegacyDayPhotos`).
 - 2026-10-07 · Claude Code · Design review (project `audits/design-review.md`) phase 1, bugs + speed: clear day persists, per-day `WearEvent` predicate fetch, wardrobe wear map / daily question built once per rebuild, calendar swipes on `HorizontalSwipeGesture`, journal notes keep their day, pushed screens keep their nav bar (`compactNavBar()`), sign-in banner no longer covers the toolbar, remaining English strings localized, localized planner dates.
 - 2026-10-07 · Claude Code · Xcode Cloud / TestFlight: the app's Info.plist was tracked as lowercase `info.plist` while the project and its synchronized-group exception say `Info.plist` (fresh clones then copy it into the bundle as a resource); renamed. `ITSAppUsesNonExemptEncryption = NO` so TestFlight builds skip the export-compliance question.
 - 2026-10-07 · Claude Code · Real profile + users step 3: `UserProfile.username` (`UsernameRules`, local until sharing has a server) and `birthday`; "Edit profile" sheet (`Views/EditProfileView`: name, @username, bio, private email/phone/birthday); username in the intro. Settings > Your data: privacy policy (`Views/PrivacyPolicyView`, published from `docs/privacy-policy.html` via GitHub Pages, built by `scripts/make_privacy_page.py`), export to zip (`Services/AccountDataService`), delete all my data (store rows, iCloud photos, local files, defaults, sign-in). `PrivacyInfo.xcprivacy` for app + widget; sign-in screen localized and no longer claims sign-in is what syncs.

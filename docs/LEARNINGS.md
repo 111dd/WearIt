@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Look photos are LookPosts
+- **Did:** added `LookPost` + `LookPostStore` + `LookPhotoProcessor`; profile grid, "Snap the look", calendar day photos all read/write posts.
+- **Why:** `DailyLook.photoPaths` were local files only (never reached other devices) and had no room for caption, visibility or tags needed for the social phase.
+- **Watch:** read a post's photo through `LookPostStore.localPhotoPath(for:)` (rewrites the file from synced `photoData` on a new device). Delete a post only after its detail view has popped. `garmentIDs` is private; only `publicTaggedGarmentIDs` may ever leave the device.
+
 ## 2026-10-07 — Design review phase 1: bugs and speed
 - **Did:** "Clear day" now persists; `WearEventStore` fetches one day by `#Predicate` instead of the whole table; wardrobe builds the wear map and its daily question once per rebuild; calendar day/period swipes use `HorizontalSwipeGesture` (which now ignores touches inside nested horizontal scroll views); journal notes save to the day they were typed on and commit on disappear; pushed screens use `compactNavBar()` so their back button never hides; sign-in banner is a `safeAreaInset`; leftover English strings localized. Full review: project `audits/design-review.md`.
 - **Why:** the planner fetched every `WearEvent` three times per redraw, cleared looks came back on the next hydrate, and the card `.id(selectedDay)` dropped a note being typed when the user swiped.
