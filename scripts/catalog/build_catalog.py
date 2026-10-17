@@ -17,6 +17,7 @@ import hashlib
 import html
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -422,6 +423,9 @@ def crawl_store(store, previous_items, country):
     known = {item["sourcePage"]: item for item in previous_items.values() if item.get("sourcePage")}
     live = set(urls)
     fresh = [u for u in urls if u not in known]
+    # Sitemaps list products in catalog order (one department at a time); a shuffled pick
+    # gives the first nights a catalog that covers every department.
+    random.Random(datetime.now(timezone.utc).strftime("%Y-%m-%d") + store["id"]).shuffle(fresh)
     stale = sorted((u for u in urls if u in known), key=lambda u: known[u].get("fetchedAt", ""))
     budget = store.get("maxPagesPerRun", 1000)
     to_fetch = (fresh + stale)[:budget]
