@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Planner body type-check limit, sheets need a painted backdrop
+- **Did:** split `OutfitPlannerView.body` into `plannerStack` → `plannerWithSheets` → `body` (sheet switch in `plannerSheet(_:)`); `LookCaptureView` uses `withLocalAppBackdropPainted()`.
+- **Why:** two PRs each added modifiers to one chain → "unable to type-check in reasonable time"; `withLocalAppBackdrop()` clears the hosting background, so a sheet showed the screen behind it.
+- **Watch:** add planner modifiers to the shortest piece, never back into one chain. Sheets / full-screen covers use the Painted variant. Copy an existing call for custom inits (`DSGarmentThumbnail(garment, size:)` has no `garment:` label); nothing here compiles before Dor builds.
+
 ## 2026-10-17 — Shop picks ranked on the device
 - **Did:** `ShopCatalogService`, `PurchaseScorer`, `ShopFeedback`, `Views/ShopPicksView` (+ Stats section, planner gap link).
 - **Why:** suggest purchases the user will actually wear, using the wardrobe without sending it anywhere.

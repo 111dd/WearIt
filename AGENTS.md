@@ -188,6 +188,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Look posts follow-ups: "Snap the look" sheet paints its own backdrop (`withLocalAppBackdropPainted`, was see-through), `DSGarmentThumbnail(garment, size:)` call fixed, `OutfitPlannerView.body` split into `plannerStack` → `plannerWithSheets` → `body` + `plannerSheet(_:)` (type-checker timeout). Social feed (phase B) paused by Dor: CloudKit public can only do an all-public feed; private accounts / followers / moderation need a real server (Supabase recommended).
 - 2026-10-17 · Claude Code · Shop picks step 2–4 (`plans/shopping-israel.md`): the app downloads the Israeli catalog and ranks it on the device by how much the user would wear each piece (taste, looks with their most-worn items, wardrobe gaps, usual size, a penalty for duplicates), with an "about N× a month" estimate and reasons. "Picks for you" screen (women/men/all, category and saved filters, open in shop, save, not for me, I bought it) feeding a small on-device preference model; top 3 in Stats and a link on the planner's gap card.
 - 2026-10-17 · Claude Code · Shop catalog step 1 (`plans/shopping-israel.md`): nightly GitHub Action builds an Israeli product catalog (Terminal X + Castro pilot) from sitemaps and product-page JSON-LD, incremental, robots-aware, published to the `catalog-data` branch. The app doesn't read it yet.
 - 2026-10-17 · Claude Code · Interactive widget: ↻ cycles two ready alternatives per day look (planner `widgetAlternatives`, memoized `rankLooks`, locked items kept; the pick becomes the day's look), Today / Evening / Tomorrow tabs in medium + large, ✓ / ✕ (not today) and a one-time 😍🥶🥵 "how was it?" after wearing, learned by the planner.
@@ -309,6 +310,7 @@ Newest first. One line per meaningful change: date, tool, what.
 
 Ideas, not commitments. The owner picks what to do next.
 
+- Social phase A, no server (`plans/profile-social-direction.md`): custom camera (timer, raise-hand shot), share a look to Stories + monthly "Wrapped", profile highlights. Phase B (feed between users) is on hold until Dor picks a server.
 Agreed direction (2026-10-04): understand the user better with low-effort, on-device signals,
 and recommend from that. Wardrobe gaps and the trip packing list have shipped; smarter stats is next.
 
