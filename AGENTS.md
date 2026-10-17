@@ -159,7 +159,9 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Widget types (`WidgetSnapshot`, `WidgetLook`, `WidgetCommand`) are duplicated in
   `WearItWidget/WidgetShared.swift` and `Services/Widget*`; keep both in sync. The snapshot holds today's
   and tomorrow's looks (day + evening); the widget picks by its entry date, never shows another day as today.
-  Widget taps queue commands (`widgetCommandsV2`) that `WidgetCommandService.consumeIfNeeded` applies on app activation.
+  Widget taps queue commands (`widgetCommandsV2`: worn / not worn / chooseLook / feedback) that
+  `WidgetCommandService.consumeIfNeeded` applies on app activation; reactions go on to the planner
+  (`takePlannerFeedback`) for its learning. Widget-only UI state (tab, look picked with ↻) is `widgetUIStateV1`.
 - `OutfitPlannerView.swift` is ~4.7k lines; use its `// MARK:` sections to navigate.
 - **Away from home**: a map pin (`EKEvent.structuredLocation.geoLocation`) ≥ 40 km from home
   changes a look's forecast; for a trip or all-day event a typed location also counts once
@@ -176,6 +178,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Interactive widget: ↻ cycles two ready alternatives per day look (planner `widgetAlternatives`, memoized `rankLooks`, locked items kept; the pick becomes the day's look), Today / Evening / Tomorrow tabs in medium + large, ✓ / ✕ (not today) and a one-time 😍🥶🥵 "how was it?" after wearing, learned by the planner.
 - 2026-10-17 · Claude Code · Social phase A step 1 (`plans/profile-social-direction.md`): `LookPost` model (mirrors the future server table, private by default, photo synced as `photoData` external storage), "Snap the look" (`Views/LookPosts/LookCaptureView`: camera/library, `LookPhotoProcessor` 4:5 crop around the person, hide face, blur background, metadata-free JPEG) offered once under a worn look and in the day ⋯ menu; profile photo grid (3 columns, pinned first, zoom into a post with caption, private item tags, pin, share, delete). Calendar day photos are now posts; old `DailyLook.photoPaths` are imported at launch (`LookPostStore.importLegacyDayPhotos`).
 - 2026-10-17 · Claude Code · Widget step 1 (project `plans/widget-review.md`): snapshot v2 with today + evening + tomorrow, timeline entries at 18:00 and midnight (no more yesterday's look after midnight), "I wore it" queued per look and applied through `LookWearStatus` on app activation (planner board kept in step), new small / medium / large flat-lay layouts with the top reason and rain, full-color garments on tinted / clear Home Screens, thumbs refresh when a photo changes and old ones are deleted, widget names localized.
 - 2026-10-07 · Claude Code · Design review (project `audits/design-review.md`) phase 1, bugs + speed: clear day persists, per-day `WearEvent` predicate fetch, wardrobe wear map / daily question built once per rebuild, calendar swipes on `HorizontalSwipeGesture`, journal notes keep their day, pushed screens keep their nav bar (`compactNavBar()`), sign-in banner no longer covers the toolbar, remaining English strings localized, localized planner dates.

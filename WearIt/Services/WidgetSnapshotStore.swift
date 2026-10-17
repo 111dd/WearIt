@@ -28,6 +28,10 @@ struct WidgetLook: Codable, Sendable {
     let rainChance: Double?    // 0...1
     var reason: String?
     let items: [WidgetLookItem]
+    /// Other ready looks the widget's ↻ cycles through (day looks only).
+    var options: [[WidgetLookItem]]? = nil
+    /// Non-nil once the user reacted (😍🥶🥵 or "not my style"): the widget stops asking.
+    var reaction: String? = nil
 }
 
 struct WidgetSnapshot: Codable, Sendable {
@@ -57,14 +61,17 @@ private struct WidgetLookDraft: Sendable {
     let highTempC: Double?
     let rainChance: Double?
     let reason: String?
+    let reaction: String?
     let sources: [WidgetThumbSource]
+    let options: [[WidgetThumbSource]]
 }
 
 private struct WidgetSnapshotDraft: Sendable {
     let locationName: String?
     let looks: [WidgetLookDraft]
-    /// False when the caller has no reasons (e.g. a notification action): keep the last ones.
-    let reasonsAreFresh: Bool
+    /// False when the caller has no reasons or options (e.g. a notification action):
+    /// keep the last ones while the look itself is unchanged.
+    let plannerInputsAreFresh: Bool
 }
 
 enum WidgetSnapshotService {
@@ -77,14 +84,15 @@ enum WidgetSnapshotService {
 
     /// Writes today's and tomorrow's looks (day + evening) for the widget.
     /// Captures plan state on the calling actor, then makes thumbnails off-main.
-    /// `dayReasons` (keyed by start of day) is the planner's top "why this look" line;
-    /// pass nil to keep the reasons already in the widget.
+    /// `dayReasons` (keyed by start of day) is the planner's top "why this look" line and
+    /// `dayAlternatives` the other ready day looks for ↻; pass nil to keep the widget's.
     @MainActor static func saveSnapshot(
         plans: [DayPlan],
         garments: [Garment],
         forecasts: [DayForecast],
         locationName: String?,
-        dayReasons: [Date: String]? = nil
+        dayReasons: [Date: String]? = nil,
+        dayAlternatives: [Date: [[OutfitSlot: UUID]]]? = nil
     ) {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -108,7 +116,9 @@ enum WidgetSnapshotService {
                     highTempC: forecast?.highTempC,
                     rainChance: forecast?.rainProbability,
                     reason: dayReasons?[day],
-                    sources: daySources
+                    reaction: hasReaction(plan) ? "given" : nil,
+                    sources: daySources,
+                    options: (dayAlternatives?[day] ?? []).map { thumbSources($0, garmentsByID: garmentsByID) }
                 ))
             }
 
@@ -124,7 +134,9 @@ enum WidgetSnapshotService {
                     highTempC: forecast?.highTempC,
                     rainChance: forecast?.rainProbability,
                     reason: nil,
-                    sources: eveningSources
+                    reaction: nil,
+                    sources: eveningSources,
+                    options: []
                 ))
             }
         }
@@ -132,7 +144,7 @@ enum WidgetSnapshotService {
         let draft = WidgetSnapshotDraft(
             locationName: locationName,
             looks: looks,
-            reasonsAreFresh: dayReasons != nil
+            plannerInputsAreFresh: dayReasons != nil
         )
         Task(priority: .utility) {
             await WidgetSnapshotCoordinator.shared.save(draft)
@@ -166,6 +178,11 @@ enum WidgetSnapshotService {
     }
 
     // MARK: - Internal
+
+    /// Same rule as the planner's reaction strip.
+    @MainActor private static func hasReaction(_ plan: DayPlan) -> Bool {
+        plan.feedback == .loved || plan.feedback == .rejected || plan.temperatureFeedback != nil
+    }
 
     private static func thumbSources(
         _ assignments: [OutfitSlot: UUID],
@@ -218,8 +235,8 @@ private actor WidgetSnapshotCoordinator {
         let pending = WidgetCommandService.pendingCommands()
 
         var referenced = Set<String>()
-        let looks: [WidgetLook] = draft.looks.map { look in
-            let items: [WidgetLookItem] = look.sources.map { source in
+        func makeItems(_ sources: [WidgetThumbSource]) -> [WidgetLookItem] {
+            sources.map { source in
                 let filename = ensureThumbnail(for: source) ?? ""
                 if !filename.isEmpty { referenced.insert(filename) }
                 return WidgetLookItem(
@@ -229,21 +246,40 @@ private actor WidgetSnapshotCoordinator {
                     thumbFilename: filename
                 )
             }
-            let confirmedInWidget = pending.contains {
-                $0.type == WidgetCommand.confirmWorn && $0.date == look.date && $0.lookKind == look.kind
+        }
+
+        let looks: [WidgetLook] = draft.looks.map { look in
+            let items = makeItems(look.sources)
+            let matching = pending.filter { $0.date == look.date && $0.lookKind == look.kind }
+            var status = look.status
+            if let last = matching.last(where: { $0.type == WidgetCommand.confirmWorn || $0.type == WidgetCommand.notWorn }) {
+                status = last.type == WidgetCommand.confirmWorn ? LookWearStatus.worn.rawValue : LookWearStatus.notWorn.rawValue
             }
-            let reason = draft.reasonsAreFresh
-                ? look.reason
-                : previous?.look(date: look.date, kind: look.kind)?.reason
+            let reactedInWidget = matching.contains { $0.type == WidgetCommand.feedback }
+
+            // Without fresh planner inputs, keep the last reason and options while the look is the same.
+            let old = previous?.look(date: look.date, kind: look.kind)
+            let sameLook = old.map { Set($0.items.map(\.garmentID)) == Set(items.map(\.garmentID)) } ?? false
+            let reason = draft.plannerInputsAreFresh ? look.reason : (sameLook ? old?.reason : nil)
+            let options: [[WidgetLookItem]]
+            if draft.plannerInputsAreFresh {
+                options = look.options.map(makeItems).filter { !$0.isEmpty }
+            } else {
+                options = sameLook ? (old?.options ?? []) : []
+                options.flatMap { $0 }.map(\.thumbFilename).filter { !$0.isEmpty }.forEach { referenced.insert($0) }
+            }
+
             return WidgetLook(
                 date: look.date,
                 kind: look.kind,
-                status: confirmedInWidget ? LookWearStatus.worn.rawValue : look.status,
+                status: status,
                 lowTempC: look.lowTempC,
                 highTempC: look.highTempC,
                 rainChance: look.rainChance,
                 reason: reason,
-                items: items
+                items: items,
+                options: options.isEmpty ? nil : options,
+                reaction: look.reaction ?? (reactedInWidget ? "given" : nil)
             )
         }
 
