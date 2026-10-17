@@ -16,7 +16,8 @@
       "productUrlPattern": null,
       "maxPagesPerRun": 1200,
       "delaySeconds": 1.0,
-      "currency": "ILS"
+      "currency": "ILS",
+      "excludeUrlPattern": "/(בית|ילדים|ילדות|בנים|בנות|תינוקות|kids|baby|home)(/|$)|-look-lok"
     }
   ]
 }

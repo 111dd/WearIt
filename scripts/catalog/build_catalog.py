@@ -45,13 +45,30 @@ def now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def fetch(url, accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"):
-    request = urllib.request.Request(url, headers={
+def iri_to_uri(url):
+    """Hebrew paths ("/נשים/חולצות/...") must be percent-encoded before urllib sends them."""
+    parts = urllib.parse.urlsplit(url)
+    path = urllib.parse.quote(parts.path, safe="/%:@!$&'()*+,;=-._~")
+    query = urllib.parse.quote(parts.query, safe="=&%:@!$'()*+,;/?-._~")
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc.encode("idna").decode("ascii"), path, query, parts.fragment))
+
+
+def readable(url):
+    """The URL as people read it, for pattern matching and gender hints."""
+    return urllib.parse.unquote(url)
+
+
+def fetch(url, accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", data=None, content_type=None):
+    url = iri_to_uri(url)
+    headers = {
         "User-Agent": USER_AGENT,
         "Accept": accept,
         "Accept-Language": "he-IL,he;q=0.9,en;q=0.6",
         "Accept-Encoding": "gzip",
-    })
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    request = urllib.request.Request(url, data=data, headers=headers)
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         body = response.read()
         if response.headers.get("Content-Encoding") == "gzip" or url.endswith(".gz"):
@@ -106,7 +123,10 @@ def discover_product_urls(store, robots, log):
         pages.extend(urls)
         time.sleep(store.get("delaySeconds", 1.0) / 2)
     if pattern:
-        pages = [u for u in pages if pattern.search(u)]
+        pages = [u for u in pages if pattern.search(readable(u))]
+    exclude = re.compile(store["excludeUrlPattern"]) if store.get("excludeUrlPattern") else None
+    if exclude:
+        pages = [u for u in pages if not exclude.search(readable(u))]
     return list(dict.fromkeys(pages))
 
 
@@ -293,8 +313,9 @@ def parse_product_page(page, page_url):
             images += [i for i in images_of(variant.get("image"), page_url) if i not in images]
     description = text(product.get("description")) or meta_content(page, "og:description")
     audience = product.get("audience") if isinstance(product.get("audience"), dict) else {}
-    canonical = text(product.get("url")) or meta_content(page, "og:url") or page_url
-    canonical = urllib.parse.urljoin(page_url, canonical)
+    # The sitemap page is the product's identity and link: some shops point og:url / JSON-LD url
+    # at a shared or generic page, which collapsed many products into one.
+    canonical = page_url
 
     return {
         "url": canonical,
@@ -305,7 +326,7 @@ def parse_product_page(page, page_url):
         "color": text(product.get("color")) or meta_content(page, "product:color"),
         "material": text(product.get("material")),
         "categoryPath": category_path or text(product.get("category")),
-        "gender": guess_gender(text(audience.get("suggestedGender")), category_path, canonical, title),
+        "gender": guess_gender(text(audience.get("suggestedGender")), category_path, readable(canonical), title),
         "sizes": sizes,
         "inStockSizes": in_stock_sizes,
         "images": list(dict.fromkeys(images))[:IMAGE_LIMIT],
@@ -437,6 +458,68 @@ def crawl_store(store, previous_items, country):
     return items, report
 
 
+# MARK: - Probe
+
+GRAPHQL_PROBE = '{products(search:"shirt",pageSize:2){total_count items{__typename sku name url_key url_suffix}}}'
+
+
+def probe_store(store):
+    """What a store exposes, for tuning stores.json from a GitHub Actions log (`--probe`)."""
+    base = store["base"].rstrip("/")
+    out = {"id": store["id"]}
+    robots = urllib.robotparser.RobotFileParser(f"{base}/robots.txt")
+    try:
+        robots.parse(fetch(f"{base}/robots.txt", accept="text/plain").splitlines())
+        out["sitemaps"] = robots.site_maps()
+    except Exception as error:  # noqa: BLE001 - diagnostics only
+        out["robots"] = str(error)
+        return out
+    children, sample = [], []
+    for sitemap in (robots.site_maps() or [f"{base}/sitemap.xml"])[:3]:
+        try:
+            kids, urls = sitemap_locations(fetch(sitemap, accept="application/xml,text/xml,*/*"))
+        except Exception as error:  # noqa: BLE001
+            children.append(f"{sitemap}: {error}")
+            continue
+        children += kids
+        sample += urls[:20]
+    out["children"] = [readable(c) for c in children[:40]]
+    for child in [c for c in children if looks_like_product_sitemap(c)][:2] or children[:2]:
+        try:
+            _, urls = sitemap_locations(fetch(child, accept="application/xml,text/xml,*/*"))
+            out.setdefault("childCounts", {})[readable(child)] = len(urls)
+            sample += urls[:: max(1, len(urls) // 15)][:15]
+        except Exception as error:  # noqa: BLE001
+            out.setdefault("childCounts", {})[readable(child)] = str(error)
+    out["sampleUrls"] = [readable(u) for u in sample[:30]]
+    pages = []
+    for url in [u for u in sample if urllib.parse.urlsplit(u).path.count("/") >= 1][-6:]:
+        info = {"url": readable(url)}
+        try:
+            page = fetch(url)
+            nodes = list(json_ld_blocks(page))
+            info.update(
+                length=len(page),
+                ldTypes=sorted({str(t) for n in nodes for t in types_of(n)}),
+                ogType=meta_content(page, "og:type"),
+                hasNextData="__NEXT_DATA__" in page,
+                hasInitialState="__INITIAL_STATE__" in page or "__APOLLO_STATE__" in page,
+                mentionsMagento="magento" in page.lower() or "mage/" in page.lower(),
+                parsed=bool(parse_product_page(page, url)),
+            )
+        except Exception as error:  # noqa: BLE001
+            info["error"] = str(error)
+        pages.append(info)
+        time.sleep(store.get("delaySeconds", 1.0))
+    out["pages"] = pages
+    try:
+        query = urllib.parse.quote(GRAPHQL_PROBE)
+        out["graphql"] = fetch(f"{base}/graphql?query={query}", accept="application/json")[:600]
+    except Exception as error:  # noqa: BLE001
+        out["graphql"] = str(error)
+    return out
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--country", default="IL")
@@ -444,12 +527,18 @@ def main():
     parser.add_argument("--previous")
     parser.add_argument("--stores", default=os.path.join(os.path.dirname(__file__), "stores.json"))
     parser.add_argument("--only", help="comma-separated store ids")
+    parser.add_argument("--probe", action="store_true", help="print what each store exposes, build nothing")
     args = parser.parse_args()
 
     stores = json.load(open(args.stores, encoding="utf-8"))[args.country]
     if args.only:
         wanted = set(args.only.split(","))
         stores = [s for s in stores if s["id"] in wanted]
+
+    if args.probe:
+        for store in stores:
+            print(json.dumps(probe_store(store), ensure_ascii=False, indent=2))
+        return
 
     previous = {}
     if args.previous and os.path.exists(args.previous):
