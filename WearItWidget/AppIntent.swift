@@ -8,51 +8,42 @@
 import WidgetKit
 import AppIntents
 
+/// The widget's "I wore it" button. The widget can't write the app's store, so it
+/// marks the look in the snapshot right away and queues a command the app applies
+/// (wear status, history, iCloud) the next time it opens or comes to the foreground.
 struct ConfirmWornIntent: AppIntent {
-    static var title: LocalizedStringResource { "Confirm Worn" }
-    static var description: IntentDescription { "Mark today’s outfit as worn." }
+    static var title: LocalizedStringResource { "widget_intent_confirm_title" }
+    static var description: IntentDescription { IntentDescription("widget_intent_confirm_description") }
+    static var isDiscoverable: Bool { false }
 
-    @Parameter(title: "Date (yyyy-mm-dd)")
+    @Parameter(title: "widget_intent_param_date")
     var dateString: String
+
+    @Parameter(title: "widget_intent_param_look")
+    var look: String
 
     init() {
         self.dateString = DateFormatter.widgetDate.string(from: Date())
+        self.look = WidgetLook.kindDay
     }
 
-    init(dateString: String) {
+    init(dateString: String, look: String) {
         self.dateString = dateString
+        self.look = look
     }
 
     func perform() async throws -> some IntentResult {
-        let snapshot = WidgetSnapshotReader.loadSnapshot()
-        let date = snapshot?.date ?? dateString
-
-        // Update snapshot for immediate UI feedback
-        if let snapshot {
-            let updated = TodaySnapshot(
-                date: snapshot.date,
-                locationName: snapshot.locationName,
-                lowTempC: snapshot.lowTempC,
-                highTempC: snapshot.highTempC,
-                confirmedWorn: true,
-                items: snapshot.items
-            )
-            WidgetSnapshotReader.saveSnapshot(updated)
+        if var snapshot = WidgetSnapshotReader.loadSnapshot(),
+           let index = snapshot.looks.firstIndex(where: { $0.date == dateString && $0.kind == look }) {
+            snapshot.looks[index].status = "worn"
+            WidgetSnapshotReader.saveSnapshot(snapshot)
         }
 
-        // Write command for app to consume
-        let command = WidgetCommand(type: "confirmWorn", date: date, timestamp: Date())
-        WidgetSnapshotReader.writeCommand(command)
+        WidgetSnapshotReader.appendCommand(
+            WidgetCommand(type: WidgetCommand.confirmWorn, date: dateString, look: look, timestamp: Date())
+        )
 
         WidgetCenter.shared.reloadTimelines(ofKind: "WearItWidget")
         return .result()
     }
-}
-
-extension DateFormatter {
-    static let widgetDate: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        return df
-    }()
 }

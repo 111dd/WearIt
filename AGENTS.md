@@ -155,8 +155,10 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   Goal: later match in-stock items in the user's size.
 - **RecoState features**: append new features at the end of `FeatureSpace` so old
   weights migrate by zero-padding, and bump `RecoState.version`.
-- Widget types (`TodaySnapshot`, `WidgetCommand`) are duplicated in
-  `WearItWidget/WidgetShared.swift` and `Services/Widget*`; keep both in sync.
+- Widget types (`WidgetSnapshot`, `WidgetLook`, `WidgetCommand`) are duplicated in
+  `WearItWidget/WidgetShared.swift` and `Services/Widget*`; keep both in sync. The snapshot holds today's
+  and tomorrow's looks (day + evening); the widget picks by its entry date, never shows another day as today.
+  Widget taps queue commands (`widgetCommandsV2`) that `WidgetCommandService.consumeIfNeeded` applies on app activation.
 - `OutfitPlannerView.swift` is ~4.7k lines; use its `// MARK:` sections to navigate.
 - **Away from home**: a map pin (`EKEvent.structuredLocation.geoLocation`) ≥ 40 km from home
   changes a look's forecast; for a trip or all-day event a typed location also counts once
@@ -173,6 +175,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Widget step 1 (project `plans/widget-review.md`): snapshot v2 with today + evening + tomorrow, timeline entries at 18:00 and midnight (no more yesterday's look after midnight), "I wore it" queued per look and applied through `LookWearStatus` on app activation (planner board kept in step), new small / medium / large flat-lay layouts with the top reason and rain, full-color garments on tinted / clear Home Screens, thumbs refresh when a photo changes and old ones are deleted, widget names localized.
 - 2026-10-07 · Claude Code · Design review (project `audits/design-review.md`) phase 1, bugs + speed: clear day persists, per-day `WearEvent` predicate fetch, wardrobe wear map / daily question built once per rebuild, calendar swipes on `HorizontalSwipeGesture`, journal notes keep their day, pushed screens keep their nav bar (`compactNavBar()`), sign-in banner no longer covers the toolbar, remaining English strings localized, localized planner dates.
 - 2026-10-07 · Claude Code · Xcode Cloud / TestFlight: the app's Info.plist was tracked as lowercase `info.plist` while the project and its synchronized-group exception say `Info.plist` (fresh clones then copy it into the bundle as a resource); renamed. `ITSAppUsesNonExemptEncryption = NO` so TestFlight builds skip the export-compliance question.
 - 2026-10-07 · Claude Code · Real profile + users step 3: `UserProfile.username` (`UsernameRules`, local until sharing has a server) and `birthday`; "Edit profile" sheet (`Views/EditProfileView`: name, @username, bio, private email/phone/birthday); username in the intro. Settings > Your data: privacy policy (`Views/PrivacyPolicyView`, published from `docs/privacy-policy.html` via GitHub Pages, built by `scripts/make_privacy_page.py`), export to zip (`Services/AccountDataService`), delete all my data (store rows, iCloud photos, local files, defaults, sign-in). `PrivacyInfo.xcprivacy` for app + widget; sign-in screen localized and no longer claims sign-in is what syncs.
