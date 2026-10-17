@@ -58,7 +58,7 @@ struct LookCaptureView: View {
                     }
                 }
             }
-            .withLocalAppBackdrop()
+            .withLocalAppBackdropPainted()
         }
         .fullScreenCover(isPresented: $showCamera) {
             CameraPickerWrapper { image in load(image) }
