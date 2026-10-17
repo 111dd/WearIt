@@ -75,6 +75,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
   (`EventLocationForecastService`: WeatherKit, else Open-Meteo — never mock).
 - Weather: WeatherKit (`ForecastService`) plus Open-Meteo (`WeatherService`),
   shared state in `WeatherCenter`.
+- Look photos are `LookPost`s (profile grid, calendar day photos), created only through `LookPostStore`; the local file is a cache of the synced `photoData`. `DailyLook.photoPaths` is legacy.
 - Images are files under `Documents/WearItImages` (`ImageStore`: disk + downsample +
   cache), synced separately by `CloudKitImageSyncService`. `Garment.imageData` is legacy.
 - Privacy policy: in-app `PrivacyPolicyView` from `privacy_*` strings; the public copy is `docs/privacy-policy.html`
@@ -175,6 +176,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Social phase A step 1 (`plans/profile-social-direction.md`): `LookPost` model (mirrors the future server table, private by default, photo synced as `photoData` external storage), "Snap the look" (`Views/LookPosts/LookCaptureView`: camera/library, `LookPhotoProcessor` 4:5 crop around the person, hide face, blur background, metadata-free JPEG) offered once under a worn look and in the day ⋯ menu; profile photo grid (3 columns, pinned first, zoom into a post with caption, private item tags, pin, share, delete). Calendar day photos are now posts; old `DailyLook.photoPaths` are imported at launch (`LookPostStore.importLegacyDayPhotos`).
 - 2026-10-17 · Claude Code · Widget step 1 (project `plans/widget-review.md`): snapshot v2 with today + evening + tomorrow, timeline entries at 18:00 and midnight (no more yesterday's look after midnight), "I wore it" queued per look and applied through `LookWearStatus` on app activation (planner board kept in step), new small / medium / large flat-lay layouts with the top reason and rain, full-color garments on tinted / clear Home Screens, thumbs refresh when a photo changes and old ones are deleted, widget names localized.
 - 2026-10-07 · Claude Code · Design review (project `audits/design-review.md`) phase 1, bugs + speed: clear day persists, per-day `WearEvent` predicate fetch, wardrobe wear map / daily question built once per rebuild, calendar swipes on `HorizontalSwipeGesture`, journal notes keep their day, pushed screens keep their nav bar (`compactNavBar()`), sign-in banner no longer covers the toolbar, remaining English strings localized, localized planner dates.
 - 2026-10-07 · Claude Code · Xcode Cloud / TestFlight: the app's Info.plist was tracked as lowercase `info.plist` while the project and its synchronized-group exception say `Info.plist` (fresh clones then copy it into the bundle as a resource); renamed. `ITSAppUsesNonExemptEncryption = NO` so TestFlight builds skip the export-compliance question.

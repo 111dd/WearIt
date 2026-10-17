@@ -22,6 +22,7 @@ struct OutfitPlannerView: View {
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
     @Query private var dayPlans: [DayPlan]
     @Query private var wearEvents: [WearEvent]
+    @Query(sort: \LookPost.lookDate, order: .reverse) private var lookPosts: [LookPost]
     @Query private var dismissedOutfits: [DismissedOutfit]
     @Query(sort: \RecommendationEvent.createdAt, order: .reverse) private var recommendationEvents: [RecommendationEvent]
     
@@ -139,6 +140,8 @@ struct OutfitPlannerView: View {
         case addNewItem(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime)
         /// Add an item to the wardrobe (not to a look), from the "your wardrobe is missing" nudge.
         case addToWardrobe(Category)
+        /// "Snap the look": a photo of a worn look for the profile grid.
+        case captureLook(dayIndex: Int, lookTime: LookTime)
 
         var id: String {
             switch self {
@@ -151,6 +154,8 @@ struct OutfitPlannerView: View {
                 return "new-\(dayIndex)-\(slot.rawValue)-\(lookTime.rawValue)"
             case .addToWardrobe(let category):
                 return "wardrobe-\(category.rawValue)"
+            case .captureLook(let dayIndex, let lookTime):
+                return "capture-\(dayIndex)-\(lookTime.rawValue)"
             }
         }
     }
@@ -267,6 +272,14 @@ struct OutfitPlannerView: View {
                     // The new item can fill tomorrow's looks; today's stay as they are.
                     scheduleGenerateAllOutfits(fillMissingOnly: true)
                 }
+            case .captureLook(let dayIndex, let lookTime):
+                let day = boardState.days[dayIndex]
+                let slots = lookTime == .evening ? day.eveningSlots : day.slots
+                LookCaptureView(
+                    lookDate: day.date,
+                    isEvening: lookTime == .evening,
+                    garmentIDs: OutfitSlot.allCases.compactMap { slots[$0]?.garmentID }
+                )
             }
         }
         .fullScreenCover(isPresented: $showStyleSwipe) {
@@ -1129,6 +1142,14 @@ struct OutfitPlannerView: View {
                     loveLook(dayIndex: dayIndex)
                 } label: {
                     Label(String(localized: "planner_love_it"), systemImage: "heart")
+                }
+            }
+            if dayTiming(for: dayIndex) != .future,
+               !boardState.days[dayIndex].assignedGarmentIDs.isEmpty {
+                Button {
+                    activeSheet = .captureLook(dayIndex: dayIndex, lookTime: .day)
+                } label: {
+                    Label(String(localized: "look_capture_cta"), systemImage: "camera")
                 }
             }
             if dayTiming(for: dayIndex) != .future, isConfirmed(dayIndex) {
@@ -2494,6 +2515,7 @@ struct OutfitPlannerView: View {
             accessibilitySlotLabel: slotLabel,
             isFuture: timing == .future,
             feedback: lookTime == .day ? lookFeedbackActions(for: dayIndex) : nil,
+            capturePrompt: lookCapturePrompt(dayIndex: dayIndex, lookTime: lookTime, timing: timing),
             onConfirm: {
                 handleSwipeConfirm(dayIndex: dayIndex, lookTime: lookTime)
             },
@@ -2515,6 +2537,26 @@ struct OutfitPlannerView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Snap the look
+
+    private func hasLookPost(dayIndex: Int, lookTime: LookTime) -> Bool {
+        let day = boardState.days[dayIndex].date
+        let evening = lookTime == .evening
+        return lookPosts.contains { $0.isEvening == evening && Calendar.current.isDate($0.lookDate, inSameDayAs: day) }
+    }
+
+    private func lookCapturePrompt(dayIndex: Int, lookTime: LookTime, timing: DayTiming) -> LookCapturePrompt? {
+        let date = boardState.days[dayIndex].date
+        let evening = lookTime == .evening
+        guard timing != .future,
+              !hasLookPost(dayIndex: dayIndex, lookTime: lookTime),
+              !LookPostStore.isPromptDismissed(on: date, isEvening: evening) else { return nil }
+        return LookCapturePrompt(
+            onCapture: { activeSheet = .captureLook(dayIndex: dayIndex, lookTime: lookTime) },
+            onDismiss: { LookPostStore.dismissPrompt(on: date, isEvening: evening) }
+        )
     }
 
     // MARK: - Quick swap & love gestures

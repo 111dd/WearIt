@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Look photos are LookPosts
+- **Did:** added `LookPost` + `LookPostStore` + `LookPhotoProcessor`; profile grid, "Snap the look", calendar day photos all read/write posts.
+- **Why:** `DailyLook.photoPaths` were local files only (never reached other devices) and had no room for caption, visibility or tags needed for the social phase.
+- **Watch:** read a post's photo through `LookPostStore.localPhotoPath(for:)` (rewrites the file from synced `photoData` on a new device). Delete a post only after its detail view has popped. `garmentIDs` is private; only `publicTaggedGarmentIDs` may ever leave the device.
+
 ## 2026-10-17 — Widget step 1: date-aware, queued "I wore it", new layouts
 - **Did:** `WidgetSnapshot` v2 (`widgetSnapshotV2`) holds today's and tomorrow's day + evening looks; the widget picks by entry date (entries at 18:00 and midnight). Widget taps append to a command queue that `WidgetCommandService.consumeIfNeeded` applies on every app activation via `markWorn` (`LookWearStatus`, one `recordWorn`, posts `.lookMarkedWornOutside` so the planner board doesn't save the old status back). Thumbs are `Thumbs/{uuid}-{mtime}.png`, unreferenced ones deleted. Planner's `unconfirmDay` now clears `dayLookWearStatus` too.
 - **Why:** after midnight the widget showed yesterday's look and its button marked yesterday; one command key meant a second tap overwrote the first; the planner's in-memory status overwrote widget confirms; thumbs never refreshed after a photo change; garments went one-color on tinted Home Screens.

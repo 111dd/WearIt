@@ -45,7 +45,8 @@ final class AppBootstrapper: ObservableObject {
             DayPlan.self,
             NotificationPreferences.self,
             Brand.self,
-            WearEvent.self
+            WearEvent.self,
+            LookPost.self
         ])
 
         let storeURL: URL = {

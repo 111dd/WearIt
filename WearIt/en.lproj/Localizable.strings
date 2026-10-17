@@ -841,7 +841,7 @@
 "profile_stat_streak" = "Day streak";
 "profile_style_identity" = "Style Identity";
 "profile_my_looks" = "My Looks";
-"profile_looks_empty" = "Photos you add in the calendar will appear here";
+"profile_looks_empty" = "Photos of the looks you wear will show here.";
 "profile_avatar_change" = "Change profile photo";
 "profile_avatar_remove_photo" = "Remove photo";
 "action_share" = "Share";
@@ -1201,3 +1201,31 @@
 "garment_temperature_max" = "Max";
 "garment_temperature_reset" = "Reset to default";
 "garment_no_image" = "No photo";
+
+/* Look posts (profile photo grid) */
+"look_capture_title" = "Snap the look";
+"look_capture_title_evening" = "Snap the evening look";
+"look_capture_save" = "Save";
+"look_capture_headline" = "Show the look you wore";
+"look_capture_subtitle" = "A mirror selfie or a full-body photo. We frame it for your profile, and you can hide your face or the background.";
+"look_capture_preview_a11y" = "Look photo preview";
+"look_capture_hide_face" = "Hide face";
+"look_capture_blur_background" = "Blur background";
+"look_capture_retake" = "Choose another photo";
+"look_capture_no_person" = "No person found, so the photo is centered.";
+"look_capture_caption_placeholder" = "Add a caption";
+"look_capture_privacy_note" = "Only you can see your looks. Location and camera details are removed.";
+"look_capture_cta" = "Snap the look";
+"look_post_delete_question" = "Delete this look photo?";
+"look_post_delete" = "Delete photo";
+"look_post_evening_date_format" = "%@ · Evening";
+"look_post_only_me" = "Only me";
+"look_post_pinned" = "Pinned";
+"look_post_add_caption" = "Add a caption…";
+"look_post_items_title" = "In this look";
+"look_post_show_tag" = "Show tag";
+"look_post_show_tag_a11y_format" = "Show a tag for %@";
+"look_post_tags_footer" = "Tags stay private. Once sharing arrives, only the items you turn on will show, with their type and brand. The rest of your wardrobe never does.";
+"look_post_pin" = "Pin to top";
+"look_post_unpin" = "Unpin";
+"look_post_options" = "Photo options";

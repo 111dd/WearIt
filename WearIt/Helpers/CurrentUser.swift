@@ -165,6 +165,9 @@ extension CurrentUser {
         for item in (try? context.fetch(FetchDescriptor<DailyLook>(predicate: #Predicate { $0.ownerID == old }))) ?? [] {
             item.ownerID = newID
         }
+        for item in (try? context.fetch(FetchDescriptor<LookPost>(predicate: #Predicate { $0.ownerID == old }))) ?? [] {
+            item.ownerID = newID
+        }
         for event in (try? context.fetch(FetchDescriptor<RecommendationEvent>(predicate: #Predicate { $0.profileID == old }))) ?? [] {
             event.profileID = newID
         }

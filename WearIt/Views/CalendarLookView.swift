@@ -39,7 +39,7 @@ struct CalendarLookView: View {
     @State private var showPlanTrip = false
     @State private var placePickerEvent: DayJournalEvent?
 
-    @Query(sort: \DailyLook.date, order: .reverse) private var dailyLooks: [DailyLook]
+    @Query(sort: \LookPost.lookDate, order: .reverse) private var lookPosts: [LookPost]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
 
@@ -52,8 +52,11 @@ struct CalendarLookView: View {
 
     private var selectedDay: Date { calendar.startOfDay(for: selectedDate) }
 
-    private var lookForSelectedDay: DailyLook? {
-        dailyLooks.first(where: { calendar.isDate($0.date, inSameDayAs: selectedDay) })
+    /// The day's look photos (posts), oldest first, in the order the journal strip shows them.
+    private var postsForSelectedDay: [LookPost] {
+        lookPosts
+            .filter { calendar.isDate($0.lookDate, inSameDayAs: selectedDay) }
+            .sorted { $0.createdAt < $1.createdAt }
     }
 
     private var planForSelectedDay: DayPlan? {
@@ -79,8 +82,8 @@ struct CalendarLookView: View {
     /// Per-day indicators for the strip, keyed by start-of-day.
     private var dayIndicators: [Date: CalendarDayIndicators] {
         var result: [Date: CalendarDayIndicators] = [:]
-        for look in dailyLooks where !look.photoPaths.isEmpty {
-            result[calendar.startOfDay(for: look.date), default: CalendarDayIndicators()].hasPhotos = true
+        for post in lookPosts {
+            result[calendar.startOfDay(for: post.lookDate), default: CalendarDayIndicators()].hasPhotos = true
         }
         for plan in dayPlans {
             let day = calendar.startOfDay(for: plan.date)
@@ -111,7 +114,7 @@ struct CalendarLookView: View {
             temperatureFeedback: plan?.temperatureFeedback,
             notes: plan?.notes ?? "",
             weather: weatherSummary(for: plan),
-            photoPaths: lookForSelectedDay?.photoPaths ?? [],
+            photoPaths: postsForSelectedDay.compactMap { LookPostStore.localPhotoPath(for: $0) },
             events: dayEvents
         )
     }
@@ -227,9 +230,7 @@ struct CalendarLookView: View {
             refreshCurrentDate()
         }
         .sheet(isPresented: $showCamera) {
-            CameraPickerWrapper { image in
-                Task { await save(images: [image]) }
-            }
+            LookCaptureView(lookDate: selectedDay)
         }
         .sheet(isPresented: $showLookEditor) {
             DayLookEditorSheet(
@@ -626,18 +627,17 @@ struct CalendarLookView: View {
     private func save(images: [UIImage]) async {
         guard !images.isEmpty else { return }
         let day = selectedDay
+        // Framed 4:5 around the person and re-encoded without location, like "Snap the look".
         let encoded: [Data] = await Task.detached(priority: .userInitiated) {
-            images.compactMap { $0.resized(max: 1400).jpegData(compressionQuality: 0.9) }
+            images.compactMap { image in
+                LookPhotoProcessor.process(image).flatMap(LookPhotoProcessor.jpegData)
+            }
         }.value
 
         do {
-            var newPaths: [String] = []
             for jpg in encoded {
-                newPaths.append(try ImageStore.save(data: jpg, preferredExt: "jpg"))
+                try LookPostStore.create(jpeg: jpg, lookDate: day, isEvening: false, context: context)
             }
-            let look = lookForSelectedDay ?? createLook(for: day)
-            look.photoPaths.append(contentsOf: newPaths)
-            try? context.save()
             DS.haptic(0.5)
             showStatusToast(String(localized: "success_saved"))
         } catch {
@@ -645,23 +645,10 @@ struct CalendarLookView: View {
         }
     }
 
-    private func createLook(for day: Date) -> DailyLook {
-        let look = DailyLook(date: day, photoPaths: [])
-        if let profile = CurrentUser.activeProfile(in: context, userIdentifier: auth.userIdentifier, createIfNeeded: false) {
-            look.ownerID = profile.id
-            if !profile.dailyLookIDs.contains(look.id) {
-                profile.dailyLookIDs.append(look.id)
-            }
-        }
-        context.insert(look)
-        return look
-    }
-
     private func removePhoto(at index: Int) {
-        guard let look = lookForSelectedDay, look.photoPaths.indices.contains(index) else { return }
-        let path = look.photoPaths.remove(at: index)
-        ImageStore.delete(path: path)
-        try? context.save()
+        let posts = postsForSelectedDay.filter { LookPostStore.localPhotoPath(for: $0) != nil }
+        guard posts.indices.contains(index) else { return }
+        LookPostStore.delete(posts[index], context: context)
         DS.haptic(0.5)
         showStatusToast(String(localized: "success_deleted"))
     }
