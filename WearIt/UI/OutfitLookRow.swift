@@ -7,6 +7,7 @@
 //  - Future days: no buttons at all — the plan is the content.
 //  - Once answered: a small status mark on the corner; tapping it undoes or fine-tunes.
 //  - Right after "worn": a one-tap "How was it?" emoji strip, then it disappears.
+//  - Then, once: "📸 Snap the look" for the profile grid (skipped when a photo exists).
 //  Gestures carry the rest: swipe the look sideways to replace it, tap an item
 //  for quick swaps (handled by the tile).
 //  Every gesture is mirrored as a VoiceOver action.
@@ -28,6 +29,12 @@ struct LookFeedbackActions {
     let onFormality: (Int) -> Void
 }
 
+/// "Snap the look" offer under a worn look. nil = don't offer (future day, photo already taken, dismissed).
+struct LookCapturePrompt {
+    let onCapture: () -> Void
+    let onDismiss: () -> Void
+}
+
 struct OutfitLookRow<Content: View>: View {
     let canConfirm: Bool
     let isBusy: Bool
@@ -41,6 +48,7 @@ struct OutfitLookRow<Content: View>: View {
     /// Future looks show no wear prompt; they are confirmed from the day menu.
     var isFuture: Bool = false
     var feedback: LookFeedbackActions? = nil
+    var capturePrompt: LookCapturePrompt? = nil
     let onConfirm: () -> Void
     let onNotWorn: () -> Void
     let onReplace: () -> Void
@@ -49,6 +57,7 @@ struct OutfitLookRow<Content: View>: View {
 
     @State private var swipeOffset: CGFloat = 0
     @State private var reactionDismissed = false
+    @State private var captureDismissed = false
     @State private var heartBurst = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.layoutDirection) private var layoutDirection
@@ -71,12 +80,16 @@ struct OutfitLookRow<Content: View>: View {
             } else if showsReactionStrip, let feedback {
                 reactionStrip(feedback)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            } else if showsCapturePrompt, let capturePrompt {
+                capturePromptRow(capturePrompt)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .opacity(isBusy ? 0.65 : 1)
         .gesture(swipeGesture)
         .animation(reduceMotion ? nil : DS.Animation.standard, value: showsWearPrompt)
         .animation(reduceMotion ? nil : DS.Animation.standard, value: showsReactionStrip)
+        .animation(reduceMotion ? nil : DS.Animation.standard, value: showsCapturePrompt)
         .onChange(of: feedback?.isLoved ?? false) { _, loved in
             guard loved else { return }
             playHeartBurst()
@@ -115,6 +128,10 @@ struct OutfitLookRow<Content: View>: View {
     private var showsReactionStrip: Bool {
         guard let feedback else { return false }
         return status == .worn && !feedback.hasReaction && !reactionDismissed
+    }
+
+    private var showsCapturePrompt: Bool {
+        capturePrompt != nil && status == .worn && !showsReactionStrip && !captureDismissed
     }
 
     // MARK: - Wear prompt
@@ -261,6 +278,40 @@ struct OutfitLookRow<Content: View>: View {
             }
             Button {
                 reactionDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(String(localized: "micro_question_skip")))
+        }
+    }
+
+    // MARK: - Snap the look
+
+    private func capturePromptRow(_ prompt: LookCapturePrompt) -> some View {
+        HStack(spacing: DS.Spacing.xs) {
+            Button {
+                DS.haptic(0.35)
+                prompt.onCapture()
+            } label: {
+                Label(String(localized: "look_capture_cta"), systemImage: "camera")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .padding(.horizontal, DS.Spacing.sm)
+                    .frame(height: 40)
+                    .liquidGlassPill(interactive: true)
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            Spacer(minLength: DS.Spacing.xxs)
+            Button {
+                captureDismissed = true
+                prompt.onDismiss()
             } label: {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))

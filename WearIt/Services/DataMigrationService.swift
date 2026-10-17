@@ -88,6 +88,9 @@ final class DataMigrationService {
         }
         migrateCloudKitIDsIfNeeded(context: context)
         migrateWearHistoryIfNeeded(context: context)
+        // Small table (one row per day with photos); re-checked each launch so photos of a
+        // DailyLook that syncs in later still become posts on the device that has the files.
+        LookPostStore.importLegacyDayPhotos(context: context)
     }
 
     /// Run migrations and await completion (boot-time use — critical only).

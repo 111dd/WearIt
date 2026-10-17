@@ -22,6 +22,7 @@ struct OutfitPlannerView: View {
     @Query(sort: \UserProfile.createdAt, order: .reverse) private var profiles: [UserProfile]
     @Query private var dayPlans: [DayPlan]
     @Query private var wearEvents: [WearEvent]
+    @Query(sort: \LookPost.lookDate, order: .reverse) private var lookPosts: [LookPost]
     @Query private var dismissedOutfits: [DismissedOutfit]
     @Query(sort: \RecommendationEvent.createdAt, order: .reverse) private var recommendationEvents: [RecommendationEvent]
     
@@ -37,6 +38,8 @@ struct OutfitPlannerView: View {
     @State private var quickSwapTarget: SlotTarget?
     @AppStorage("plannerGestureHintSeen") private var gestureHintSeen = false
     @State private var lastForecastSignature: String = ""
+    /// Ready alternatives for the widget's ↻, keyed by day + current look + forecast.
+    @State private var widgetAlternativesMemo: [String: [[OutfitSlot: UUID]]] = [:]
     @State private var expandedDayDetails: Set<Int> = []
     @State private var selectedDayIndex: Int = 0
     @State private var availableGarmentsCache: [Garment] = []
@@ -139,6 +142,8 @@ struct OutfitPlannerView: View {
         case addNewItem(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime)
         /// Add an item to the wardrobe (not to a look), from the "your wardrobe is missing" nudge.
         case addToWardrobe(Category)
+        /// "Snap the look": a photo of a worn look for the profile grid.
+        case captureLook(dayIndex: Int, lookTime: LookTime)
 
         var id: String {
             switch self {
@@ -151,6 +156,8 @@ struct OutfitPlannerView: View {
                 return "new-\(dayIndex)-\(slot.rawValue)-\(lookTime.rawValue)"
             case .addToWardrobe(let category):
                 return "wardrobe-\(category.rawValue)"
+            case .captureLook(let dayIndex, let lookTime):
+                return "capture-\(dayIndex)-\(lookTime.rawValue)"
             }
         }
     }
@@ -178,7 +185,58 @@ struct OutfitPlannerView: View {
     
     // MARK: - Body
     
+    // The modifier chain is split across properties so each piece type-checks on its own.
     var body: some View {
+        plannerWithSheets
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+                refreshCurrentDate()
+                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                // Events may have changed while the app was in the background.
+                if CalendarContextPreferences.deviceCalendarEnabled {
+                    calendarUnderstandingDidChange()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+                // EventKit posts this in bursts (sync, edits); re-read once it settles.
+                calendarRefreshTask?.cancel()
+                calendarRefreshTask = Task {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    guard !Task.isCancelled else { return }
+                    calendarUnderstandingDidChange()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { note in
+                handleCalendarUnderstandingChanged(note)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                refreshCurrentDate()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .background {
+                    flushDirtyPlans()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
+                flushDirtyPlans()
+            }
+            .onChange(of: appIntentRouter.pendingAction) { _, newAction in
+                if newAction != nil {
+                    performPendingIntentAction()
+                }
+            }
+    }
+
+    private func handleCalendarUnderstandingChanged(_ note: Notification) {
+        // The work dress code changed in Settings: work days get a fresh look.
+        let replan = note.userInfo?["replanWorkDays"] as? Bool == true
+        let workDays: Set<Int> = replan
+            ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
+            : []
+        calendarUnderstandingDidChange(replanning: workDays)
+        learnOccasionsFromHistory()
+    }
+
+    private var plannerStack: some View {
         NavigationStack {
             plannerContent
                 .navigationTitle(String(localized: "planner_board_title"))
@@ -232,80 +290,68 @@ struct OutfitPlannerView: View {
         } message: {
             Text(boardState.alertMessage)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
-            confirmWorn(dayIndex: 0)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
-            guard let date = notification.userInfo?["date"] as? Date,
-                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
-            else { return }
-            selectedDayIndex = index
-            expandedDayDetails.insert(index)
-        }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .garmentMenu(let garment):
-                garmentSheet(garment)
-            case .addPicker(let dayIndex, let slots, let lookTime, let initialSlot):
-                addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
-            case .addNewItem(let dayIndex, let slot, let lookTime):
-                addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
-            case .addToWardrobe(let category):
-                AddGarmentView(initialCategory: category) { _ in
-                    activeSheet = nil
-                    // The new item can fill tomorrow's looks; today's stay as they are.
-                    scheduleGenerateAllOutfits(fillMissingOnly: true)
+    }
+
+    private var plannerWithSheets: some View {
+        plannerStack
+            .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
+                confirmWorn(dayIndex: 0)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dayPlanChangedOutside)) { notification in
+                // Already saved by the widget / notification path; reload that day so the
+                // board (and its next save) matches the store.
+                guard let date = notification.userInfo?["date"] as? Date,
+                      let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+                else { return }
+                var usedIDs: Set<UUID> = []
+                applyPlan(DayPlanService.shared.planFor(date: date, context: context), dayIndex: index, usedIDs: &usedIDs)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .widgetFeedbackPending)) { _ in
+                applyWidgetFeedback()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
+                guard let date = notification.userInfo?["date"] as? Date,
+                      let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+                else { return }
+                selectedDayIndex = index
+                expandedDayDetails.insert(index)
+            }
+            .sheet(item: $activeSheet) { sheet in
+                plannerSheet(sheet)
+            }
+            .fullScreenCover(isPresented: $showStyleSwipe) {
+                StyleSwipeView(deckSize: styleSwipeDeckSize) {
+                    styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
+                    styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                    refreshAffinityCaches()
                 }
+                .environmentObject(auth)
             }
-        }
-        .fullScreenCover(isPresented: $showStyleSwipe) {
-            StyleSwipeView(deckSize: styleSwipeDeckSize) {
-                styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
-                styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
-                refreshAffinityCaches()
+    }
+
+    @ViewBuilder
+    private func plannerSheet(_ sheet: PlannerSheet) -> some View {
+        switch sheet {
+        case .garmentMenu(let garment):
+            garmentSheet(garment)
+        case .addPicker(let dayIndex, let slots, let lookTime, let initialSlot):
+            addPickerSheet(dayIndex: dayIndex, slots: slots, lookTime: lookTime, initialSlot: initialSlot)
+        case .addNewItem(let dayIndex, let slot, let lookTime):
+            addNewItemSheet(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+        case .addToWardrobe(let category):
+            AddGarmentView(initialCategory: category) { _ in
+                activeSheet = nil
+                // The new item can fill tomorrow's looks; today's stay as they are.
+                scheduleGenerateAllOutfits(fillMissingOnly: true)
             }
-            .environmentObject(auth)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            refreshCurrentDate()
-            styleSwipeOffered = StyleSwipeSchedule.shouldOfferToday()
-            // Events may have changed while the app was in the background.
-            if CalendarContextPreferences.deviceCalendarEnabled {
-                calendarUnderstandingDidChange()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
-            // EventKit posts this in bursts (sync, edits); re-read once it settles.
-            calendarRefreshTask?.cancel()
-            calendarRefreshTask = Task {
-                try? await Task.sleep(for: .milliseconds(800))
-                guard !Task.isCancelled else { return }
-                calendarUnderstandingDidChange()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .calendarUnderstandingChanged)) { note in
-            // The work dress code changed in Settings: work days get a fresh look.
-            let workDays = note.userInfo?["replanWorkDays"] as? Bool == true
-                ? Set(cachedCalendarContexts.filter { $0.value.dayOccasion == .work }.keys)
-                : []
-            calendarUnderstandingDidChange(replanning: workDays)
-            learnOccasionsFromHistory()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
-            refreshCurrentDate()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .background {
-                flushDirtyPlans()
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .plannerFlushDirtyPlans)) { _ in
-            flushDirtyPlans()
-        }
-        .onChange(of: appIntentRouter.pendingAction) { _, newAction in
-            if newAction != nil {
-                performPendingIntentAction()
-            }
+        case .captureLook(let dayIndex, let lookTime):
+            let day = boardState.days[dayIndex]
+            let slots = lookTime == .evening ? day.eveningSlots : day.slots
+            LookCaptureView(
+                lookDate: day.date,
+                isEvening: lookTime == .evening,
+                garmentIDs: OutfitSlot.allCases.compactMap { slots[$0]?.garmentID }
+            )
         }
     }
 
@@ -433,6 +479,7 @@ struct OutfitPlannerView: View {
         defer { signposter.endInterval("planner-restore", interval) }
         boardState.initializeDays()
         hydrateFromPlans()
+        applyWidgetFeedback()
         updateAvailableGarments()
         refreshAffinityCaches()
         refreshCurrentDate()
@@ -479,6 +526,7 @@ struct OutfitPlannerView: View {
         lastForecastSignature = signature
         boardState.updateForecasts(newForecasts)
         scheduleGenerateAllOutfits(fillMissingOnly: true)
+        saveWidgetSnapshot()
     }
 
     private func handleGarmentChange(_ _: Int) {
@@ -1117,6 +1165,14 @@ struct OutfitPlannerView: View {
                     loveLook(dayIndex: dayIndex)
                 } label: {
                     Label(String(localized: "planner_love_it"), systemImage: "heart")
+                }
+            }
+            if dayTiming(for: dayIndex) != .future,
+               !boardState.days[dayIndex].assignedGarmentIDs.isEmpty {
+                Button {
+                    activeSheet = .captureLook(dayIndex: dayIndex, lookTime: .day)
+                } label: {
+                    Label(String(localized: "look_capture_cta"), systemImage: "camera")
                 }
             }
             if dayTiming(for: dayIndex) != .future, isConfirmed(dayIndex) {
@@ -2482,6 +2538,7 @@ struct OutfitPlannerView: View {
             accessibilitySlotLabel: slotLabel,
             isFuture: timing == .future,
             feedback: lookTime == .day ? lookFeedbackActions(for: dayIndex) : nil,
+            capturePrompt: lookCapturePrompt(dayIndex: dayIndex, lookTime: lookTime, timing: timing),
             onConfirm: {
                 handleSwipeConfirm(dayIndex: dayIndex, lookTime: lookTime)
             },
@@ -2503,6 +2560,26 @@ struct OutfitPlannerView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Snap the look
+
+    private func hasLookPost(dayIndex: Int, lookTime: LookTime) -> Bool {
+        let day = boardState.days[dayIndex].date
+        let evening = lookTime == .evening
+        return lookPosts.contains { $0.isEvening == evening && Calendar.current.isDate($0.lookDate, inSameDayAs: day) }
+    }
+
+    private func lookCapturePrompt(dayIndex: Int, lookTime: LookTime, timing: DayTiming) -> LookCapturePrompt? {
+        let date = boardState.days[dayIndex].date
+        let evening = lookTime == .evening
+        guard timing != .future,
+              !hasLookPost(dayIndex: dayIndex, lookTime: lookTime),
+              !LookPostStore.isPromptDismissed(on: date, isEvening: evening) else { return nil }
+        return LookCapturePrompt(
+            onCapture: { activeSheet = .captureLook(dayIndex: dayIndex, lookTime: lookTime) },
+            onDismiss: { LookPostStore.dismissPrompt(on: date, isEvening: evening) }
+        )
     }
 
     // MARK: - Quick swap & love gestures
@@ -5243,13 +5320,108 @@ struct OutfitPlannerView: View {
         plan.eveningLookWearStatus = day.eveningLookWearStatus
         try? context.save()
 
-        if Calendar.current.isDateInToday(day.date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
+        if isWidgetDay(day.date) {
+            saveWidgetSnapshot()
+        }
+    }
+
+    /// The widget shows today and tomorrow (day + evening looks).
+    private func isWidgetDay(_ date: Date) -> Bool {
+        let calendar = Calendar.current
+        return calendar.isDateInToday(date) || calendar.isDateInTomorrow(date)
+    }
+
+    private func saveWidgetSnapshot() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+        var reasons: [Date: String] = [:]
+        var alternatives: [Date: [[OutfitSlot: UUID]]] = [:]
+        for index in boardState.days.indices where isWidgetDay(boardState.days[index].date) {
+            let day = calendar.startOfDay(for: boardState.days[index].date)
+            if let reason = lookReasons(for: index).first {
+                reasons[day] = reasonText(reason)
+            }
+            alternatives[day] = widgetAlternatives(for: index)
+        }
+        WidgetSnapshotService.saveSnapshot(
+            plans: DayPlanService.shared.plans(from: today, to: tomorrow, context: context),
+            garments: allGarments,
+            forecasts: weather.forecasts,
+            locationName: weather.locationName,
+            dayReasons: reasons,
+            dayAlternatives: alternatives
+        )
+    }
+
+    /// Up to two other day looks for the widget's ↻, ranked by the same model as the board
+    /// and keeping locked items. Memoized: only recomputed when the look or forecast changes.
+    private func widgetAlternatives(for dayIndex: Int) -> [[OutfitSlot: UUID]] {
+        guard dayIndex < boardState.days.count else { return [] }
+        let day = boardState.days[dayIndex]
+        let current: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
+            if let id = day.garmentID(for: slot) { result[slot] = id }
+        }
+        guard !current.isEmpty, day.dayLookWearStatus != .worn else { return [] }
+
+        let key = [
+            String(day.date.timeIntervalSince1970),
+            OutfitSlot.allCases.map { current[$0]?.uuidString ?? "-" }.joined(separator: ","),
+            forecastKey(for: day.forecast),
+            availableGarmentsSignature
+        ].joined(separator: "#")
+        if let cached = widgetAlternativesMemo[key] { return cached }
+
+        let locked: [OutfitSlot: UUID] = current.filter { day.isLocked($0.key) }
+        let crossDay = crossDayExclusions(excludingDay: dayIndex)
+        let ctx = recoContext(for: dayIndex)
+        let lockedCats = lockedCategories(for: dayIndex, lookTime: .day)
+        let pool = recommendedPool(referenceDate: day.date, ctx: ctx)
+            .filter { !lockedCats.contains($0.category) }
+        let ranked = AIRecommender.shared.rankLooks(
+            from: pool,
+            ctx: ctx,
+            modelContext: context,
+            excludedIDs: crossDay.hard.union(locked.values),
+            penalizedIDs: crossDay.soft,
+            limit: 6
+        )
+
+        var seen: Set<Set<UUID>> = [Set(current.values)]
+        var result: [[OutfitSlot: UUID]] = []
+        for look in ranked {
+            var assignment = locked
+            for garment in look.garments {
+                let slot = OutfitSlot.from(category: garment.category)
+                if assignment[slot] == nil { assignment[slot] = garment.id }
+            }
+            let ids = Set(assignment.values)
+            guard !seen.contains(ids) else { continue }
+            seen.insert(ids)
+            result.append(assignment)
+            if result.count == 2 { break }
+        }
+        if widgetAlternativesMemo.count > 8 { widgetAlternativesMemo.removeAll() }
+        widgetAlternativesMemo[key] = result
+        return result
+    }
+
+    /// Reactions given in the widget (😍🥶🥵), applied with the planner's own learning.
+    private func applyWidgetFeedback() {
+        for command in WidgetCommandService.takePlannerFeedback() {
+            guard let date = DateFormatter.widgetDate.date(from: command.date),
+                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+            else { continue }
+            switch command.value {
+            case WidgetCommand.feedbackLoved:
+                submitFeedback(for: index, rating: .loved)
+            case WidgetCommand.feedbackTooCold:
+                submitTemperatureFeedback(for: index, feedback: .tooCold)
+            case WidgetCommand.feedbackTooWarm:
+                submitTemperatureFeedback(for: index, feedback: .tooWarm)
+            default:
+                break
+            }
         }
     }
 
@@ -5556,15 +5728,7 @@ struct OutfitPlannerView: View {
         )
         learnFromPlannerFeedback(dayIndex: dayIndex, kind: .worn, reward: 0.82)
         DS.haptic(0.4)
-
-        if Calendar.current.isDateInToday(date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
-        }
+        // Saving also refreshes the widget for today / tomorrow.
         persistDayPlan(dayIndex, immediate: true)
     }
 
@@ -5588,19 +5752,15 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count else { return }
         let date = boardState.days[dayIndex].date
         let plan = DayPlanService.shared.planFor(date: date, context: context)
-        plan.wasWornConfirmed = false
-        plan.updatedAt = Date()
+        // Clear the status too, or the next save writes "worn" back (and the widget keeps it).
+        plan.applyDayLookWearStatus(nil)
+        boardState.days[dayIndex].dayLookWearStatus = nil
         try? context.save()
         WearEventStore.unmarkWorn(date: date, source: .planner, context: context)
         DS.haptic(0.3)
 
-        if Calendar.current.isDateInToday(date) {
-            WidgetSnapshotService.saveTodaySnapshot(
-                plan: plan,
-                garments: allGarments,
-                forecast: weather.forecasts.first,
-                locationName: weather.locationName
-            )
+        if isWidgetDay(date) {
+            saveWidgetSnapshot()
         }
     }
 

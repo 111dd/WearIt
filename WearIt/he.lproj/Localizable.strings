@@ -860,7 +860,7 @@
 "profile_stat_streak" = "רצף ימים";
 "profile_style_identity" = "זהות סטייל";
 "profile_my_looks" = "הלוקים שלי";
-"profile_looks_empty" = "תמונות שתוסיף ביומן יופיעו כאן";
+"profile_looks_empty" = "תמונות של הלוקים שלבשת יופיעו כאן.";
 "profile_avatar_change" = "שינוי תמונת פרופיל";
 "profile_avatar_remove_photo" = "הסרת תמונה";
 "action_share" = "שיתוף";
@@ -1220,3 +1220,31 @@
 "garment_temperature_max" = "מקסימום";
 "garment_temperature_reset" = "אפס לברירת המחדל";
 "garment_no_image" = "אין תמונה";
+
+/* Look posts (profile photo grid) */
+"look_capture_title" = "צלם את הלוק";
+"look_capture_title_evening" = "צלם את לוק הערב";
+"look_capture_save" = "שמור";
+"look_capture_headline" = "הראה את הלוק שלבשת";
+"look_capture_subtitle" = "סלפי במראה או תמונה של כל הגוף. נמסגר אותה לפרופיל, ותוכל להסתיר את הפנים או את הרקע.";
+"look_capture_preview_a11y" = "תצוגה מקדימה של תמונת הלוק";
+"look_capture_hide_face" = "הסתר פנים";
+"look_capture_blur_background" = "טשטש רקע";
+"look_capture_retake" = "בחר תמונה אחרת";
+"look_capture_no_person" = "לא זיהינו אדם בתמונה, אז היא ממורכזת.";
+"look_capture_caption_placeholder" = "הוסף כיתוב";
+"look_capture_privacy_note" = "רק אתה רואה את הלוקים שלך. מיקום ופרטי מצלמה נמחקים.";
+"look_capture_cta" = "צלם את הלוק";
+"look_post_delete_question" = "למחוק את תמונת הלוק?";
+"look_post_delete" = "מחק תמונה";
+"look_post_evening_date_format" = "%@ · ערב";
+"look_post_only_me" = "רק אני";
+"look_post_pinned" = "נעוץ";
+"look_post_add_caption" = "הוסף כיתוב…";
+"look_post_items_title" = "בלוק הזה";
+"look_post_show_tag" = "הצג תג";
+"look_post_show_tag_a11y_format" = "הצג תג עבור %@";
+"look_post_tags_footer" = "התגים פרטיים. כשיהיה שיתוף, יופיעו רק הפריטים שהדלקת, עם הסוג והמותג. שאר הארון לא נחשף אף פעם.";
+"look_post_pin" = "נעץ למעלה";
+"look_post_unpin" = "בטל נעיצה";
+"look_post_options" = "אפשרויות תמונה";

@@ -1,24 +1,47 @@
 import Foundation
 import UIKit
 import os
+import SwiftData
 #if canImport(WidgetKit)
 import WidgetKit
 #endif
 
-struct TodaySnapshotItem: Codable {
+// Shared with the widget: keep in sync with `WearItWidget/WidgetShared.swift`.
+
+struct WidgetLookItem: Codable, Sendable {
     let slot: String
     let garmentID: String
     let title: String
     let thumbFilename: String
 }
 
-struct TodaySnapshot: Codable {
-    let date: String
-    let locationName: String?
+/// One look the widget can show: today's day or evening look, or tomorrow's.
+struct WidgetLook: Codable, Sendable {
+    static let kindDay = "day"
+    static let kindEvening = "evening"
+
+    let date: String           // yyyy-MM-dd
+    let kind: String           // kindDay / kindEvening
+    var status: String?        // LookWearStatus.rawValue, nil = undecided
     let lowTempC: Double?
     let highTempC: Double?
-    let confirmedWorn: Bool
-    let items: [TodaySnapshotItem]
+    let rainChance: Double?    // 0...1
+    var reason: String?
+    let items: [WidgetLookItem]
+    /// Other ready looks the widget's ↻ cycles through (day looks only).
+    var options: [[WidgetLookItem]]? = nil
+    /// Non-nil once the user reacted (😍🥶🥵 or "not my style"): the widget stops asking.
+    var reaction: String? = nil
+}
+
+struct WidgetSnapshot: Codable, Sendable {
+    let savedAt: Date
+    let locationName: String?
+    var looks: [WidgetLook]
+
+    func look(date: String, kind: String) -> WidgetLook? {
+        looks.first { $0.date == date && $0.kind == kind }
+    }
 }
 
 /// Sendable garment image inputs for off-main widget thumbnail work.
@@ -30,92 +53,164 @@ private struct WidgetThumbSource: Sendable {
     let imageData: Data?
 }
 
-private struct WidgetSnapshotDraft: Sendable {
+private struct WidgetLookDraft: Sendable {
     let date: String
-    let locationName: String?
+    let kind: String
+    let status: String?
     let lowTempC: Double?
     let highTempC: Double?
-    let confirmedWorn: Bool
+    let rainChance: Double?
+    let reason: String?
+    let reaction: String?
     let sources: [WidgetThumbSource]
+    let options: [[WidgetThumbSource]]
+}
+
+private struct WidgetSnapshotDraft: Sendable {
+    let locationName: String?
+    let looks: [WidgetLookDraft]
+    /// False when the caller has no reasons or options (e.g. a notification action):
+    /// keep the last ones while the look itself is unchanged.
+    let plannerInputsAreFresh: Bool
 }
 
 enum WidgetSnapshotService {
     static let appGroupID = "group.com.dordavid.WearIt"
-    static let snapshotKey = "todaySnapshotV1"
-    static let commandKey = "widgetCommand"
+    static let snapshotKey = "widgetSnapshotV2"
+    fileprivate static let legacySnapshotKey = "todaySnapshotV1"
+    static let widgetKind = "WearItWidget"
     fileprivate static let imageFolder = "Thumbs"
-    fileprivate static let thumbPixelSize = CGSize(width: 300, height: 375)
+    fileprivate static let thumbMaxPixel: CGFloat = 400
 
-    /// Captures plan state on the calling actor, then generates thumbnails and
-    /// writes the App Group snapshot via a serial coordinator.
-    static func saveTodaySnapshot(
-        plan: DayPlan,
+    /// Writes today's and tomorrow's looks (day + evening) for the widget.
+    /// Captures plan state on the calling actor, then makes thumbnails off-main.
+    /// `dayReasons` (keyed by start of day) is the planner's top "why this look" line and
+    /// `dayAlternatives` the other ready day looks for ↻; pass nil to keep the widget's.
+    @MainActor static func saveSnapshot(
+        plans: [DayPlan],
         garments: [Garment],
-        forecast: DayForecast?,
-        locationName: String?
+        forecasts: [DayForecast],
+        locationName: String?,
+        dayReasons: [Date: String]? = nil,
+        dayAlternatives: [Date: [[OutfitSlot: UUID]]]? = nil
     ) {
-        let draft = WidgetSnapshotDraft(
-            date: dateString(from: plan.date),
-            locationName: locationName,
-            lowTempC: forecast?.lowTempC,
-            highTempC: forecast?.highTempC,
-            confirmedWorn: plan.wasWornConfirmed,
-            sources: buildThumbSources(plan: plan, garments: garments)
-        )
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+        let garmentsByID = Dictionary(garments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
+        var looks: [WidgetLookDraft] = []
+        for plan in plans.sorted(by: { $0.date < $1.date }) {
+            let day = calendar.startOfDay(for: plan.date)
+            guard day == today || day == tomorrow else { continue }
+            let forecast = forecasts.first { calendar.isDate($0.date, inSameDayAs: day) }
+            let date = DateFormatter.widgetDate.string(from: day)
+
+            let daySources = thumbSources(plan.slotAssignments, garmentsByID: garmentsByID)
+            if !daySources.isEmpty {
+                looks.append(WidgetLookDraft(
+                    date: date,
+                    kind: WidgetLook.kindDay,
+                    status: plan.resolvedDayLookWearStatus?.rawValue,
+                    lowTempC: forecast?.lowTempC,
+                    highTempC: forecast?.highTempC,
+                    rainChance: forecast?.rainProbability,
+                    reason: dayReasons?[day],
+                    reaction: hasReaction(plan) ? "given" : nil,
+                    sources: daySources,
+                    options: (dayAlternatives?[day] ?? []).map { thumbSources($0, garmentsByID: garmentsByID) }
+                ))
+            }
+
+            let eveningSources = plan.eveningEnabled == true
+                ? thumbSources(plan.eveningSlotAssignments, garmentsByID: garmentsByID)
+                : []
+            if !eveningSources.isEmpty {
+                looks.append(WidgetLookDraft(
+                    date: date,
+                    kind: WidgetLook.kindEvening,
+                    status: plan.eveningLookWearStatus?.rawValue,
+                    lowTempC: forecast?.lowTempC,
+                    highTempC: forecast?.highTempC,
+                    rainChance: forecast?.rainProbability,
+                    reason: nil,
+                    reaction: nil,
+                    sources: eveningSources,
+                    options: []
+                ))
+            }
+        }
+
+        let draft = WidgetSnapshotDraft(
+            locationName: locationName,
+            looks: looks,
+            plannerInputsAreFresh: dayReasons != nil
+        )
         Task(priority: .utility) {
             await WidgetSnapshotCoordinator.shared.save(draft)
         }
     }
 
-    static func loadSnapshot() -> TodaySnapshot? {
+    /// Rebuilds the snapshot from the store, for callers outside the planner.
+    @MainActor static func refresh(context: ModelContext) {
+        let today = Calendar.current.startOfDay(for: Date())
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
+        let plans = DayPlanService.shared.plans(from: today, to: tomorrow, context: context)
+        let ids = Array(Set(plans.flatMap { Array($0.slotAssignments.values) + Array($0.eveningSlotAssignments.values) }))
+        let descriptor = FetchDescriptor<Garment>(predicate: #Predicate { ids.contains($0.id) })
+        let garments = ids.isEmpty ? [] : ((try? context.fetch(descriptor)) ?? [])
+        saveSnapshot(
+            plans: plans,
+            garments: garments,
+            forecasts: ForecastService.shared.forecasts,
+            locationName: ForecastService.shared.locationName
+        )
+    }
+
+    static func loadSnapshot() -> WidgetSnapshot? {
         guard let defaults = UserDefaults(suiteName: appGroupID),
               let data = defaults.data(forKey: snapshotKey) else { return nil }
-        return try? JSONDecoder().decode(TodaySnapshot.self, from: data)
+        return try? JSONDecoder().decode(WidgetSnapshot.self, from: data)
     }
 
     static func imageURL(for filename: String) -> URL? {
-        guard let base = appGroupURL() else { return nil }
-        return base.appendingPathComponent(imageFolder, isDirectory: true).appendingPathComponent(filename)
+        thumbFolderURL()?.appendingPathComponent(filename)
     }
 
     // MARK: - Internal
 
-    private static func buildThumbSources(plan: DayPlan, garments: [Garment]) -> [WidgetThumbSource] {
-        let assignments = plan.slotAssignments
-        var sources: [WidgetThumbSource] = []
+    /// Same rule as the planner's reaction strip.
+    @MainActor private static func hasReaction(_ plan: DayPlan) -> Bool {
+        plan.feedback == .loved || plan.feedback == .rejected || plan.temperatureFeedback != nil
+    }
 
-        for (slot, id) in assignments {
-            guard let garment = garments.first(where: { $0.id == id }) else { continue }
-            sources.append(
-                WidgetThumbSource(
-                    slotRaw: slot.rawValue,
-                    garmentID: garment.id,
-                    title: garment.displayTitle,
-                    imagePath: garment.imagePath,
-                    imageData: garment.imageData
-                )
+    private static func thumbSources(
+        _ assignments: [OutfitSlot: UUID],
+        garmentsByID: [UUID: Garment]
+    ) -> [WidgetThumbSource] {
+        OutfitSlot.allCases.compactMap { slot in
+            guard let id = assignments[slot], let garment = garmentsByID[id] else { return nil }
+            return WidgetThumbSource(
+                slotRaw: slot.rawValue,
+                garmentID: garment.id,
+                title: garment.displayTitle,
+                imagePath: garment.imagePath,
+                imageData: garment.imagePath == nil ? garment.imageData : nil
             )
         }
-
-        return sources
     }
 
-    fileprivate static func dateString(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+    fileprivate static func thumbFolderURL() -> URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+            .appendingPathComponent(imageFolder, isDirectory: true)
     }
 
-    fileprivate static func appGroupURL() -> URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
-    }
-
-    fileprivate static func writeSnapshot(_ snapshot: TodaySnapshot) {
+    fileprivate static func writeSnapshot(_ snapshot: WidgetSnapshot) {
         guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
         if let data = try? JSONEncoder().encode(snapshot) {
             defaults.set(data, forKey: snapshotKey)
         }
+        defaults.removeObject(forKey: legacySnapshotKey)
     }
 }
 
@@ -134,36 +229,75 @@ private actor WidgetSnapshotCoordinator {
         let state = signposter.beginInterval("save-snapshot")
         defer { signposter.endInterval("save-snapshot", state) }
 
-        let items: [TodaySnapshotItem] = draft.sources.map { source in
-            let filename = ensureThumbnail(for: source) ?? ""
-            return TodaySnapshotItem(
-                slot: source.slotRaw,
-                garmentID: source.garmentID.uuidString,
-                title: source.title,
-                thumbFilename: filename
+        let previous = WidgetSnapshotService.loadSnapshot()
+        // A tap in the widget the app hasn't applied yet still counts, so a save
+        // made before the command is consumed doesn't flip the look back.
+        let pending = WidgetCommandService.pendingCommands()
+
+        var referenced = Set<String>()
+        func makeItems(_ sources: [WidgetThumbSource]) -> [WidgetLookItem] {
+            sources.map { source in
+                let filename = ensureThumbnail(for: source) ?? ""
+                if !filename.isEmpty { referenced.insert(filename) }
+                return WidgetLookItem(
+                    slot: source.slotRaw,
+                    garmentID: source.garmentID.uuidString,
+                    title: source.title,
+                    thumbFilename: filename
+                )
+            }
+        }
+
+        let looks: [WidgetLook] = draft.looks.map { look in
+            let items = makeItems(look.sources)
+            let matching = pending.filter { $0.date == look.date && $0.lookKind == look.kind }
+            var status = look.status
+            if let last = matching.last(where: { $0.type == WidgetCommand.confirmWorn || $0.type == WidgetCommand.notWorn }) {
+                status = last.type == WidgetCommand.confirmWorn ? LookWearStatus.worn.rawValue : LookWearStatus.notWorn.rawValue
+            }
+            let reactedInWidget = matching.contains { $0.type == WidgetCommand.feedback }
+
+            // Without fresh planner inputs, keep the last reason and options while the look is the same.
+            let old = previous?.look(date: look.date, kind: look.kind)
+            let sameLook = old.map { Set($0.items.map(\.garmentID)) == Set(items.map(\.garmentID)) } ?? false
+            let reason = draft.plannerInputsAreFresh ? look.reason : (sameLook ? old?.reason : nil)
+            let options: [[WidgetLookItem]]
+            if draft.plannerInputsAreFresh {
+                options = look.options.map(makeItems).filter { !$0.isEmpty }
+            } else {
+                options = sameLook ? (old?.options ?? []) : []
+                options.flatMap { $0 }.map(\.thumbFilename).filter { !$0.isEmpty }.forEach { referenced.insert($0) }
+            }
+
+            return WidgetLook(
+                date: look.date,
+                kind: look.kind,
+                status: status,
+                lowTempC: look.lowTempC,
+                highTempC: look.highTempC,
+                rainChance: look.rainChance,
+                reason: reason,
+                items: items,
+                options: options.isEmpty ? nil : options,
+                reaction: look.reaction ?? (reactedInWidget ? "given" : nil)
             )
         }
 
-        let snapshot = TodaySnapshot(
-            date: draft.date,
-            locationName: draft.locationName,
-            lowTempC: draft.lowTempC,
-            highTempC: draft.highTempC,
-            confirmedWorn: draft.confirmedWorn,
-            items: items
+        WidgetSnapshotService.writeSnapshot(
+            WidgetSnapshot(savedAt: Date(), locationName: draft.locationName, looks: looks)
         )
-        WidgetSnapshotService.writeSnapshot(snapshot)
+        removeUnusedThumbnails(keeping: referenced)
         scheduleReload()
     }
 
-    /// Downsamples from the garment file URL (or legacy data) into the App Group
-    /// thumb contract: `Thumbs/thumb-{slot}-{uuid}.jpg` at 300×375.
+    /// Downsamples the garment photo into `Thumbs/{uuid}-{version}.png`. The version
+    /// follows the source file's modification date, so a new photo gets a new thumb.
+    /// PNG keeps a cutout's transparency for the widget's flat-lay.
     private func ensureThumbnail(for source: WidgetThumbSource) -> String? {
         let thumbState = signposter.beginInterval("widget-thumb")
         defer { signposter.endInterval("widget-thumb", thumbState) }
 
-        guard let base = WidgetSnapshotService.appGroupURL() else { return nil }
-        let folderURL = base.appendingPathComponent(WidgetSnapshotService.imageFolder, isDirectory: true)
+        guard let folderURL = WidgetSnapshotService.thumbFolderURL() else { return nil }
         if !FileManager.default.fileExists(atPath: folderURL.path) {
             do {
                 try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
@@ -172,17 +306,26 @@ private actor WidgetSnapshotCoordinator {
             }
         }
 
-        let filename = "thumb-\(source.slotRaw)-\(source.garmentID.uuidString).jpg"
+        let fileURL = source.imagePath.flatMap { ImageStore.absoluteURL(path: $0) }
+        let version: Int
+        if let fileURL {
+            let modified = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.modificationDate] as? Date
+            version = Int(modified?.timeIntervalSince1970 ?? 0)
+        } else if let data = source.imageData {
+            version = data.count
+        } else {
+            return nil
+        }
+
+        let filename = "\(source.garmentID.uuidString)-\(version).png"
         let url = folderURL.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: url.path) {
             return filename
         }
 
-        let size = WidgetSnapshotService.thumbPixelSize
-        let maxPixel = max(size.width, size.height)
+        let maxPixel = WidgetSnapshotService.thumbMaxPixel
         let downsampled: UIImage?
-        if let imagePath = source.imagePath,
-           let fileURL = ImageStore.absoluteURL(path: imagePath) {
+        if let fileURL {
             downsampled = ImageStore.downsample(url: fileURL, maxPixelSize: maxPixel)
         } else if let data = source.imageData {
             downsampled = ImageStore.downsample(data: data, maxPixelSize: maxPixel)
@@ -190,19 +333,20 @@ private actor WidgetSnapshotCoordinator {
             downsampled = nil
         }
 
-        guard let image = downsampled else { return nil }
-
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let thumbnail = renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: size))
-        }
-
-        guard let data = thumbnail.jpegData(compressionQuality: 0.85) else { return nil }
+        guard let data = downsampled?.pngData() else { return nil }
         do {
             try data.write(to: url, options: .atomic)
             return filename
         } catch {
             return nil
+        }
+    }
+
+    private func removeUnusedThumbnails(keeping referenced: Set<String>) {
+        guard let folderURL = WidgetSnapshotService.thumbFolderURL(),
+              let files = try? FileManager.default.contentsOfDirectory(atPath: folderURL.path) else { return }
+        for file in files where !referenced.contains(file) {
+            try? FileManager.default.removeItem(at: folderURL.appendingPathComponent(file))
         }
     }
 
@@ -214,7 +358,7 @@ private actor WidgetSnapshotCoordinator {
             let state = signposter.beginInterval("timeline-reload")
             defer { signposter.endInterval("timeline-reload", state) }
             #if canImport(WidgetKit)
-            WidgetCenter.shared.reloadTimelines(ofKind: "WearItWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: WidgetSnapshotService.widgetKind)
             #endif
         }
     }

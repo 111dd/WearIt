@@ -18,6 +18,12 @@ extension Notification.Name {
 
     // Widget actions
     static let confirmWornFromWidget = Notification.Name("ConfirmWornFromWidget")
+    /// The widget or a notification changed a day's plan in the store (worn, not worn,
+    /// another look). `userInfo["date"]` is the start of day. The planner reloads that day
+    /// so a later save doesn't undo it.
+    static let dayPlanChangedOutside = Notification.Name("DayPlanChangedOutside")
+    /// Widget reactions (😍🥶🥵) are waiting in `WidgetCommandService.takePlannerFeedback()`.
+    static let widgetFeedbackPending = Notification.Name("WidgetFeedbackPending")
 
     /// Calendar → planner hand-off. `userInfo["date"]` is the start-of-day to focus.
     static let openPlannerDay = Notification.Name("OpenPlannerDay")

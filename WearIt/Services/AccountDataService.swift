@@ -35,6 +35,7 @@ enum AccountDataService {
         deleteAll(NotificationPreferences.self, in: context)
         deleteAll(Brand.self, in: context)
         deleteAll(WearEvent.self, in: context)
+        deleteAll(LookPost.self, in: context)
         do {
             try context.save()
         } catch {
@@ -79,8 +80,8 @@ enum AccountDataService {
 
     // MARK: - Export
 
-    /// Builds "WearIt Export <date>.zip": `wearit-data.json` (profile, wardrobe, plans, wear history)
-    /// plus the item photos. Returns the zip's URL in the temporary folder, ready to share.
+    /// Builds "WearIt Export <date>.zip": `wearit-data.json` (profile, wardrobe, plans, wear history,
+    /// look posts) plus the item and look photos. Returns the zip's URL in the temporary folder, ready to share.
     static func makeExportArchive(context: ModelContext) throws -> URL {
         let fileManager = FileManager.default
         let stamp = exportStamp()
@@ -103,13 +104,24 @@ enum AccountDataService {
             }
         }
 
+        let posts = (try? context.fetch(FetchDescriptor<LookPost>(sortBy: [SortDescriptor(\.lookDate)]))) ?? []
+        var postPhotoNames: [UUID: String] = [:]
+        for post in posts {
+            guard let path = post.photoPath, let source = ImageStore.fileURL(path: path) else { continue }
+            let name = "look-\(post.id.uuidString).jpg"
+            if (try? fileManager.copyItem(at: source, to: photos.appendingPathComponent(name))) != nil {
+                postPhotoNames[post.id] = name
+            }
+        }
+
         let payload: [String: Any] = [
             "exportedAt": iso(Date()),
             "app": "WearIt",
             "profile": profileJSON(CurrentUser.activeProfile(in: context, createIfNeeded: false)),
             "garments": garments.map { garmentJSON($0, photos: photoNames[$0.id] ?? []) },
             "dayPlans": ((try? context.fetch(FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(dayPlanJSON),
-            "wearHistory": ((try? context.fetch(FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(wearEventJSON)
+            "wearHistory": ((try? context.fetch(FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(wearEventJSON),
+            "lookPosts": posts.map { lookPostJSON($0, photo: postPhotoNames[$0.id]) }
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: root.appendingPathComponent("wearit-data.json"))
@@ -205,6 +217,22 @@ enum AccountDataService {
         ]
         json["occasion"] = event.occasionRaw
         json["notes"] = event.notes
+        return json
+    }
+
+    private static func lookPostJSON(_ post: LookPost, photo: String?) -> [String: Any] {
+        var json: [String: Any] = [
+            "id": post.id.uuidString,
+            "date": iso(post.lookDate),
+            "createdAt": iso(post.createdAt),
+            "evening": post.isEvening,
+            "visibility": post.visibilityRaw,
+            "pinned": post.isPinned,
+            "garmentIDs": post.garmentIDs.map(\.uuidString),
+            "publicTagGarmentIDs": post.publicTaggedGarmentIDs.map(\.uuidString)
+        ]
+        if let caption = post.caption { json["caption"] = caption }
+        if let photo { json["photo"] = "photos/\(photo)" }
         return json
     }
 
