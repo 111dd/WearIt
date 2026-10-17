@@ -1214,3 +1214,9 @@
 "privacy_section_children_body" = "WearIt לא מיועדת לילדים מתחת לגיל 13.";
 "privacy_section_contact_title" = "יצירת קשר";
 "privacy_section_contact_body" = "שאלות על פרטיות או על הנתונים שלך: 111dordavid@gmail.com";
+
+/* Temperature range editor + tile placeholders (previously hardcoded English) */
+"garment_temperature_min" = "מינימום";
+"garment_temperature_max" = "מקסימום";
+"garment_temperature_reset" = "אפס לברירת המחדל";
+"garment_no_image" = "אין תמונה";

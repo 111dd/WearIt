@@ -45,7 +45,7 @@ struct MySizesView: View {
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .navigationTitle(String(localized: "my_sizes_title"))
-        .minimalCollapsingNavBar()
+        .compactNavBar()
         .onAppear(perform: load)
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { save() }

@@ -51,6 +51,7 @@ struct OutfitLookRow<Content: View>: View {
     @State private var reactionDismissed = false
     @State private var heartBurst = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
 
     /// Horizontal travel that commits a swipe-to-replace.
     private static var swipeCommitDistance: CGFloat { 80 }
@@ -216,7 +217,9 @@ struct OutfitLookRow<Content: View>: View {
             }
             .buttonStyle(.plain)
             .disabled(isBusy)
-            .offset(x: -10, y: -10)
+            // `offset` is not mirrored for us: in Hebrew the leading corner is
+            // on the right, so the mark has to move the other way to stay out.
+            .offset(x: layoutDirection == .rightToLeft ? 10 : -10, y: -10)
             .transition(.scale.combined(with: .opacity))
             .accessibilityLabel(Text(statusBadge ?? confirmTitle))
         }

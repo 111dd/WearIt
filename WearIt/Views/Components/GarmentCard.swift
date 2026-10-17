@@ -78,7 +78,7 @@ struct GarmentPreview: View {
                         .font(.system(size: 48, weight: .light))
                         .foregroundStyle(.tertiary)
                     
-                    Text("No Image")
+                    Text(String(localized: "garment_no_image"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -55,7 +55,7 @@ struct StatsView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle(String(localized: "stats_title"))
-        .minimalCollapsingNavBar()
+        .compactNavBar()
         .onAppear { rebuildSnapshot() }
         .onChange(of: garments.count) { _, _ in rebuildSnapshot() }
         .onChange(of: wearEvents.count) { _, _ in rebuildSnapshot() }

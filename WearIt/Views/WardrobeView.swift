@@ -51,24 +51,22 @@ struct WardrobeView: View {
     
     @State private var showDeleteAlert = false
     @State private var pendingDelete: Garment?
-    @State private var selectedGarmentForEdit: Garment?
     @State private var currentDate: Date = Date()
     @State private var rebuildDebouncer = Debouncer(interval: 0.2)
 
     /// Micro-question nudge: at most one tiny data-completion question a day.
     @AppStorage("wardrobeMicroQuestionLastDay") private var microQuestionLastDay = ""
     @State private var microQuestionDismissed = false
-
-    private var latestWearMap: [UUID: Date] {
-        WearHistoryService.latestWearMap(events: wearEvents)
-    }
+    @State private var microQuestion: WardrobeMicroQuestion?
 
     private var forgottenCutoff: Date {
         Calendar.current.date(byAdding: .day, value: -21, to: currentDate) ?? currentDate
     }
 
-    // Filtered results
-    private var filtered: [Garment] {
+    // Filtered results. `latestWearMap` is passed in and built once per rebuild:
+    // as a computed property it walked every wear event inside each filter and
+    // sort comparison.
+    private func filtered(latestWearMap: [UUID: Date]) -> [Garment] {
         var result = allGarments
         
         if let category = selectedCategory {
@@ -112,7 +110,8 @@ struct WardrobeView: View {
     }
 
     private func rebuildVisibleGarments() {
-        var result = filtered
+        let latestWearMap = WearHistoryService.latestWearMap(events: wearEvents)
+        var result = filtered(latestWearMap: latestWearMap)
         switch selectedSort {
         case .newest:
             result.sort { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
@@ -138,6 +137,7 @@ struct WardrobeView: View {
             }
         }
         visibleGarments = result
+        microQuestion = resolveMicroQuestion()
     }
 
     private func scheduleRebuildVisibleGarments() {
@@ -161,7 +161,8 @@ struct WardrobeView: View {
             wardrobeScrollContent
                 .scrollContentBackground(.hidden)
                 .refreshable {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    refreshCurrentDate()
+                    rebuildVisibleGarments()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .withLocalAppBackdrop()
@@ -178,9 +179,9 @@ struct WardrobeView: View {
                         filterButton
                     }
                 }
-                .alert("Delete item?", isPresented: $showDeleteAlert) {
-                    Button("Cancel", role: .cancel) { pendingDelete = nil }
-                    Button("Delete", role: .destructive) {
+                .alert(String(localized: "wardrobe_delete_confirm_title"), isPresented: $showDeleteAlert) {
+                    Button(String(localized: "action_cancel"), role: .cancel) { pendingDelete = nil }
+                    Button(String(localized: "action_delete"), role: .destructive) {
                         if let g = pendingDelete {
                             context.delete(g)
                             try? context.save()
@@ -189,12 +190,7 @@ struct WardrobeView: View {
                         }
                     }
                 } message: {
-                    Text("This action cannot be undone.")
-                }
-                .sheet(item: $selectedGarmentForEdit) { garment in
-                    NavigationStack {
-                        EditGarmentView(garment: garment)
-                    }
+                    Text(String(localized: "wardrobe_delete_confirm_message"))
                 }
                 .onAppear {
                     rebuildVisibleGarments()
@@ -241,27 +237,30 @@ struct WardrobeView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                if let garment = sleeveQuestionGarment {
+                switch microQuestion {
+                case .sleeve(let garment):
                     SleeveQuestionCard(garment: garment) {
                         completeMicroQuestion()
                     }
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.sm)
                     .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if let question = occasionFitQuestion {
-                    OccasionFitQuestionCard(garment: question.garment, occasion: question.occasion) {
+                case .occasionFit(let garment, let occasion):
+                    OccasionFitQuestionCard(garment: garment, occasion: occasion) {
                         completeMicroQuestion()
                     }
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.sm)
                     .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if let garment = microQuestionGarment {
+                case .brand(let garment):
                     MicroQuestionCard(garment: garment) {
                         completeMicroQuestion()
                     }
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.sm)
                     .transition(.opacity.combined(with: .move(edge: .top)))
+                case nil:
+                    EmptyView()
                 }
 
                 if visibleGarments.isEmpty {
@@ -311,34 +310,31 @@ struct WardrobeView: View {
 
     // MARK: - Micro questions
 
-    private var todayKey: String {
+    private static let dayKeyFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: currentDate)
+        return formatter
+    }()
+
+    private var todayKey: String {
+        Self.dayKeyFormatter.string(from: currentDate)
     }
 
-    /// One garment the user actually wears that is missing its brand.
-    /// Answering (or skipping) hides the card until tomorrow.
-    private var microQuestionGarment: Garment? {
+    /// The single question the wardrobe may ask today, picked in priority order:
+    /// sleeve length (it changes what the planner picks), then an occasion the
+    /// user keeps dressing for, then a missing brand. Resolved once per rebuild —
+    /// as computed properties these walked the whole wear history on every body
+    /// evaluation.
+    private func resolveMicroQuestion() -> WardrobeMicroQuestion? {
         guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
-        return allGarments
-            .filter { ($0.brand ?? "").isEmpty && !$0.isCurrentlyUnavailable }
-            .max { $0.timesWorn < $1.timesWorn }
-            .flatMap { $0.timesWorn > 0 ? $0 : nil }
-    }
 
-    /// A worn shirt or blouse whose sleeve length is unknown; asked before the brand
-    /// because it changes what the planner picks on in-between days.
-    private var sleeveQuestionGarment: Garment? {
-        guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
-        return allGarments
-            .filter { $0.needsSleeveAnswer && !$0.isCurrentlyUnavailable && $0.timesWorn > 0 }
-            .max { $0.timesWorn < $1.timesWorn }
-    }
+        if let sleeve = allGarments
+            .filter({ $0.needsSleeveAnswer && !$0.isCurrentlyUnavailable && $0.timesWorn > 0 })
+            .max(by: { $0.timesWorn < $1.timesWorn }) {
+            return .sleeve(sleeve)
+        }
 
-    /// An item the user keeps wearing for a situation the app doesn't think it fits.
-    private var occasionFitQuestion: (garment: Garment, occasion: GarmentOccasion)? {
-        guard !microQuestionDismissed, microQuestionLastDay != todayKey else { return nil }
         let counts = GarmentOccasionProfile.wearCounts(from: wearEvents)
         var best: (garment: Garment, occasion: GarmentOccasion, count: Int)?
         for garment in allGarments where !garment.isCurrentlyUnavailable {
@@ -351,24 +347,32 @@ struct WardrobeView: View {
                 best = (garment, occasion, count)
             }
         }
-        return best.map { ($0.garment, $0.occasion) }
+        if let best {
+            return .occasionFit(best.garment, best.occasion)
+        }
+
+        if let brandless = allGarments
+            .filter({ ($0.brand ?? "").isEmpty && !$0.isCurrentlyUnavailable })
+            .max(by: { $0.timesWorn < $1.timesWorn }),
+           brandless.timesWorn > 0 {
+            return .brand(brandless)
+        }
+
+        return nil
     }
 
     private func completeMicroQuestion() {
         microQuestionLastDay = todayKey
         withAnimation(DS.Animation.standard) {
             microQuestionDismissed = true
+            microQuestion = nil
         }
     }
 
     @ViewBuilder
     private func wardrobeContextMenu(for garment: Garment) -> some View {
-        Button {
-            selectedGarmentForEdit = garment
-        } label: {
-            Label(String(localized: "planner_go_to_item"), systemImage: "info.circle")
-        }
-
+        // No "open item" entry: tapping the tile already pushes the item, and
+        // two routes to one screen (push here, sheet there) felt inconsistent.
         Button {
             replaceInPlanner(with: garment)
         } label: {
@@ -764,6 +768,13 @@ struct WardrobeView: View {
         rebuildVisibleGarments()
         DS.haptic(0.4)
     }
+}
+
+/// The one data-completion question the wardrobe may show today.
+private enum WardrobeMicroQuestion {
+    case sleeve(Garment)
+    case occasionFit(Garment, GarmentOccasion)
+    case brand(Garment)
 }
 
 private struct WardrobeTileModel: Equatable {

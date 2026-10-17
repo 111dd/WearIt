@@ -223,7 +223,7 @@ struct AddGarmentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(navigationTitle)
-            .minimalCollapsingNavBar()
+            .compactNavBar()
             .withLocalAppBackdrop()
             .toolbar { toolbarContent }
             .alert(String(localized: "add_garment_success_title"), isPresented: $showSuccess) {

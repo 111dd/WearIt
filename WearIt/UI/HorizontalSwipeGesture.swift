@@ -57,15 +57,33 @@ struct HorizontalSwipeGesture: UIGestureRecognizerRepresentable {
     }
 }
 
-/// Pan that only begins for clearly horizontal movement.
+/// Pan that only begins for clearly horizontal movement, and never steals a
+/// touch that started inside a nested horizontal scroll view (a photo strip,
+/// a chip row) — that content scrolls sideways on its own.
 final class HorizontalPanGestureRecognizer: UIPanGestureRecognizer {
     private var startPoint: CGPoint?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         super.touchesBegan(touches, with: event)
+        if let touch = touches.first, startsInsideHorizontalScrollView(touch) {
+            state = .failed
+            return
+        }
         if startPoint == nil {
             startPoint = touches.first?.location(in: view)
         }
+    }
+
+    private func startsInsideHorizontalScrollView(_ touch: UITouch) -> Bool {
+        var node = touch.view
+        while let current = node, current !== view {
+            if let scrollView = current as? UIScrollView,
+               scrollView.contentSize.width > scrollView.bounds.width + 1 {
+                return true
+            }
+            node = current.superview
+        }
+        return false
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {

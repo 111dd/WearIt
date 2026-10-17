@@ -118,7 +118,7 @@ struct EditGarmentView: View {
         .withLocalAppBackdrop()
         .navigationTitle(String(localized: "nav_edit_item"))
         .navigationBarTitleDisplayMode(.inline)
-        .minimalCollapsingNavBar()
+        .compactNavBar()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             stickySaveBar
         }

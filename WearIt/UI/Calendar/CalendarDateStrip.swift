@@ -131,8 +131,7 @@ struct CalendarDateStrip: View {
     /// Month + year. In week mode the week may straddle two months; the
     /// title follows the selected day when it is inside the visible week.
     private var periodTitle: String {
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        let formatter = Self.periodTitleFormatter
         let reference: Date
         if isExpanded {
             reference = anchor
@@ -294,22 +293,40 @@ struct CalendarDateStrip: View {
         }
     }
 
-    private var periodSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                let forward = value.translation.width < 0
-                let direction = (layoutDirection == .rightToLeft ? !forward : forward) ? 1 : -1
-                shiftPeriod(by: direction)
-            }
+    /// UIKit pan rather than a `DragGesture`: the strip sits in a vertical
+    /// scroll view, where a drag gesture competes with scrolling.
+    private var periodSwipeGesture: HorizontalSwipeGesture {
+        HorizontalSwipeGesture(
+            onChanged: { _ in },
+            onEnded: { travel, speed in
+                let isFling = abs(travel) >= 24 && speed >= 700
+                guard abs(travel) >= 56 || isFling else { return }
+                let leftward = travel < 0
+                let forward = layoutDirection == .rightToLeft ? !leftward : leftward
+                shiftPeriod(by: forward ? 1 : -1)
+            },
+            onCancelled: {}
+        )
     }
 
     // MARK: Accessibility
 
-    private func accessibilityLabel(for day: Date, indicators dayIndicators: CalendarDayIndicators) -> String {
+    /// Shared formatters: built per call these ran once per visible day
+    /// (42 in month mode) on every redraw.
+    private static let periodTitleFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        return formatter
+    }()
+
+    private static let fullDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .full
-        var parts = [formatter.string(from: day)]
+        return formatter
+    }()
+
+    private func accessibilityLabel(for day: Date, indicators dayIndicators: CalendarDayIndicators) -> String {
+        var parts = [Self.fullDateFormatter.string(from: day)]
         if dayIndicators.wasWorn {
             parts.append(String(localized: "a11y_day_worn"))
         } else if dayIndicators.hasOutfit {

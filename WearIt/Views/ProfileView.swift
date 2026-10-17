@@ -70,7 +70,7 @@ struct ProfileView: View {
         }
         .scrollContentBackground(.hidden)
         .navigationTitle(String(localized: "nav_profile"))
-        .minimalCollapsingNavBar()
+        .compactNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {

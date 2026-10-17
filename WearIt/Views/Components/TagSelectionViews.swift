@@ -303,7 +303,7 @@ struct TemperatureRangeSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Temperature Range")
+                Text(String(localized: "garment_temperature_range"))
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(Int(effectiveMin))°C – \(Int(effectiveMax))°C")
@@ -313,7 +313,7 @@ struct TemperatureRangeSlider: View {
             
             HStack(spacing: 16) {
                 VStack(alignment: .leading) {
-                    Text("Min")
+                    Text(String(localized: "garment_temperature_min"))
                         .font(.caption2)
                         .foregroundStyle(DS.Text.secondary)
                     Slider(
@@ -328,7 +328,7 @@ struct TemperatureRangeSlider: View {
                 }
                 
                 VStack(alignment: .leading) {
-                    Text("Max")
+                    Text(String(localized: "garment_temperature_max"))
                         .font(.caption2)
                         .foregroundStyle(DS.Text.secondary)
                     Slider(
@@ -343,7 +343,7 @@ struct TemperatureRangeSlider: View {
                 }
             }
             
-            Button("Reset to Default") {
+            Button(String(localized: "garment_temperature_reset")) {
                 minTemp = nil
                 maxTemp = nil
             }

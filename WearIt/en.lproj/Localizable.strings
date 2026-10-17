@@ -1195,3 +1195,9 @@
 "privacy_section_children_body" = "WearIt is not meant for children under 13.";
 "privacy_section_contact_title" = "Contact";
 "privacy_section_contact_body" = "Questions about privacy or your data: 111dordavid@gmail.com";
+
+/* Temperature range editor + tile placeholders (previously hardcoded English) */
+"garment_temperature_min" = "Min";
+"garment_temperature_max" = "Max";
+"garment_temperature_reset" = "Reset to default";
+"garment_no_image" = "No photo";
