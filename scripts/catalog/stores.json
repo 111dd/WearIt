@@ -1,0 +1,22 @@
+{
+  "IL": [
+    {
+      "id": "terminalx",
+      "name": "Terminal X",
+      "base": "https://www.terminalx.com",
+      "productUrlPattern": null,
+      "maxPagesPerRun": 1200,
+      "delaySeconds": 1.0,
+      "currency": "ILS"
+    },
+    {
+      "id": "castro",
+      "name": "Castro",
+      "base": "https://www.castro.com",
+      "productUrlPattern": null,
+      "maxPagesPerRun": 1200,
+      "delaySeconds": 1.0,
+      "currency": "ILS"
+    }
+  ]
+}

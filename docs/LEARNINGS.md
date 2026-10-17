@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Shop catalog crawler
+- **Did:** `scripts/catalog/build_catalog.py` + `.github/workflows/catalog.yml` publish `il/catalog.json` on the `catalog-data` branch.
+- **Why:** personalized purchase suggestions need a product source; no server yet, so GitHub Actions + a data branch.
+- **Watch:** Claude's cloud container can't reach the shop sites (proxy 403), so tune `stores.json` from `il/report.json` after a real run. "sitemap" contains "item": match product sitemaps on the file name without it. Keep mapping to the taxonomy in the app, not in the crawler.
+
 ## 2026-10-17 — Interactive widget (↻, tabs, ✓/✕, reactions)
 - **Did:** the planner precomputes two alternative day looks for today and tomorrow (memoized by look + forecast) into the snapshot; widget intents for next look, tab, not worn and reaction. `chooseLook` / `notWorn` / `confirmWorn` are applied to `DayPlan` in `consumeIfNeeded` in tap order (so "worn" after ↻ records the picked garments); reactions are handed to the planner (`.widgetFeedbackPending`) so `submitFeedback` / `submitTemperatureFeedback` do the learning. Any outside change posts `.dayPlanChangedOutside` and the planner re-applies that day's plan.
 - **Why:** dor asked for a more interactive widget.

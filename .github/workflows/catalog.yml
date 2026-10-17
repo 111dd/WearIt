@@ -1,0 +1,51 @@
+# Nightly shop catalog for on-device purchase suggestions (plans/shopping-israel.md in the project).
+# Builds il/catalog.json + il/report.json and publishes them on the `catalog-data` branch, which the
+# app reads from raw.githubusercontent.com. Not a build or test job.
+name: Shop catalog
+
+on:
+  schedule:
+    - cron: "30 23 * * *"   # 02:30 Israel time
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated store ids (empty = all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: shop-catalog
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Previous catalog
+        run: |
+          mkdir -p previous
+          if git fetch --depth 1 origin catalog-data 2>/dev/null; then
+            git show FETCH_HEAD:il/catalog.json > previous/il.json 2>/dev/null || rm -f previous/il.json
+          fi
+
+      - name: Build catalog
+        run: |
+          python3 scripts/catalog/build_catalog.py --country IL --out out/il \
+            --previous previous/il.json ${{ inputs.only && format('--only {0}', inputs.only) || '' }}
+          cat out/il/report.json
+
+      - name: Publish to catalog-data
+        run: |
+          cd out
+          git init -q -b catalog-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Catalog $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" catalog-data

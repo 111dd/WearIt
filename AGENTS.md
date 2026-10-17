@@ -81,7 +81,12 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Privacy policy: in-app `PrivacyPolicyView` from `privacy_*` strings; the public copy is `docs/privacy-policy.html`
   (GitHub Pages from `main` /docs, `https://111dd.github.io/WearIt/privacy-policy.html`). After editing a `privacy_*`
   string run `python3 scripts/make_privacy_page.py`.
-- No CI, no third-party packages (Mantis cropper has a stub fallback).
+- No CI (the one GitHub Action, `.github/workflows/catalog.yml`, is the nightly shop catalog, not a build), no third-party packages (Mantis cropper has a stub fallback).
+- Shop catalog (`plans/shopping-israel.md` in the project): `scripts/catalog/build_catalog.py` (stdlib Python) reads each
+  store in `scripts/catalog/stores.json` (per country, IL first: Terminal X, Castro) through robots.txt → sitemaps → JSON-LD
+  Product/ProductGroup + Open Graph, or `/products.json` for Shopify. It stores raw fields only; the app maps them through
+  `ProductPageMetadataService.makeProduct` / `ProductFieldMapper`. Published nightly to the `catalog-data` branch
+  (`https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/catalog.json`, plus `il/report.json`).
 
 ## Architecture facts
 
@@ -178,6 +183,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Shop catalog step 1 (`plans/shopping-israel.md`): nightly GitHub Action builds an Israeli product catalog (Terminal X + Castro pilot) from sitemaps and product-page JSON-LD, incremental, robots-aware, published to the `catalog-data` branch. The app doesn't read it yet.
 - 2026-10-17 · Claude Code · Interactive widget: ↻ cycles two ready alternatives per day look (planner `widgetAlternatives`, memoized `rankLooks`, locked items kept; the pick becomes the day's look), Today / Evening / Tomorrow tabs in medium + large, ✓ / ✕ (not today) and a one-time 😍🥶🥵 "how was it?" after wearing, learned by the planner.
 - 2026-10-17 · Claude Code · Social phase A step 1 (`plans/profile-social-direction.md`): `LookPost` model (mirrors the future server table, private by default, photo synced as `photoData` external storage), "Snap the look" (`Views/LookPosts/LookCaptureView`: camera/library, `LookPhotoProcessor` 4:5 crop around the person, hide face, blur background, metadata-free JPEG) offered once under a worn look and in the day ⋯ menu; profile photo grid (3 columns, pinned first, zoom into a post with caption, private item tags, pin, share, delete). Calendar day photos are now posts; old `DailyLook.photoPaths` are imported at launch (`LookPostStore.importLegacyDayPhotos`).
 - 2026-10-17 · Claude Code · Widget step 1 (project `plans/widget-review.md`): snapshot v2 with today + evening + tomorrow, timeline entries at 18:00 and midnight (no more yesterday's look after midnight), "I wore it" queued per look and applied through `LookWearStatus` on app activation (planner board kept in step), new small / medium / large flat-lay layouts with the top reason and rain, full-color garments on tinted / clear Home Screens, thumbs refresh when a photo changes and old ones are deleted, widget names localized.
