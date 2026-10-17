@@ -989,6 +989,15 @@ struct OutfitPlannerView: View {
                 .frame(maxWidth: .infinity, minHeight: 36)
             }
             .buttonStyle(SoftPressButtonStyle())
+            NavigationLink {
+                ShopPicksView()
+                    .withLocalAppBackdrop()
+            } label: {
+                Label(String(localized: "planner_gap_shop"), systemImage: "bag")
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 32)
+            }
+            .buttonStyle(SoftPressButtonStyle())
         }
         .padding(DS.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)

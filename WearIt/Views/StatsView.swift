@@ -43,6 +43,11 @@ struct StatsView: View {
                     coverage: WardrobeGapAnalyzer.coverage(garments),
                     onDismiss: dismissGap
                 )
+                ShopPicksSection(
+                    garments: garments,
+                    wearEvents: wearEvents,
+                    recommendationEvents: recommendationEvents
+                )
                 tasteColorsSection
                 tasteBrandsSection
                 favoriteCombosSection
