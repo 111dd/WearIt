@@ -50,7 +50,7 @@ struct WearItProvider: TimelineProvider {
 
 // MARK: - Which look to show
 
-enum WidgetLookRole {
+enum WidgetLookRole: String {
     case today, evening, tomorrow
 
     var title: String {
@@ -65,9 +65,16 @@ enum WidgetLookRole {
 struct WidgetLookChoice {
     let look: WidgetLook
     let role: WidgetLookRole
+    /// What the widget shows: the current look, or the one picked with ↻.
+    let items: [WidgetLookItem]
+    let optionCount: Int
 
     /// Only today's looks get "I wore it"; tomorrow's can't be worn yet.
     var canConfirm: Bool { role != .tomorrow && look.isOpen }
+    /// ↻ for an open day look with ready alternatives.
+    var canSwap: Bool { look.kind == WidgetLook.kindDay && look.isOpen && optionCount > 1 }
+    /// "How was it?" once, right after today's day look is marked worn.
+    var asksReaction: Bool { role == .today && look.isWorn && look.reaction == nil }
 }
 
 enum WidgetLookPicker {
@@ -75,19 +82,25 @@ enum WidgetLookPicker {
 
     /// Before the evening: today's look, then the evening look / tomorrow.
     /// From the evening: an open evening look, an open day look (so it can still be
-    /// marked worn), then tomorrow. A look from another day is never shown as today's.
-    static func choices(for snapshot: WidgetSnapshot?, at date: Date) -> [WidgetLookChoice] {
+    /// marked worn), then tomorrow. A tab the user picked today goes first.
+    /// A look from another day is never shown as today's.
+    static func choices(for snapshot: WidgetSnapshot?, at date: Date, state: WidgetUIState, useTab: Bool) -> [WidgetLookChoice] {
         guard let snapshot else { return [] }
         let calendar = Calendar.current
         let todayKey = DateFormatter.widgetDate.string(from: date)
         let tomorrowDate = calendar.date(byAdding: .day, value: 1, to: date) ?? date.addingTimeInterval(86_400)
         let tomorrowKey = DateFormatter.widgetDate.string(from: tomorrowDate)
 
-        let day = snapshot.look(date: todayKey, kind: WidgetLook.kindDay).map { WidgetLookChoice(look: $0, role: .today) }
-        let evening = snapshot.look(date: todayKey, kind: WidgetLook.kindEvening).map { WidgetLookChoice(look: $0, role: .evening) }
-        let tomorrow = snapshot.look(date: tomorrowKey, kind: WidgetLook.kindDay).map { WidgetLookChoice(look: $0, role: .tomorrow) }
+        func choice(_ look: WidgetLook?, _ role: WidgetLookRole) -> WidgetLookChoice? {
+            look.map {
+                WidgetLookChoice(look: $0, role: role, items: $0.shownItems(in: state), optionCount: $0.allOptions.count)
+            }
+        }
+        let day = choice(snapshot.look(date: todayKey, kind: WidgetLook.kindDay), .today)
+        let evening = choice(snapshot.look(date: todayKey, kind: WidgetLook.kindEvening), .evening)
+        let tomorrow = choice(snapshot.look(date: tomorrowKey, kind: WidgetLook.kindDay), .tomorrow)
 
-        let ordered: [WidgetLookChoice?]
+        var ordered: [WidgetLookChoice?]
         if calendar.component(.hour, from: date) >= eveningHour {
             ordered = [
                 evening?.look.isOpen == true ? evening : nil,
@@ -96,6 +109,9 @@ enum WidgetLookPicker {
             ]
         } else {
             ordered = [day, evening, tomorrow]
+        }
+        if useTab, let tab = state.tab.flatMap(WidgetLookRole.init(rawValue:)) {
+            ordered.insert([day, evening, tomorrow].compactMap { $0 }.first { $0.role == tab }, at: 0)
         }
 
         var result: [WidgetLookChoice] = []
@@ -114,14 +130,20 @@ struct WearItWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
-        let choices = WidgetLookPicker.choices(for: entry.snapshot, at: entry.date)
+        let state = WidgetUIState.load(today: DateFormatter.widgetDate.string(from: entry.date))
+        let choices = WidgetLookPicker.choices(
+            for: entry.snapshot,
+            at: entry.date,
+            state: state,
+            useTab: family != .systemSmall
+        )
         Group {
             if let primary = choices.first {
                 switch family {
                 case .systemMedium:
-                    MediumLookView(choice: primary)
+                    MediumLookView(choice: primary, all: choices)
                 case .systemLarge:
-                    LargeLookView(choice: primary, next: choices.dropFirst().first, locationName: entry.snapshot?.locationName)
+                    LargeLookView(choice: primary, all: choices, locationName: entry.snapshot?.locationName)
                 default:
                     SmallLookView(choice: primary)
                 }
@@ -134,14 +156,14 @@ struct WearItWidgetEntryView: View {
     }
 }
 
-/// Small: the main piece large, two more beside it, ✓ in the corner.
+/// Small: the main piece large, two more beside it, ↻ and ✓ on the corners.
 private struct SmallLookView: View {
     let choice: WidgetLookChoice
 
     var body: some View {
-        let items = LookItems(choice.look.items)
+        let items = LookItems(choice.items)
         VStack(alignment: .leading, spacing: 6) {
-            LookHeader(choice: choice, compact: true)
+            LookHeader(choice: choice, compact: true, showsTitle: true)
             HStack(spacing: 4) {
                 ThumbTile(item: items.hero)
                 if !items.rest.isEmpty {
@@ -152,6 +174,9 @@ private struct SmallLookView: View {
                     }
                     .frame(width: 44)
                 }
+            }
+            .overlay(alignment: .topLeading) {
+                SwapButton(choice: choice)
             }
             .overlay(alignment: .bottomTrailing) {
                 if choice.canConfirm {
@@ -169,39 +194,49 @@ private struct SmallLookView: View {
     }
 }
 
-/// Medium: the whole look as a flat-lay, with the why and the ✓ beside it.
+/// Medium: tabs, the look as a flat-lay with ↻, and the why plus ✓ / ✕ or "how was it?".
 private struct MediumLookView: View {
     let choice: WidgetLookChoice
+    let all: [WidgetLookChoice]
 
     var body: some View {
-        HStack(spacing: 12) {
-            FlatLay(items: choice.look.items, maxCount: 4, sideWidth: 48)
-            VStack(alignment: .leading, spacing: 4) {
-                LookHeader(choice: choice, compact: false)
-                if let reason = choice.look.reason, !reason.isEmpty {
-                    Text(reason)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
+        VStack(alignment: .leading, spacing: 6) {
+            LookTabs(all: all, selected: choice.role)
+            HStack(spacing: 10) {
+                FlatLay(items: choice.items, maxCount: 4, sideWidth: 46)
+                    .overlay(alignment: .topLeading) { SwapButton(choice: choice) }
+                VStack(alignment: .leading, spacing: 4) {
+                    LookHeader(choice: choice, compact: false, showsTitle: all.count < 2)
+                    if let reason = choice.look.reason, !reason.isEmpty, !choice.asksReaction {
+                        Text(reason)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(all.count < 2 ? 3 : 2)
+                    }
+                    Spacer(minLength: 0)
+                    LookActions(choice: choice)
                 }
-                Spacer(minLength: 0)
-                StatusOrConfirm(choice: choice)
+                .frame(width: 122, alignment: .leading)
             }
-            .frame(width: 118, alignment: .leading)
         }
     }
 }
 
-/// Large: the main look big, and the next one (evening or tomorrow) below.
+/// Large: tabs, the main look big, and the next one (evening or tomorrow) below.
 private struct LargeLookView: View {
     let choice: WidgetLookChoice
-    let next: WidgetLookChoice?
+    let all: [WidgetLookChoice]
     let locationName: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                LookHeader(choice: choice, compact: false)
+        let next = all.dropFirst().first
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
+                if all.count > 1 {
+                    LookTabs(all: all, selected: choice.role)
+                } else {
+                    LookHeader(choice: choice, compact: false, showsTitle: true)
+                }
                 Spacer(minLength: 4)
                 if let locationName {
                     Text(locationName)
@@ -210,27 +245,31 @@ private struct LargeLookView: View {
                         .lineLimit(1)
                 }
             }
-            FlatLay(items: choice.look.items, maxCount: 5, sideWidth: 72)
+            if all.count > 1 {
+                LookHeader(choice: choice, compact: false, showsTitle: false)
+            }
+            FlatLay(items: choice.items, maxCount: 5, sideWidth: 72)
+                .overlay(alignment: .topLeading) { SwapButton(choice: choice) }
             HStack(alignment: .center, spacing: 8) {
-                if let reason = choice.look.reason, !reason.isEmpty {
+                if let reason = choice.look.reason, !reason.isEmpty, !choice.asksReaction {
                     Text(reason)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 0)
-                StatusOrConfirm(choice: choice)
+                LookActions(choice: choice)
             }
             if let next {
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
-                    LookHeader(choice: next, compact: true)
+                    LookHeader(choice: next, compact: true, showsTitle: true)
                     HStack(spacing: 4) {
-                        ForEach(LookItems(next.look.items).all.prefix(5), id: \.slot) { item in
+                        ForEach(LookItems(next.items).all.prefix(5), id: \.slot) { item in
                             ThumbTile(item: item)
                         }
                     }
-                    .frame(height: 64)
+                    .frame(height: 56)
                 }
             }
         }
@@ -258,29 +297,80 @@ private struct EmptyLookView: View {
 
 // MARK: - Pieces
 
+/// Today / This evening / Tomorrow, only for looks that exist.
+private struct LookTabs: View {
+    let all: [WidgetLookChoice]
+    let selected: WidgetLookRole
+
+    var body: some View {
+        let roles = [WidgetLookRole.today, .evening, .tomorrow].filter { role in all.contains { $0.role == role } }
+        if roles.count > 1 {
+            HStack(spacing: 4) {
+                ForEach(roles, id: \.self) { role in
+                    Button(intent: SelectLookTabIntent(role: role.rawValue)) {
+                        Text(role.title)
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .foregroundStyle(role == selected ? AnyShapeStyle(.background) : AnyShapeStyle(.secondary))
+                            .background(
+                                Capsule().fill(role == selected ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.primary.opacity(0.08)))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// ↻: the next ready look.
+private struct SwapButton: View {
+    let choice: WidgetLookChoice
+
+    var body: some View {
+        if choice.canSwap {
+            Button(intent: NextLookIntent(dateString: choice.look.date, look: choice.look.kind)) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.circle)
+            .tint(.primary)
+            .padding(2)
+            .accessibilityLabel(Text("widget_another_look"))
+        }
+    }
+}
+
 /// "Today · 14°–22° · ☂ 60%", plus a ✓ when already worn.
 private struct LookHeader: View {
     let choice: WidgetLookChoice
     let compact: Bool
+    let showsTitle: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 4) {
-                Text(choice.role.title)
-                    .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
-                    .lineLimit(1)
+                if showsTitle {
+                    Text(choice.role.title)
+                        .font(compact ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                        .lineLimit(1)
+                }
                 if choice.look.isWorn {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.green)
                         .accessibilityLabel(Text("widget_status_worn"))
                 }
-                if compact {
-                    Spacer(minLength: 2)
+                if compact || !showsTitle {
+                    if compact { Spacer(minLength: 2) }
                     weather
                 }
             }
-            if !compact {
+            if !compact && showsTitle {
                 weather
             }
         }
@@ -310,18 +400,44 @@ private struct LookHeader: View {
     }
 }
 
-private struct StatusOrConfirm: View {
+/// ✓ / ✕ while open; "how was it?" 😍🥶🥵 right after wearing; then the status.
+private struct LookActions: View {
     let choice: WidgetLookChoice
 
     var body: some View {
         if choice.canConfirm {
-            Button(intent: ConfirmWornIntent(dateString: choice.look.date, look: choice.look.kind)) {
-                Label("widget_mark_worn", systemImage: "checkmark")
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
+            HStack(spacing: 4) {
+                Button(intent: ConfirmWornIntent(dateString: choice.look.date, look: choice.look.kind)) {
+                    Label("widget_mark_worn", systemImage: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                Button(intent: NotWornIntent(dateString: choice.look.date, look: choice.look.kind)) {
+                    Image(systemName: "xmark")
+                        .font(.caption2.weight(.bold))
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.bordered)
+                .buttonBorderShape(.circle)
+                .controlSize(.small)
+                .tint(.secondary)
+                .accessibilityLabel(Text("widget_not_worn"))
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
+        } else if choice.asksReaction {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("widget_how_was_it")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 2) {
+                    reaction("😍", WidgetCommand.feedbackLoved, label: "widget_reaction_loved")
+                    reaction("🥶", WidgetCommand.feedbackTooCold, label: "widget_reaction_too_cold")
+                    reaction("🥵", WidgetCommand.feedbackTooWarm, label: "widget_reaction_too_warm")
+                }
+            }
         } else if choice.look.isWorn {
             Label("widget_status_worn", systemImage: "checkmark.circle.fill")
                 .font(.caption.weight(.semibold))
@@ -331,6 +447,17 @@ private struct StatusOrConfirm: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func reaction(_ emoji: String, _ value: String, label: LocalizedStringKey) -> some View {
+        Button(intent: LookFeedbackIntent(dateString: choice.look.date, value: value)) {
+            Text(verbatim: emoji)
+                .font(.title3)
+                .frame(width: 30, height: 28)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
     }
 }
 

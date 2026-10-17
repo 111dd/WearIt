@@ -13,3 +13,14 @@
 "widget_intent_confirm_description" = "מסמן את הלוק שבווידג'ט כנלבש.";
 "widget_intent_param_date" = "תאריך";
 "widget_intent_param_look" = "לוק";
+"widget_another_look" = "לוק אחר";
+"widget_not_worn" = "לא היום";
+"widget_how_was_it" = "איך היה?";
+"widget_reaction_loved" = "אהבתי";
+"widget_reaction_too_cold" = "היה קר";
+"widget_reaction_too_warm" = "היה חם";
+"widget_intent_not_worn_title" = "לא היום";
+"widget_intent_next_look_title" = "לוק אחר";
+"widget_intent_tab_title" = "הצג לוק";
+"widget_intent_feedback_title" = "איך היה?";
+"widget_intent_param_feedback" = "תגובה";
