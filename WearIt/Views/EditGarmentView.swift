@@ -24,8 +24,10 @@ struct EditGarmentView: View {
     @State private var showLabelScanner = false
     @State private var isScanningLabel = false
     @State private var labelScanMessage: String?
-    @State private var showGalleryViewer = false
-    @State private var galleryStartIndex = 0
+    @State private var gallerySelection: GarmentGallerySelection?
+    @State private var isSavingPhoto = false
+    @State private var photoTask: Task<Void, Never>?
+    @State private var photoGeneration = UUID()
     @State private var heroImage: UIImage?
     @State private var isLoadingHero = false
 
@@ -48,7 +50,7 @@ struct EditGarmentView: View {
     }
 
     private var galleryImagePaths: [String] {
-        garment.additionalImagePaths ?? []
+        garment.galleryPhotoPaths
     }
 
     private var brandSuggestions: [Brand] {
@@ -125,11 +127,17 @@ struct EditGarmentView: View {
         .onAppear {
             brandText = garment.brand ?? ""
             BrandStore.syncFromGarments(context: context)
-            loadHeroImage()
             loadOccasionWearCounts()
+            prepareLegacyPrimaryIfNeeded()
         }
-        .onChange(of: garment.imagePath) { _, _ in
-            loadHeroImage()
+        .task(id: "\(garment.imagePath ?? "")|\(garment.thumbnailPath ?? "")") {
+            await loadHeroImage()
+        }
+        .onDisappear {
+            // Covers are part of this editor's workflow, not an abandoned edit.
+            if gallerySelection == nil, !showCropper, !showCamera, !showPhotoPicker, !showLabelScanner {
+                cancelPhotoWork()
+            }
         }
         .alert(String(localized: "edit_delete_title"), isPresented: $showDeleteAlert) {
             Button(String(localized: "action_cancel"), role: .cancel) {}
@@ -138,7 +146,7 @@ struct EditGarmentView: View {
             Text(String(localized: "edit_delete_message"))
         }
         .alert(String(localized: "error_title"), isPresented: Binding(
-            get: { errorMessage != nil },
+            get: { errorMessage != nil && gallerySelection == nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
             Button(String(localized: "action_confirm"), role: .cancel) {}
@@ -177,8 +185,14 @@ struct EditGarmentView: View {
                 )
             }
         }
-        .fullScreenCover(isPresented: $showGalleryViewer) {
-            GalleryViewer(imagePaths: galleryImagePaths, startIndex: galleryStartIndex)
+        .fullScreenCover(item: $gallerySelection) { selection in
+            GarmentPhotoViewer(
+                garment: garment, startPath: selection.id,
+                isBusy: $isSavingPhoto, errorMessage: $errorMessage,
+                onMakePrimary: makePrimaryPhoto,
+                onRoleChange: setPhotoRole,
+                onRemove: removeGalleryImage
+            )
         }
     }
 
@@ -196,6 +210,7 @@ struct EditGarmentView: View {
                     .frame(maxWidth: .infinity)
             }
             .dsPrimaryButton()
+            .disabled(isSavingPhoto)
             .padding(.horizontal, DS.Spacing.md)
             .padding(.top, DS.Spacing.sm)
             .padding(.bottom, DS.Spacing.md)
@@ -214,7 +229,7 @@ struct EditGarmentView: View {
                 if let heroImage {
                     Image(uiImage: heroImage)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
                         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
                         .clipped()
                 } else if isLoadingHero {
@@ -230,6 +245,17 @@ struct EditGarmentView: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let path = garment.imagePath {
+                    gallerySelection = GarmentGallerySelection(id: path)
+                }
+            }
+            .accessibilityAction(named: Text(String(localized: "garment_photo_open_hint"))) {
+                if let path = garment.imagePath {
+                    gallerySelection = GarmentGallerySelection(id: path)
+                }
+            }
             .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .frame(maxHeight: 280)
@@ -240,24 +266,22 @@ struct EditGarmentView: View {
             )
 
             if !galleryImagePaths.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: DS.Spacing.xs) {
-                        ForEach(Array(galleryImagePaths.enumerated()), id: \.offset) { index, path in
-                            AsyncGalleryThumb(path: path)
-                                .onTapGesture {
-                                    galleryStartIndex = index
-                                    showGalleryViewer = true
-                                }
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        removeGalleryImage(at: index)
-                                    } label: {
-                                        Label(String(localized: "action_remove_photo"), systemImage: "trash")
-                                    }
-                                }
-                        }
-                    }
+                GarmentPhotoGallery(
+                    garment: garment, isBusy: isSavingPhoto,
+                    onOpen: { gallerySelection = GarmentGallerySelection(id: $0) },
+                    onMakePrimary: makePrimaryPhoto,
+                    onRoleChange: setPhotoRole,
+                    onRemove: removeGalleryImage
+                )
+            }
+            if isSavingPhoto {
+                HStack(spacing: DS.Spacing.sm) {
+                    ProgressView()
+                    Text(String(localized: "add_garment_preparing_photo"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
 
             HStack(spacing: DS.Spacing.sm) {
@@ -320,6 +344,7 @@ struct EditGarmentView: View {
                 }
             }
             .foregroundStyle(.secondary)
+            .disabled(isSavingPhoto)
 
             titleEditor
         }
@@ -901,24 +926,19 @@ struct EditGarmentView: View {
 
     // MARK: - Image helpers
 
-    private func loadHeroImage() {
+    private func loadHeroImage() async {
         let path = garment.imagePath
         let data = garment.imageData
+        heroImage = nil
         isLoadingHero = true
-        Task(priority: .userInitiated) {
-            let loaded: UIImage? = await Task.detached(priority: .utility) {
-                if let path, let img = ImageStore.loadThumbnail(path: path, maxPixelSize: 900)
-                    ?? ImageStore.loadImage(path: path) {
-                    return img
-                }
-                if let data { return UIImage(data: data) }
-                return nil
-            }.value
-            await MainActor.run {
-                heroImage = loaded
-                isLoadingHero = false
-            }
-        }
+        let loaded: UIImage? = await Task.detached(priority: .utility) {
+            if let path { return ImageStore.loadThumbnail(path: path, maxPixelSize: 900) }
+            if let data { return ImageStore.downsample(data: data, maxPixelSize: 900) }
+            return nil
+        }.value
+        guard !Task.isCancelled else { return }
+        heroImage = loaded
+        isLoadingHero = false
     }
 
     private func selectCategory(_ cat: Category) {
@@ -945,19 +965,28 @@ struct EditGarmentView: View {
     }
 
     private func reopenCropperForExisting() {
-        Task {
-            let path = garment.originalImagePath ?? garment.imagePath
+        guard !isSavingPhoto else { return }
+        let generation = UUID()
+        photoGeneration = generation
+        isSavingPhoto = true
+        let path = garment.originalImagePath ?? garment.imagePath
+        let legacyData = garment.imageData
+        photoTask = Task { @MainActor in
+            defer { finishPhotoWork(generation: generation) }
             let loaded: UIImage? = await Task.detached(priority: .utility) {
-                if let path { return ImageStore.loadImage(path: path) }
+                if let path { return ImageStore.loadThumbnail(path: path, maxPixelSize: 2400) }
+                if let legacyData { return ImageStore.downsample(data: legacyData, maxPixelSize: 2400) }
                 return nil
             }.value
-            await MainActor.run {
-                guard let loaded else { return }
-                cropMode = .replaceMain
-                originalPickedImage = loaded
-                pendingCropImage = loaded
-                showCropper = true
+            guard !Task.isCancelled, photoGeneration == generation else { return }
+            guard let loaded else {
+                errorMessage = String(localized: "edit_image_save_failed")
+                return
             }
+            cropMode = .replaceMain
+            originalPickedImage = loaded
+            pendingCropImage = loaded
+            showCropper = true
         }
     }
 
@@ -966,92 +995,290 @@ struct EditGarmentView: View {
         case .replaceMain:
             persistMainImage(cropped, original: original)
         case .addGallery:
-            persistGalleryImage(cropped)
+            persistNewPhoto(cropped, original: original, makePrimary: false)
+        }
+    }
+
+    /// Snapshot only photo fields so a failed media save cannot discard unrelated edits.
+    private struct PhotoState {
+        let image: String?
+        let thumbnail: String?
+        let original: String?
+        let additional: [String]?
+        let metadata: String?
+        let legacyData: Data?
+        let files: Set<String>
+
+        init(_ garment: Garment) {
+            image = garment.imagePath
+            thumbnail = garment.thumbnailPath
+            original = garment.originalImagePath
+            additional = garment.additionalImagePaths
+            metadata = garment.photoMetadataRaw
+            legacyData = garment.imageData
+            files = garment.allPhotoFilePaths
+        }
+
+        func restore(on garment: Garment) {
+            garment.imagePath = image
+            garment.thumbnailPath = thumbnail
+            garment.originalImagePath = original
+            garment.additionalImagePaths = additional
+            garment.photoMetadataRaw = metadata
+            garment.imageData = legacyData
+        }
+    }
+
+    private func prepareLegacyPrimaryIfNeeded() {
+        guard garment.imagePath == nil, let data = garment.imageData, !isSavingPhoto else { return }
+        let generation = UUID()
+        photoGeneration = generation
+        isSavingPhoto = true
+        photoTask = Task { @MainActor in
+            defer { finishPhotoWork(generation: generation) }
+            do {
+                let files = try await GarmentImagePersistence.shared.persistLegacy(data)
+                guard !Task.isCancelled, photoGeneration == generation, garment.imagePath == nil else {
+                    await GarmentImagePersistence.shared.remove(paths: files.paths)
+                    return
+                }
+                let previous = PhotoState(garment)
+                garment.imagePath = files.image
+                garment.originalImagePath = files.original
+                garment.thumbnailPath = files.thumbnail
+                garment.imageData = nil
+                garment.setPhotoInfo(
+                    GarmentPhotoMetadata(originalPath: files.original, thumbnailPath: files.thumbnail), for: files.image
+                )
+                if !savePhotoChanges(previous) {
+                    await GarmentImagePersistence.shared.remove(paths: files.paths)
+                }
+            } catch {
+                guard !Task.isCancelled, photoGeneration == generation else { return }
+                errorMessage = String(localized: "edit_image_save_failed")
+            }
         }
     }
 
     private func persistMainImage(_ display: UIImage, original: UIImage) {
-        guard let jpeg = display.jpegData(compressionQuality: 0.9),
-              let imagePath = try? ImageStore.save(data: jpeg, preferredExt: "jpg") else {
-            errorMessage = String(localized: "edit_image_save_failed")
+        persistNewPhoto(display, original: original, makePrimary: true)
+    }
+
+    private func persistNewPhoto(_ display: UIImage, original: UIImage, makePrimary: Bool) {
+        guard !isSavingPhoto else { return }
+        let generation = UUID()
+        photoGeneration = generation
+        isSavingPhoto = true
+        photoTask = Task { @MainActor in
+            defer { finishPhotoWork(generation: generation) }
+            do {
+                let files = try await GarmentImagePersistence.shared.persist(display: display, original: original)
+                guard !Task.isCancelled, photoGeneration == generation else {
+                    await GarmentImagePersistence.shared.remove(paths: files.paths)
+                    return
+                }
+                let previous = PhotoState(garment)
+                let role = makePrimary ? garment.imagePath.map { garment.photoInfo(for: $0).role } ?? .other : .other
+                garment.rememberPrimaryPhoto()
+                var additional = garment.additionalImagePaths ?? []
+                if makePrimary || garment.imagePath == nil {
+                    // Keep the previous cover in the gallery, including its original crop source.
+                    if let old = garment.imagePath, !additional.contains(old) { additional.insert(old, at: 0) }
+                    garment.imagePath = files.image
+                    garment.thumbnailPath = files.thumbnail
+                    garment.originalImagePath = files.original
+                    garment.imageData = nil
+                } else {
+                    additional.append(files.image)
+                }
+                garment.additionalImagePaths = additional.isEmpty ? nil : additional
+                garment.setPhotoInfo(
+                    GarmentPhotoMetadata(role: role, originalPath: files.original, thumbnailPath: files.thumbnail),
+                    for: files.image
+                )
+                if !savePhotoChanges(previous) {
+                    await GarmentImagePersistence.shared.remove(paths: files.paths)
+                }
+            } catch {
+                guard !Task.isCancelled, photoGeneration == generation else { return }
+                errorMessage = String(localized: "edit_image_save_failed")
+            }
+        }
+    }
+
+    private func makePrimaryPhoto(_ path: String) {
+        guard !isSavingPhoto, path != garment.imagePath, galleryImagePaths.contains(path) else { return }
+        let generation = UUID()
+        photoGeneration = generation
+        isSavingPhoto = true
+        photoTask = Task { @MainActor in
+            defer { finishPhotoWork(generation: generation) }
+            do {
+                let thumbnail = try await GarmentImagePersistence.shared.prepareThumbnail(for: path)
+                guard !Task.isCancelled, photoGeneration == generation, galleryImagePaths.contains(path) else {
+                    await GarmentImagePersistence.shared.remove(paths: [thumbnail])
+                    return
+                }
+                let previous = PhotoState(garment)
+                garment.rememberPrimaryPhoto()
+                let info = garment.photoInfo(for: path)
+                let additional = galleryImagePaths.filter { $0 != path }
+                garment.imagePath = path
+                garment.thumbnailPath = thumbnail
+                garment.originalImagePath = info.originalPath ?? path
+                garment.imageData = nil
+                garment.additionalImagePaths = additional.isEmpty ? nil : additional
+                garment.setPhotoInfo(
+                    GarmentPhotoMetadata(role: info.role, originalPath: info.originalPath, thumbnailPath: thumbnail), for: path
+                )
+                if !savePhotoChanges(previous) {
+                    await GarmentImagePersistence.shared.remove(paths: [thumbnail])
+                }
+            } catch {
+                guard !Task.isCancelled, photoGeneration == generation else { return }
+                errorMessage = String(localized: "edit_image_save_failed")
+            }
+        }
+    }
+
+    private func setPhotoRole(_ path: String, role: GarmentPhotoRole) {
+        guard !isSavingPhoto, galleryImagePaths.contains(path) else { return }
+        let previous = PhotoState(garment)
+        var info = garment.photoInfo(for: path)
+        info.role = role
+        garment.setPhotoInfo(info, for: path)
+        _ = savePhotoChanges(previous)
+    }
+
+    private func removeGalleryImage(_ path: String) {
+        guard !isSavingPhoto, galleryImagePaths.contains(path) else { return }
+        let remaining = galleryImagePaths.filter { $0 != path }
+        guard path == garment.imagePath, let replacement = remaining.first else {
+            applyPhotoRemoval(path, replacement: nil, thumbnail: nil)
             return
         }
-        let thumb = ImageStore.generateAndSaveThumbnail(
-            for: imagePath,
-            maxPixelSize: ImageStore.thumbnailMaxPixelSize
-        )
-        var originalPath: String?
-        if let data = original.jpegData(compressionQuality: 0.85) {
-            originalPath = try? ImageStore.save(data: data, preferredExt: "jpg")
+        let generation = UUID()
+        photoGeneration = generation
+        isSavingPhoto = true
+        photoTask = Task { @MainActor in
+            defer { finishPhotoWork(generation: generation) }
+            do {
+                let thumbnail = try await GarmentImagePersistence.shared.prepareThumbnail(for: replacement)
+                guard !Task.isCancelled, photoGeneration == generation,
+                      garment.imagePath == path, galleryImagePaths.contains(replacement) else {
+                    await GarmentImagePersistence.shared.remove(paths: [thumbnail])
+                    return
+                }
+                if !applyPhotoRemoval(path, replacement: replacement, thumbnail: thumbnail) {
+                    await GarmentImagePersistence.shared.remove(paths: [thumbnail])
+                }
+            } catch {
+                guard !Task.isCancelled, photoGeneration == generation else { return }
+                errorMessage = String(localized: "edit_image_save_failed")
+            }
         }
-
-        garment.imagePath = imagePath
-        garment.thumbnailPath = thumb
-        garment.imageData = nil
-        if let originalPath {
-            garment.originalImagePath = originalPath
-        }
-        heroImage = display
-        CloudKitImageSyncService.shared.enqueueUpload(garmentID: garment.id, imagePath: imagePath)
-        hasUnsavedChanges = true
-        saveChanges(dismissAfter: false)
     }
 
-    private func persistGalleryImage(_ image: UIImage) {
-        guard let jpeg = image.jpegData(compressionQuality: 0.9),
-              let path = try? ImageStore.save(data: jpeg, preferredExt: "jpg") else { return }
-        var paths = garment.additionalImagePaths ?? []
-        paths.append(path)
-        garment.additionalImagePaths = paths
-        hasUnsavedChanges = true
-        saveChanges(dismissAfter: false)
+    @discardableResult
+    private func applyPhotoRemoval(_ path: String, replacement: String?, thumbnail: String?) -> Bool {
+        let previous = PhotoState(garment)
+        let replacementInfo = replacement.map { garment.photoInfo(for: $0) }
+        let primary = path == garment.imagePath ? replacement : garment.imagePath
+        let additional = galleryImagePaths.filter { $0 != path && $0 != primary }
+        garment.additionalImagePaths = additional.isEmpty ? nil : additional
+        if path == garment.imagePath {
+            garment.imagePath = replacement
+            garment.originalImagePath = replacementInfo?.originalPath ?? replacement
+            garment.thumbnailPath = thumbnail
+            garment.imageData = nil
+        }
+        var metadata = garment.photoMetadata
+        metadata.removeValue(forKey: path)
+        if let replacement, var info = replacementInfo {
+            info.thumbnailPath = thumbnail
+            metadata[replacement] = info
+        }
+        garment.photoMetadata = metadata
+        return savePhotoChanges(previous)
     }
 
-    private func removeGalleryImage(at index: Int) {
-        guard var paths = garment.additionalImagePaths, paths.indices.contains(index) else { return }
-        let removed = paths.remove(at: index)
-        garment.additionalImagePaths = paths.isEmpty ? nil : paths
-        ImageStore.delete(path: removed)
+    @discardableResult
+    private func savePhotoChanges(_ previous: PhotoState) -> Bool {
         hasUnsavedChanges = true
-        saveChanges(dismissAfter: false)
+        guard saveChanges(dismissAfter: false, notifyUpdate: false) else {
+            previous.restore(on: garment)
+            return false
+        }
+        if previous.image != garment.imagePath {
+            ImageStore.evictStoredThumbnail(cacheKey: garment.id.uuidString)
+            CloudKitImageSyncService.shared.enqueueUpload(garmentID: garment.id, imagePath: garment.imagePath)
+            WidgetSnapshotService.refresh(context: context)
+        }
+        NotificationCenter.default.post(name: .garmentUpdated, object: garment.id)
+        let unused = Array(previous.files.subtracting(garment.allPhotoFilePaths))
+        if !unused.isEmpty {
+            Task { await GarmentImagePersistence.shared.remove(paths: unused) }
+        }
+        return true
     }
 
     private func clearImage() {
-        garment.imagePath = nil
-        garment.thumbnailPath = nil
-        garment.imageData = nil
-        heroImage = nil
-        hasUnsavedChanges = true
+        if let path = garment.imagePath {
+            removeGalleryImage(path)
+        } else {
+            let previous = PhotoState(garment)
+            garment.imageData = nil
+            garment.originalImagePath = nil
+            garment.thumbnailPath = nil
+            _ = savePhotoChanges(previous)
+            heroImage = nil
+        }
     }
 
-    private func saveChanges(dismissAfter: Bool = true) {
+    private func finishPhotoWork(generation: UUID) {
+        guard photoGeneration == generation else { return }
+        isSavingPhoto = false
+        photoTask = nil
+    }
+
+    private func cancelPhotoWork() {
+        photoTask?.cancel()
+        photoTask = nil
+        photoGeneration = UUID()
+        isSavingPhoto = false
+    }
+
+    @discardableResult
+    private func saveChanges(dismissAfter: Bool = true, notifyUpdate: Bool = true) -> Bool {
         do {
             try context.save()
             if let trimmed = garment.brand, !trimmed.isEmpty {
                 BrandStore.upsert(name: trimmed, context: context)
             }
             hasUnsavedChanges = false
-            NotificationCenter.default.post(name: .garmentUpdated, object: garment.id)
+            if notifyUpdate {
+                NotificationCenter.default.post(name: .garmentUpdated, object: garment.id)
+            }
             if dismissAfter {
                 dismiss()
             }
+            return true
         } catch {
             errorMessage = String(
                 format: NSLocalizedString("add_garment_save_failed_format", comment: ""),
                 error.localizedDescription
             )
+            return false
         }
     }
 
     private func deleteItem() {
-        if let path = garment.imagePath { ImageStore.delete(path: path) }
-        if let originalPath = garment.originalImagePath { ImageStore.delete(path: originalPath) }
-        if let additional = garment.additionalImagePaths {
-            for path in additional { ImageStore.delete(path: path) }
-        }
+        cancelPhotoWork()
+        let photoPaths = Array(garment.allPhotoFilePaths)
         context.delete(garment)
         do {
             try context.save()
+            Task { await GarmentImagePersistence.shared.remove(paths: photoPaths) }
             NotificationCenter.default.post(name: .garmentDeleted, object: garment.id)
             dismiss()
         } catch {
@@ -1059,95 +1286,6 @@ struct EditGarmentView: View {
                 format: NSLocalizedString("add_garment_save_failed_format", comment: ""),
                 error.localizedDescription
             )
-        }
-    }
-}
-
-// MARK: - Lightweight gallery thumb (async decode)
-
-private struct AsyncGalleryThumb: View {
-    let path: String
-    @State private var image: UIImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.secondarySystemBackground).opacity(0.5))
-            }
-        }
-        .frame(width: 64, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .task(id: path) {
-            image = await Task.detached(priority: .utility) {
-                ImageStore.loadThumbnail(path: path, maxPixelSize: 180)
-                    ?? ImageStore.loadImage(path: path)
-            }.value
-        }
-    }
-}
-
-private struct GalleryViewer: View {
-    let imagePaths: [String]
-    let startIndex: Int
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var selection: Int
-
-    init(imagePaths: [String], startIndex: Int) {
-        self.imagePaths = imagePaths
-        self.startIndex = startIndex
-        _selection = State(initialValue: startIndex)
-    }
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.black.ignoresSafeArea()
-
-            TabView(selection: $selection) {
-                ForEach(Array(imagePaths.enumerated()), id: \.offset) { index, path in
-                    GalleryFullImage(path: path)
-                        .tag(index)
-                        .padding()
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .padding()
-            }
-        }
-    }
-}
-
-private struct GalleryFullImage: View {
-    let path: String
-    @State private var image: UIImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                ProgressView().tint(.white)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: path) {
-            image = await Task.detached(priority: .utility) {
-                ImageStore.loadImage(path: path)
-            }.value
         }
     }
 }

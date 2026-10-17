@@ -92,14 +92,16 @@ enum AccountDataService {
 
         let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
         var photoNames: [UUID: [String]] = [:]
+        var photoFilesByPath: [UUID: [String: String]] = [:]
         for garment in garments {
-            let paths = [garment.imagePath].compactMap { $0 } + (garment.additionalImagePaths ?? [])
+            let paths = garment.galleryPhotoPaths
             for (index, path) in paths.enumerated() {
                 guard let source = ImageStore.fileURL(path: path) else { continue }
                 let ext = source.pathExtension.isEmpty ? "jpg" : source.pathExtension
                 let name = "\(garment.id.uuidString)-\(index + 1).\(ext)"
                 if (try? fileManager.copyItem(at: source, to: photos.appendingPathComponent(name))) != nil {
                     photoNames[garment.id, default: []].append(name)
+                    photoFilesByPath[garment.id, default: [:]][path] = name
                 }
             }
         }
@@ -118,7 +120,9 @@ enum AccountDataService {
             "exportedAt": iso(Date()),
             "app": "WearIt",
             "profile": profileJSON(CurrentUser.activeProfile(in: context, createIfNeeded: false)),
-            "garments": garments.map { garmentJSON($0, photos: photoNames[$0.id] ?? []) },
+            "garments": garments.map {
+                garmentJSON($0, photos: photoNames[$0.id] ?? [], photoFiles: photoFilesByPath[$0.id] ?? [:])
+            },
             "dayPlans": ((try? context.fetch(FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(dayPlanJSON),
             "wearHistory": ((try? context.fetch(FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(wearEventJSON),
             "lookPosts": posts.map { lookPostJSON($0, photo: postPhotoNames[$0.id]) }
@@ -173,7 +177,9 @@ enum AccountDataService {
         return json
     }
 
-    private static func garmentJSON(_ garment: Garment, photos: [String]) -> [String: Any] {
+    private static func garmentJSON(
+        _ garment: Garment, photos: [String], photoFiles: [String: String]
+    ) -> [String: Any] {
         var json: [String: Any] = [
             "id": garment.id.uuidString,
             "title": garment.displayTitle,
@@ -185,6 +191,15 @@ enum AccountDataService {
             "timesWorn": garment.timesWorn,
             "photos": photos
         ]
+        json["primaryPhoto"] = garment.imagePath.flatMap { photoFiles[$0] }
+        json["photoDetails"] = garment.galleryPhotoPaths.compactMap { path -> [String: Any]? in
+            guard let file = photoFiles[path] else { return nil }
+            return [
+                "file": file,
+                "role": garment.photoInfo(for: path).role.rawValue,
+                "isPrimary": path == garment.imagePath
+            ]
+        }
         json["itemType"] = garment.itemType?.rawValue
         json["brand"] = garment.brand
         json["size"] = garment.sizeOption?.rawValue

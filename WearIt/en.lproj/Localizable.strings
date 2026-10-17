@@ -1267,3 +1267,30 @@
 "shop_reason_size_format" = "In stock in your size (%@)";
 "shop_reason_already_have_format" = "You already have %1$d like this (%2$@)";
 "planner_gap_shop" = "See shop picks for this";
+
+/* Background garment image persistence */
+"add_garment_preparing_photo" = "Preparing photo…";
+"add_garment_saving" = "Saving…";
+"add_garment_retry_photo" = "Try saving the photo again";
+"add_garment_batch_partial_failure" = "Some items couldn't be saved. They are still here so you can try again.";
+
+/* Garment photo gallery */
+"garment_photo_gallery_title" = "Photo gallery";
+"garment_photo_gallery_hint" = "Choose the wardrobe photo and label each view. The star marks the main photo.";
+"garment_photo_primary" = "Main photo";
+"garment_photo_additional" = "Additional photo";
+"garment_photo_make_primary" = "Use as main photo";
+"garment_photo_role_title" = "Photo view";
+"garment_photo_actions" = "Photo options";
+"garment_photo_open_hint" = "Open full-screen gallery";
+"garment_photo_unavailable" = "Photo unavailable on this device";
+"garment_photo_role_other" = "Choose a view";
+"garment_photo_role_front" = "Front";
+"garment_photo_role_back" = "Back";
+"garment_photo_role_side" = "Side";
+"garment_photo_role_inside" = "Inside";
+"garment_photo_role_sole" = "Sole";
+"garment_photo_role_detail" = "Detail";
+"garment_photo_role_label" = "Label";
+"garment_photo_role_on_body" = "Worn";
+"garment_photo_role_clasp" = "Clasp or buckle";
