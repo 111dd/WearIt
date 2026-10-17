@@ -264,7 +264,7 @@ struct LookPostDetailView: View {
             DSSectionHeader(String(localized: "look_post_items_title"), icon: "tag")
             ForEach(garments) { garment in
                 HStack(spacing: DS.Spacing.sm) {
-                    DSGarmentThumbnail(garment: garment, size: .small)
+                    DSGarmentThumbnail(garment, size: .small)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(garment.name)
                             .font(.subheadline.weight(.medium))
