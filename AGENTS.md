@@ -80,7 +80,12 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 - Privacy policy: in-app `PrivacyPolicyView` from `privacy_*` strings; the public copy is `docs/privacy-policy.html`
   (GitHub Pages from `main` /docs, `https://111dd.github.io/WearIt/privacy-policy.html`). After editing a `privacy_*`
   string run `python3 scripts/make_privacy_page.py`.
-- No CI, no third-party packages (Mantis cropper has a stub fallback).
+- No CI (the one GitHub Action, `.github/workflows/catalog.yml`, is the nightly shop catalog, not a build), no third-party packages (Mantis cropper has a stub fallback).
+- Shop catalog (`plans/shopping-israel.md` in the project): `scripts/catalog/build_catalog.py` (stdlib Python) reads each
+  store in `scripts/catalog/stores.json` (per country, IL first: Terminal X, Castro) through robots.txt → sitemaps → JSON-LD
+  Product/ProductGroup + Open Graph, or `/products.json` for Shopify. It stores raw fields only; the app maps them through
+  `ProductPageMetadataService.makeProduct` / `ProductFieldMapper`. Published nightly to the `catalog-data` branch
+  (`https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/catalog.json`, plus `il/report.json`).
 
 ## Architecture facts
 
@@ -173,6 +178,7 @@ worn" App Intent, App Shortcuts (`WearItAppIntents.swift`), local notifications.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-17 · Claude Code · Shop catalog step 1 (`plans/shopping-israel.md`): nightly GitHub Action builds an Israeli product catalog (Terminal X + Castro pilot) from sitemaps and product-page JSON-LD, incremental, robots-aware, published to the `catalog-data` branch. The app doesn't read it yet.
 - 2026-10-07 · Claude Code · Design review (project `audits/design-review.md`) phase 1, bugs + speed: clear day persists, per-day `WearEvent` predicate fetch, wardrobe wear map / daily question built once per rebuild, calendar swipes on `HorizontalSwipeGesture`, journal notes keep their day, pushed screens keep their nav bar (`compactNavBar()`), sign-in banner no longer covers the toolbar, remaining English strings localized, localized planner dates.
 - 2026-10-07 · Claude Code · Xcode Cloud / TestFlight: the app's Info.plist was tracked as lowercase `info.plist` while the project and its synchronized-group exception say `Info.plist` (fresh clones then copy it into the bundle as a resource); renamed. `ITSAppUsesNonExemptEncryption = NO` so TestFlight builds skip the export-compliance question.
 - 2026-10-07 · Claude Code · Real profile + users step 3: `UserProfile.username` (`UsernameRules`, local until sharing has a server) and `birthday`; "Edit profile" sheet (`Views/EditProfileView`: name, @username, bio, private email/phone/birthday); username in the intro. Settings > Your data: privacy policy (`Views/PrivacyPolicyView`, published from `docs/privacy-policy.html` via GitHub Pages, built by `scripts/make_privacy_page.py`), export to zip (`Services/AccountDataService`), delete all my data (store rows, iCloud photos, local files, defaults, sign-in). `PrivacyInfo.xcprivacy` for app + widget; sign-in screen localized and no longer claims sign-in is what syncs.

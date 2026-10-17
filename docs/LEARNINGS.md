@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Shop catalog crawler
+- **Did:** `scripts/catalog/build_catalog.py` + `.github/workflows/catalog.yml` publish `il/catalog.json` on the `catalog-data` branch.
+- **Why:** personalized purchase suggestions need a product source; no server yet, so GitHub Actions + a data branch.
+- **Watch:** Claude's cloud container can't reach the shop sites (proxy 403), so tune `stores.json` from `il/report.json` after a real run. "sitemap" contains "item": match product sitemaps on the file name without it. Keep mapping to the taxonomy in the app, not in the crawler.
+
 ## 2026-10-07 — Design review phase 1: bugs and speed
 - **Did:** "Clear day" now persists; `WearEventStore` fetches one day by `#Predicate` instead of the whole table; wardrobe builds the wear map and its daily question once per rebuild; calendar day/period swipes use `HorizontalSwipeGesture` (which now ignores touches inside nested horizontal scroll views); journal notes save to the day they were typed on and commit on disappear; pushed screens use `compactNavBar()` so their back button never hides; sign-in banner is a `safeAreaInset`; leftover English strings localized. Full review: project `audits/design-review.md`.
 - **Why:** the planner fetched every `WearEvent` three times per redraw, cleared looks came back on the next hydrate, and the card `.id(selectedDay)` dropped a note being typed when the user swiped.
