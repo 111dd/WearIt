@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-17 — Interactive widget (↻, tabs, ✓/✕, reactions)
+- **Did:** the planner precomputes two alternative day looks for today and tomorrow (memoized by look + forecast) into the snapshot; widget intents for next look, tab, not worn and reaction. `chooseLook` / `notWorn` / `confirmWorn` are applied to `DayPlan` in `consumeIfNeeded` in tap order (so "worn" after ↻ records the picked garments); reactions are handed to the planner (`.widgetFeedbackPending`) so `submitFeedback` / `submitTemperatureFeedback` do the learning. Any outside change posts `.dayPlanChangedOutside` and the planner re-applies that day's plan.
+- **Why:** dor asked for a more interactive widget.
+- **Watch:** the widget's own UI state lives in `widgetUIStateV1` (not the snapshot) because the app rewrites the snapshot; the shown look is matched by garment IDs, so after the app applies a pick it lines up with option 0 again.
+
 ## 2026-10-17 — Look photos are LookPosts
 - **Did:** added `LookPost` + `LookPostStore` + `LookPhotoProcessor`; profile grid, "Snap the look", calendar day photos all read/write posts.
 - **Why:** `DailyLook.photoPaths` were local files only (never reached other devices) and had no room for caption, visibility or tags needed for the social phase.

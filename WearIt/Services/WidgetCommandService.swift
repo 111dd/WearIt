@@ -4,6 +4,15 @@ import SwiftData
 // Shared with the widget: keep in sync with `WearItWidget/WidgetShared.swift`.
 struct WidgetCommand: Codable, Sendable {
     static let confirmWorn = "confirmWorn"
+    static let notWorn = "notWorn"
+    /// The user picked another of the prepared looks (`slots`: slot rawValue → garment UUID).
+    static let chooseLook = "chooseLook"
+    /// A reaction after wearing (`value`: `feedbackLoved` / `feedbackTooCold` / `feedbackTooWarm`).
+    static let feedback = "feedback"
+    static let feedbackLoved = "loved"
+    static let feedbackTooCold = "tooCold"
+    static let feedbackTooWarm = "tooWarm"
+
     static let queueKey = "widgetCommandsV2"
     /// Single command written by older builds; still read once.
     static let legacyKey = "widgetCommand"
@@ -12,12 +21,17 @@ struct WidgetCommand: Codable, Sendable {
     let date: String
     /// `WidgetLook.kindDay` / `kindEvening`. Missing in legacy commands (= day).
     var look: String?
+    var slots: [String: String]? = nil
+    var value: String? = nil
     let timestamp: Date
 
     var lookKind: String { look ?? WidgetLook.kindDay }
 }
 
 enum WidgetCommandService {
+    /// Reactions waiting for the planner, which owns the learning behind them.
+    private static let plannerFeedbackKey = "widget.pendingPlannerFeedback"
+
     /// Queues "mark today's look worn" for the app to apply (App Shortcut path).
     static func enqueueConfirmWorn(for date: Date) {
         append(WidgetCommand(
@@ -28,36 +42,63 @@ enum WidgetCommandService {
         ))
     }
 
-    /// Commands written by the widget that the app has not applied yet.
+    /// Commands written by the widget that the app has not applied yet, plus reactions
+    /// already taken from the widget but not yet learned by the planner.
     static func pendingCommands() -> [WidgetCommand] {
-        guard let defaults = UserDefaults(suiteName: WidgetSnapshotService.appGroupID) else { return [] }
-        var commands: [WidgetCommand] = []
-        if let data = defaults.data(forKey: WidgetCommand.queueKey),
-           let queued = try? JSONDecoder().decode([WidgetCommand].self, from: data) {
-            commands = queued
-        }
-        if let data = defaults.data(forKey: WidgetCommand.legacyKey),
+        var commands = decodeQueue(UserDefaults(suiteName: WidgetSnapshotService.appGroupID), key: WidgetCommand.queueKey)
+        if let data = UserDefaults(suiteName: WidgetSnapshotService.appGroupID)?.data(forKey: WidgetCommand.legacyKey),
            let legacy = try? JSONDecoder().decode(WidgetCommand.self, from: data) {
             commands.append(legacy)
         }
+        commands += decodeQueue(.standard, key: plannerFeedbackKey)
         return commands
     }
 
     /// Applies every queued widget tap (oldest first), then rebuilds the widget, so it
     /// also catches up after midnight or a sync from another device. Runs on app activation.
     @MainActor static func consumeIfNeeded(context: ModelContext) {
-        let commands = pendingCommands().sorted { $0.timestamp < $1.timestamp }
+        let shared = UserDefaults(suiteName: WidgetSnapshotService.appGroupID)
+        var commands = decodeQueue(shared, key: WidgetCommand.queueKey)
+        if let data = shared?.data(forKey: WidgetCommand.legacyKey),
+           let legacy = try? JSONDecoder().decode(WidgetCommand.self, from: data) {
+            commands.append(legacy)
+        }
+        shared?.removeObject(forKey: WidgetCommand.queueKey)
+        shared?.removeObject(forKey: WidgetCommand.legacyKey)
 
-        for command in commands where command.type == WidgetCommand.confirmWorn {
+        var plannerFeedback: [WidgetCommand] = []
+        for command in commands.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard let date = DateFormatter.widgetDate.date(from: command.date) else { continue }
-            markWorn(date: date, isEvening: command.lookKind == WidgetLook.kindEvening, context: context, refreshWidget: false)
+            let isEvening = command.lookKind == WidgetLook.kindEvening
+            switch command.type {
+            case WidgetCommand.confirmWorn:
+                markWorn(date: date, isEvening: isEvening, context: context, refreshWidget: false)
+            case WidgetCommand.notWorn:
+                markNotWorn(date: date, isEvening: isEvening, context: context)
+            case WidgetCommand.chooseLook:
+                chooseLook(date: date, slots: command.slots ?? [:], context: context)
+            case WidgetCommand.feedback:
+                plannerFeedback.append(command)
+            default:
+                break
+            }
         }
 
-        if let defaults = UserDefaults(suiteName: WidgetSnapshotService.appGroupID) {
-            defaults.removeObject(forKey: WidgetCommand.queueKey)
-            defaults.removeObject(forKey: WidgetCommand.legacyKey)
+        if !plannerFeedback.isEmpty {
+            let stored = decodeQueue(.standard, key: plannerFeedbackKey) + plannerFeedback
+            if let data = try? JSONEncoder().encode(stored) {
+                UserDefaults.standard.set(data, forKey: plannerFeedbackKey)
+            }
+            NotificationCenter.default.post(name: .widgetFeedbackPending, object: nil)
         }
         WidgetSnapshotService.refresh(context: context)
+    }
+
+    /// Hands the queued reactions to the planner (which applies its own learning) and clears them.
+    static func takePlannerFeedback() -> [WidgetCommand] {
+        let feedback = decodeQueue(.standard, key: plannerFeedbackKey)
+        UserDefaults.standard.removeObject(forKey: plannerFeedbackKey)
+        return feedback
     }
 
     /// Marks a day's day or evening look worn through `LookWearStatus`, records the
@@ -91,11 +132,7 @@ enum WidgetCommandService {
                 loveScoreDelta: 1
             )
             try? context.save()
-            NotificationCenter.default.post(
-                name: .lookMarkedWornOutside,
-                object: nil,
-                userInfo: ["date": day, "isEvening": isEvening]
-            )
+            postDayChanged(day)
         }
 
         if refreshWidget {
@@ -103,14 +140,59 @@ enum WidgetCommandService {
         }
     }
 
+    /// Same as the planner's "not worn": status only, no history or learning.
+    @MainActor private static func markNotWorn(date: Date, isEvening: Bool, context: ModelContext) {
+        let day = Calendar.current.startOfDay(for: date)
+        let plan = DayPlanService.shared.planFor(date: day, context: context)
+        let current = isEvening ? plan.eveningLookWearStatus : plan.resolvedDayLookWearStatus
+        // A look already confirmed worn is undone in the planner, not from the widget.
+        guard current != .worn, current != .notWorn else { return }
+        if isEvening {
+            plan.applyEveningLookWearStatus(.notWorn)
+        } else {
+            plan.applyDayLookWearStatus(.notWorn)
+        }
+        try? context.save()
+        postDayChanged(day)
+    }
+
+    /// Puts one of the widget's prepared looks on the day, keeping locked slots.
+    /// Neutral like the planner's swipe-to-replace: no taste or feedback signal.
+    @MainActor private static func chooseLook(date: Date, slots: [String: String], context: ModelContext) {
+        let day = Calendar.current.startOfDay(for: date)
+        let plan = DayPlanService.shared.planFor(date: day, context: context)
+        guard plan.resolvedDayLookWearStatus != .worn else { return }
+        let chosen: [OutfitSlot: UUID] = slots.reduce(into: [:]) { result, pair in
+            if let slot = OutfitSlot(rawValue: pair.key), let id = UUID(uuidString: pair.value) {
+                result[slot] = id
+            }
+        }
+        guard !chosen.isEmpty else { return }
+        let current = plan.slotAssignments
+        let locked = plan.lockedSlots
+        var assignments: [OutfitSlot: UUID?] = [:]
+        for slot in OutfitSlot.allCases {
+            assignments[slot] = locked.contains(slot) ? current[slot] : chosen[slot]
+        }
+        guard assignments.compactMapValues({ $0 }) != current else { return }
+        plan.setSlotAssignments(assignments, lockedSlots: locked)
+        try? context.save()
+        postDayChanged(day)
+    }
+
+    @MainActor private static func postDayChanged(_ day: Date) {
+        NotificationCenter.default.post(name: .dayPlanChangedOutside, object: nil, userInfo: ["date": day])
+    }
+
+    private static func decodeQueue(_ defaults: UserDefaults?, key: String) -> [WidgetCommand] {
+        guard let data = defaults?.data(forKey: key),
+              let queue = try? JSONDecoder().decode([WidgetCommand].self, from: data) else { return [] }
+        return queue
+    }
+
     private static func append(_ command: WidgetCommand) {
         guard let defaults = UserDefaults(suiteName: WidgetSnapshotService.appGroupID) else { return }
-        var queue: [WidgetCommand] = []
-        if let data = defaults.data(forKey: WidgetCommand.queueKey),
-           let decoded = try? JSONDecoder().decode([WidgetCommand].self, from: data) {
-            queue = decoded
-        }
-        queue.append(command)
+        let queue = decodeQueue(defaults, key: WidgetCommand.queueKey) + [command]
         if let data = try? JSONEncoder().encode(queue) {
             defaults.set(data, forKey: WidgetCommand.queueKey)
         }

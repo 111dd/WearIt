@@ -24,6 +24,10 @@ struct WidgetLook: Codable {
     let rainChance: Double?    // 0...1
     var reason: String?
     let items: [WidgetLookItem]
+    /// Other ready looks for ↻ (day looks only).
+    var options: [[WidgetLookItem]]? = nil
+    /// Non-nil once the user reacted: stop asking "how was it?".
+    var reaction: String? = nil
 
     var isWorn: Bool { status == "worn" }
     var isNotWorn: Bool { status == "notWorn" }
@@ -43,12 +47,65 @@ struct WidgetSnapshot: Codable {
 
 struct WidgetCommand: Codable {
     static let confirmWorn = "confirmWorn"
+    static let notWorn = "notWorn"
+    static let chooseLook = "chooseLook"
+    static let feedback = "feedback"
+    static let feedbackLoved = "loved"
+    static let feedbackTooCold = "tooCold"
+    static let feedbackTooWarm = "tooWarm"
     static let queueKey = "widgetCommandsV2"
 
     let type: String
     let date: String
     var look: String?
+    var slots: [String: String]? = nil
+    var value: String? = nil
     let timestamp: Date
+}
+
+/// What the widget itself is showing (tab, which ready look). Widget-only and reset each
+/// day, so the app's snapshot writes never clobber it.
+struct WidgetUIState: Codable {
+    static let key = "widgetUIStateV1"
+
+    var day: String
+    /// `WidgetLookRole` raw value the user picked with a tab.
+    var tab: String?
+    /// "date|kind" → garment IDs of the look shown after ↻.
+    var shown: [String: [String]] = [:]
+
+    static func load(today: String) -> WidgetUIState {
+        guard let data = UserDefaults(suiteName: WidgetSnapshotReader.appGroupID)?.data(forKey: key),
+              let state = try? JSONDecoder().decode(WidgetUIState.self, from: data),
+              state.day == today else {
+            return WidgetUIState(day: today)
+        }
+        return state
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults(suiteName: WidgetSnapshotReader.appGroupID)?.set(data, forKey: Self.key)
+        }
+    }
+
+    static func lookKey(_ look: WidgetLook) -> String { "\(look.date)|\(look.kind)" }
+}
+
+extension WidgetLook {
+    /// The current look first, then the ready alternatives.
+    var allOptions: [[WidgetLookItem]] { [items] + (options ?? []) }
+
+    /// Which option the widget shows: the one picked with ↻, else the current look.
+    func shownIndex(in state: WidgetUIState) -> Int {
+        guard let ids = state.shown[WidgetUIState.lookKey(self)] else { return 0 }
+        let wanted = Set(ids)
+        return allOptions.firstIndex { Set($0.map(\.garmentID)) == wanted } ?? 0
+    }
+
+    func shownItems(in state: WidgetUIState) -> [WidgetLookItem] {
+        allOptions[shownIndex(in: state)]
+    }
 }
 
 enum WidgetSnapshotReader {

@@ -38,6 +38,8 @@ struct OutfitPlannerView: View {
     @State private var quickSwapTarget: SlotTarget?
     @AppStorage("plannerGestureHintSeen") private var gestureHintSeen = false
     @State private var lastForecastSignature: String = ""
+    /// Ready alternatives for the widget's ↻, keyed by day + current look + forecast.
+    @State private var widgetAlternativesMemo: [String: [[OutfitSlot: UUID]]] = [:]
     @State private var expandedDayDetails: Set<Int> = []
     @State private var selectedDayIndex: Int = 0
     @State private var availableGarmentsCache: [Garment] = []
@@ -240,16 +242,17 @@ struct OutfitPlannerView: View {
         .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
             confirmWorn(dayIndex: 0)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .lookMarkedWornOutside)) { notification in
-            // Already saved by the widget / notification path; keep the board in step.
+        .onReceive(NotificationCenter.default.publisher(for: .dayPlanChangedOutside)) { notification in
+            // Already saved by the widget / notification path; reload that day so the
+            // board (and its next save) matches the store.
             guard let date = notification.userInfo?["date"] as? Date,
                   let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
             else { return }
-            if notification.userInfo?["isEvening"] as? Bool == true {
-                boardState.days[index].eveningLookWearStatus = .worn
-            } else {
-                boardState.days[index].dayLookWearStatus = .worn
-            }
+            var usedIDs: Set<UUID> = []
+            applyPlan(DayPlanService.shared.planFor(date: date, context: context), dayIndex: index, usedIDs: &usedIDs)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .widgetFeedbackPending)) { _ in
+            applyWidgetFeedback()
         }
         .onReceive(NotificationCenter.default.publisher(for: .openPlannerDay)) { notification in
             guard let date = notification.userInfo?["date"] as? Date,
@@ -457,6 +460,7 @@ struct OutfitPlannerView: View {
         defer { signposter.endInterval("planner-restore", interval) }
         boardState.initializeDays()
         hydrateFromPlans()
+        applyWidgetFeedback()
         updateAvailableGarments()
         refreshAffinityCaches()
         refreshCurrentDate()
@@ -5313,18 +5317,93 @@ struct OutfitPlannerView: View {
         let today = calendar.startOfDay(for: Date())
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today
         var reasons: [Date: String] = [:]
+        var alternatives: [Date: [[OutfitSlot: UUID]]] = [:]
         for index in boardState.days.indices where isWidgetDay(boardState.days[index].date) {
+            let day = calendar.startOfDay(for: boardState.days[index].date)
             if let reason = lookReasons(for: index).first {
-                reasons[calendar.startOfDay(for: boardState.days[index].date)] = reasonText(reason)
+                reasons[day] = reasonText(reason)
             }
+            alternatives[day] = widgetAlternatives(for: index)
         }
         WidgetSnapshotService.saveSnapshot(
             plans: DayPlanService.shared.plans(from: today, to: tomorrow, context: context),
             garments: allGarments,
             forecasts: weather.forecasts,
             locationName: weather.locationName,
-            dayReasons: reasons
+            dayReasons: reasons,
+            dayAlternatives: alternatives
         )
+    }
+
+    /// Up to two other day looks for the widget's ↻, ranked by the same model as the board
+    /// and keeping locked items. Memoized: only recomputed when the look or forecast changes.
+    private func widgetAlternatives(for dayIndex: Int) -> [[OutfitSlot: UUID]] {
+        guard dayIndex < boardState.days.count else { return [] }
+        let day = boardState.days[dayIndex]
+        let current: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
+            if let id = day.garmentID(for: slot) { result[slot] = id }
+        }
+        guard !current.isEmpty, day.dayLookWearStatus != .worn else { return [] }
+
+        let key = [
+            String(day.date.timeIntervalSince1970),
+            OutfitSlot.allCases.map { current[$0]?.uuidString ?? "-" }.joined(separator: ","),
+            forecastKey(for: day.forecast),
+            availableGarmentsSignature
+        ].joined(separator: "#")
+        if let cached = widgetAlternativesMemo[key] { return cached }
+
+        let locked: [OutfitSlot: UUID] = current.filter { day.isLocked($0.key) }
+        let crossDay = crossDayExclusions(excludingDay: dayIndex)
+        let ctx = recoContext(for: dayIndex)
+        let lockedCats = lockedCategories(for: dayIndex, lookTime: .day)
+        let pool = recommendedPool(referenceDate: day.date, ctx: ctx)
+            .filter { !lockedCats.contains($0.category) }
+        let ranked = AIRecommender.shared.rankLooks(
+            from: pool,
+            ctx: ctx,
+            modelContext: context,
+            excludedIDs: crossDay.hard.union(locked.values),
+            penalizedIDs: crossDay.soft,
+            limit: 6
+        )
+
+        var seen: Set<Set<UUID>> = [Set(current.values)]
+        var result: [[OutfitSlot: UUID]] = []
+        for look in ranked {
+            var assignment = locked
+            for garment in look.garments {
+                let slot = OutfitSlot.from(category: garment.category)
+                if assignment[slot] == nil { assignment[slot] = garment.id }
+            }
+            let ids = Set(assignment.values)
+            guard !seen.contains(ids) else { continue }
+            seen.insert(ids)
+            result.append(assignment)
+            if result.count == 2 { break }
+        }
+        if widgetAlternativesMemo.count > 8 { widgetAlternativesMemo.removeAll() }
+        widgetAlternativesMemo[key] = result
+        return result
+    }
+
+    /// Reactions given in the widget (😍🥶🥵), applied with the planner's own learning.
+    private func applyWidgetFeedback() {
+        for command in WidgetCommandService.takePlannerFeedback() {
+            guard let date = DateFormatter.widgetDate.date(from: command.date),
+                  let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
+            else { continue }
+            switch command.value {
+            case WidgetCommand.feedbackLoved:
+                submitFeedback(for: index, rating: .loved)
+            case WidgetCommand.feedbackTooCold:
+                submitTemperatureFeedback(for: index, feedback: .tooCold)
+            case WidgetCommand.feedbackTooWarm:
+                submitTemperatureFeedback(for: index, feedback: .tooWarm)
+            default:
+                break
+            }
+        }
     }
 
     private func persistPlans(for indices: [Int], immediate: Bool = false) {

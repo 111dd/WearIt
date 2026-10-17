@@ -13,3 +13,14 @@
 "widget_intent_confirm_description" = "Marks the look shown in the widget as worn.";
 "widget_intent_param_date" = "Date";
 "widget_intent_param_look" = "Look";
+"widget_another_look" = "Another look";
+"widget_not_worn" = "Not today";
+"widget_how_was_it" = "How was it?";
+"widget_reaction_loved" = "Loved it";
+"widget_reaction_too_cold" = "Too cold";
+"widget_reaction_too_warm" = "Too warm";
+"widget_intent_not_worn_title" = "Not today";
+"widget_intent_next_look_title" = "Another look";
+"widget_intent_tab_title" = "Show look";
+"widget_intent_feedback_title" = "How was it?";
+"widget_intent_param_feedback" = "Reaction";
