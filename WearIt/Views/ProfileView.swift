@@ -31,6 +31,7 @@ struct ProfileView: View {
     @State private var showAvatarPicker = false
     @State private var showStyleSwipe = false
     @State private var showLookCapture = false
+    @State private var shoppingPreferencesProfile: UserProfile?
     @Namespace private var lookTransition
 
     init() {
@@ -63,6 +64,7 @@ struct ProfileView: View {
                 formulasSection
                 styleSwipeRow
                 mySizesRow
+                shoppingPreferencesRow
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.top, DS.Spacing.sm)
@@ -116,6 +118,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showLookCapture) {
             LookCaptureView(lookDate: Date())
+        }
+        .sheet(item: $shoppingPreferencesProfile) { profile in
+            ShoppingPreferencesView(profile: profile)
         }
     }
 
@@ -239,7 +244,7 @@ struct ProfileView: View {
                 profileStat(value: "\(wearStreak)", title: String(localized: "profile_stat_streak"))
             }
             .padding(.vertical, DS.Spacing.sm)
-            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+            .contentSurface()
         }
         .buttonStyle(.plain)
         .accessibilityHint(String(localized: "stats_title"))
@@ -323,7 +328,7 @@ struct ProfileView: View {
                 }
             }
             .padding(DS.Spacing.sm)
-            .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+            .contentSurface()
         }
     }
 
@@ -363,7 +368,7 @@ struct ProfileView: View {
             }
             .padding(DS.Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+            .contentSurface()
         }
     }
 
@@ -397,7 +402,7 @@ struct ProfileView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+        .contentSurface()
     }
 
     // MARK: - My Sizes
@@ -431,7 +436,38 @@ struct ProfileView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .liquidGlassSurface(cornerRadius: DS.Radius.card, tint: Color(.systemBackground).opacity(0.35), castsShadow: true)
+            .contentSurface()
+        }
+    }
+
+    @ViewBuilder
+    private var shoppingPreferencesRow: some View {
+        if let profile = activeProfile {
+            Button {
+                shoppingPreferencesProfile = profile
+            } label: {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: "bag")
+                        .font(.title3)
+                        .foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "shop_preferences_title"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text(String(localized: "shop_preferences_row_detail"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.forward")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(DS.Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .contentSurface()
         }
     }
 

@@ -98,6 +98,8 @@ struct AddGarmentView: View {
     @State private var originalPickedImage: UIImage?
     @State private var pendingCropImage: UIImage?
     @State private var showCropper = false
+    @State private var showSubjectPicker = false
+    @State private var photoPreview: UIImage?
     @State private var savedImagePath: String?
     @State private var savedThumbnailPath: String?
     @State private var savedOriginalImagePath: String?
@@ -315,6 +317,19 @@ struct AddGarmentView: View {
                     )
                 }
             }
+            .fullScreenCover(isPresented: $showSubjectPicker) {
+                GarmentSubjectPicker(image: originalPickedImage ?? selectedImage, category: category ?? .top) { cutout, original in
+                    // An explicit selection must not be replaced by another automatic cutout.
+                    aiGeneration = UUID()
+                    isAnalyzing = false
+                    isRefining = false
+                    cutoutSuggestion = nil
+                    selectedImage = cutout
+                    photoPreview = cutout
+                    originalPickedImage = original
+                    persistDisplayImage(cutout, original: original)
+                }
+            }
             .onAppear {
                 BrandStore.syncFromGarments(context: context)
                 // Recreate uncommitted files after returning from another tab or cover.
@@ -327,7 +342,7 @@ struct AddGarmentView: View {
                 }
             }
             .onDisappear {
-                cancelPendingMediaWork()
+                if !showSubjectPicker { cancelPendingMediaWork() }
             }
         }
     }
@@ -699,7 +714,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private func detectedRow(
@@ -975,7 +990,7 @@ struct AddGarmentView: View {
             .disabled(item.status == .processing || isSavingBatch)
         }
         .padding(DS.Spacing.xs)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: false)
+        .contentSurface()
     }
 
     private func setBatchCategory(_ category: Category, for id: UUID) {
@@ -1185,12 +1200,8 @@ struct AddGarmentView: View {
                 RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
                     .fill(Color(.secondarySystemBackground).opacity(0.45))
 
-                if let image = selectedImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                        .clipped()
+                if let image = photoPreview ?? selectedImage {
+                    GarmentPhotoCanvas(image: image)
                 } else {
                     VStack(spacing: DS.Spacing.sm) {
                         Image(systemName: "camera.fill")
@@ -1259,6 +1270,15 @@ struct AddGarmentView: View {
             }
             .foregroundStyle(.secondary)
 
+            if selectedImage != nil {
+                Button { showSubjectPicker = true } label: {
+                    Label(String(localized: "photo_tool_select_subject"), systemImage: "person.crop.rectangle")
+                        .font(.subheadline.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .disabled(isAnalyzing || isPersistingImage)
+            }
+
             if let cutoutSuggestion {
                 cutoutChoices(cutoutSuggestion)
             }
@@ -1269,9 +1289,17 @@ struct AddGarmentView: View {
 
             titleEditor
         }
+        .task(id: savedImagePath) {
+            let path = savedImagePath
+            let preview = await Task.detached(priority: .utility) {
+                ImageStore.loadGarmentPreview(imagePath: path, maxPixelSize: 900)
+            }.value
+            guard !Task.isCancelled else { return }
+            photoPreview = preview
+        }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var titleEditor: some View {
@@ -1403,7 +1431,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var fitSizeSection: some View {
@@ -1428,7 +1456,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var colorSection: some View {
@@ -1459,7 +1487,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var brandSection: some View {
@@ -1516,7 +1544,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var seasonSection: some View {
@@ -1542,7 +1570,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var attributesSection: some View {
@@ -1567,7 +1595,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private func attributeRow<Trailing: View>(
@@ -1611,7 +1639,7 @@ struct AddGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
         .onAppear {
             if !scannedMaterials.isEmpty {
                 showAdvancedOptions = true
@@ -1890,6 +1918,7 @@ struct AddGarmentView: View {
     /// Clears wardrobe photo state from a previous scan / pick.
     private func clearLookupImageState() {
         selectedImage = nil
+        photoPreview = nil
         originalPickedImage = nil
         pendingCropImage = nil
         discardDraftImageFiles()
@@ -2015,6 +2044,7 @@ struct AddGarmentView: View {
         // AI only fills gaps (see applySuggestion).
         let keepLookupSuggestions = didApplyAISuggestions || barcodeNeedsPhoto
         selectedImage = cropped
+        photoPreview = nil
         originalPickedImage = original
         barcodeNeedsPhoto = false
         isAnalyzing = true
@@ -2471,6 +2501,7 @@ struct AddGarmentView: View {
         thermalBreathabilityOverride = nil
         formality = 3
         selectedImage = nil
+        photoPreview = nil
         originalPickedImage = nil
         pendingCropImage = nil
         discardDraftImageFiles()

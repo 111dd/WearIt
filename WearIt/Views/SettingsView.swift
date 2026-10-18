@@ -33,6 +33,7 @@ struct SettingsView: View {
     @State private var showResetLearningDialog = false
     @State private var showBackdropPicker = false
     @State private var showIntro = false
+    @State private var shoppingPreferencesProfile: UserProfile?
     @State private var exportURL: URL?
     @State private var isExporting = false
     @State private var exportFailed = false
@@ -62,6 +63,7 @@ struct SettingsView: View {
                 accountCard
                 appearanceSection
                 tasteLearningSection
+                shoppingPreferencesSection
                 aiFeaturesSection
                 calendarContextSection
                 notificationsSection
@@ -124,6 +126,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showSignInSheet) {
             SignInView()
+        }
+        .sheet(item: $shoppingPreferencesProfile) { profile in
+            ShoppingPreferencesView(profile: profile)
         }
         .confirmationDialog(
             String(localized: "settings_delete_title"),
@@ -354,6 +359,33 @@ struct SettingsView: View {
                 .liquidGlassPill(interactive: true)
             }
         }
+        .dsCard()
+    }
+
+    private var shoppingPreferencesSection: some View {
+        Button {
+            shoppingPreferencesProfile = CurrentUser.activeProfile(from: users, userIdentifier: auth.userIdentifier)
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "bag")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "shop_preferences_title"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(String(localized: "shop_preferences_row_detail"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .dsCard()
     }
 

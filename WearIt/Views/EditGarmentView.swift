@@ -9,6 +9,10 @@ struct EditGarmentView: View {
     @Environment(\.openURL) private var openURL
 
     @Bindable var garment: Garment
+    let initialPhotoTool: GarmentPhotoTool?
+    @State private var photoTool: GarmentPhotoTool?
+    @State private var didOpenInitialPhotoTool = false
+    @State private var photoAdvice: GarmentPhotoFraming.Advice?
     @Query(sort: \Brand.name, order: .forward) private var brands: [Brand]
 
     @State private var isEditingTitle = false
@@ -36,6 +40,7 @@ struct EditGarmentView: View {
     @State private var showCropper = false
     @State private var pendingCropImage: UIImage?
     @State private var originalPickedImage: UIImage?
+    @State private var pendingPhotoSourceURL: URL?
     @State private var cropMode: CropMode = .replaceMain
 
     private enum CropMode {
@@ -44,6 +49,11 @@ struct EditGarmentView: View {
     }
 
     private let feedback = UIImpactFeedbackGenerator(style: .medium)
+
+    init(garment: Garment, initialPhotoTool: GarmentPhotoTool? = nil) {
+        self.garment = garment
+        self.initialPhotoTool = initialPhotoTool
+    }
 
     private var categoryColumns: [GridItem] {
         Array(repeating: GridItem(.flexible(minimum: 0), spacing: DS.Spacing.xs), count: 3)
@@ -129,13 +139,17 @@ struct EditGarmentView: View {
             BrandStore.syncFromGarments(context: context)
             loadOccasionWearCounts()
             prepareLegacyPrimaryIfNeeded()
+            if !didOpenInitialPhotoTool {
+                didOpenInitialPhotoTool = true
+                photoTool = initialPhotoTool
+            }
         }
         .task(id: "\(garment.imagePath ?? "")|\(garment.thumbnailPath ?? "")") {
             await loadHeroImage()
         }
         .onDisappear {
             // Covers are part of this editor's workflow, not an abandoned edit.
-            if gallerySelection == nil, !showCropper, !showCamera, !showPhotoPicker, !showLabelScanner {
+            if photoTool == nil, gallerySelection == nil, !showCropper, !showCamera, !showPhotoPicker, !showLabelScanner {
                 cancelPhotoWork()
             }
         }
@@ -146,7 +160,7 @@ struct EditGarmentView: View {
             Text(String(localized: "edit_delete_message"))
         }
         .alert(String(localized: "error_title"), isPresented: Binding(
-            get: { errorMessage != nil && gallerySelection == nil },
+            get: { errorMessage != nil && gallerySelection == nil && photoTool == nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
             Button(String(localized: "action_confirm"), role: .cancel) {}
@@ -194,6 +208,23 @@ struct EditGarmentView: View {
                 onRemove: removeGalleryImage
             )
         }
+        .fullScreenCover(item: $photoTool) { tool in
+            switch tool {
+            case .subject:
+                GarmentSubjectPicker(
+                    imagePath: garment.originalImagePath ?? garment.imagePath,
+                    fallbackImagePath: garment.imagePath,
+                    legacyData: garment.imageData, category: garment.category
+                ) { cutout, original in
+                    let source = garment.imagePath.flatMap { garment.photoInfo(for: $0).sourceURL }.flatMap { URL(string: $0) }
+                    persistNewPhoto(cutout, original: original, makePrimary: true, sourceURL: source)
+                }
+            case .findPhoto:
+                GarmentPhotoSearchView(garment: garment) { image, source, asPrimary in
+                    persistNewPhoto(image, original: image, makePrimary: asPrimary, sourceURL: source)
+                }
+            }
+        }
     }
 
     // MARK: - Sticky save
@@ -222,29 +253,8 @@ struct EditGarmentView: View {
 
     private var heroCard: some View {
         VStack(spacing: DS.Spacing.sm) {
-            ZStack {
-                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                    .fill(Color(.secondarySystemBackground).opacity(0.45))
-
-                if let heroImage {
-                    Image(uiImage: heroImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                        .clipped()
-                } else if isLoadingHero {
-                    ProgressView()
-                } else {
-                    VStack(spacing: DS.Spacing.xs) {
-                        Image(systemName: garment.category.icon)
-                            .font(.system(size: 44, weight: .light))
-                            .foregroundStyle(.tertiary)
-                        Text(String(localized: "garment_no_image"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            GarmentPhotoCanvas(image: heroImage, placeholder: garment.category.icon)
+                .overlay { if isLoadingHero { ProgressView() } }
             .contentShape(Rectangle())
             .onTapGesture {
                 if let path = garment.imagePath {
@@ -346,11 +356,40 @@ struct EditGarmentView: View {
             .foregroundStyle(.secondary)
             .disabled(isSavingPhoto)
 
+            photoTools
             titleEditor
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
+    }
+
+    private var photoTools: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Spacing.sm) { photoToolButtons }
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) { photoToolButtons }
+            }
+            if let photoAdvice, photoAdvice.suggestsImprovement {
+                Text(String(localized: photoAdvice.isLowResolution ? "photo_advice_low_resolution" : "photo_advice_isolate"))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(isSavingPhoto)
+    }
+
+    @ViewBuilder private var photoToolButtons: some View {
+        Button { photoTool = .subject } label: {
+            Label(String(localized: "photo_tool_select_subject"), systemImage: "person.crop.rectangle")
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .disabled(garment.imagePath == nil && garment.imageData == nil)
+        Button { photoTool = .findPhoto } label: {
+            Label(String(localized: "photo_tool_find_photo"), systemImage: "photo.badge.magnifyingglass")
+                .font(.caption.weight(.semibold))
+        }.buttonStyle(.bordered)
     }
 
     private var titleEditor: some View {
@@ -488,7 +527,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var fitSizeCard: some View {
@@ -519,7 +558,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var colorCard: some View {
@@ -556,7 +595,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var brandCard: some View {
@@ -618,7 +657,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private func handleLabelScan(_ image: UIImage) {
@@ -688,7 +727,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     /// "Right for": everyday, work, evening out, formal, workouts, outdoors, home.
@@ -835,7 +874,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var advancedCard: some View {
@@ -868,7 +907,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var dangerCard: some View {
@@ -897,7 +936,7 @@ struct EditGarmentView: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private func attributeRow<Trailing: View>(
@@ -931,13 +970,13 @@ struct EditGarmentView: View {
         let data = garment.imageData
         heroImage = nil
         isLoadingHero = true
-        let loaded: UIImage? = await Task.detached(priority: .utility) {
-            if let path { return ImageStore.loadThumbnail(path: path, maxPixelSize: 900) }
-            if let data { return ImageStore.downsample(data: data, maxPixelSize: 900) }
-            return nil
+        let result: (UIImage?, GarmentPhotoFraming.Advice?) = await Task.detached(priority: .utility) {
+            let image = ImageStore.loadGarmentPreview(imagePath: path, legacyData: data, maxPixelSize: 900)
+            return (image, image.map { GarmentPhotoFraming.advice(for: $0) })
         }.value
         guard !Task.isCancelled else { return }
-        heroImage = loaded
+        heroImage = result.0
+        photoAdvice = result.1
         isLoadingHero = false
     }
 
@@ -959,6 +998,7 @@ struct EditGarmentView: View {
     }
 
     private func beginCrop(with image: UIImage) {
+        pendingPhotoSourceURL = nil
         originalPickedImage = image
         pendingCropImage = image
         showCropper = true
@@ -971,6 +1011,7 @@ struct EditGarmentView: View {
         isSavingPhoto = true
         let path = garment.originalImagePath ?? garment.imagePath
         let legacyData = garment.imageData
+        let sourceURL = garment.imagePath.flatMap { garment.photoInfo(for: $0).sourceURL }.flatMap { URL(string: $0) }
         photoTask = Task { @MainActor in
             defer { finishPhotoWork(generation: generation) }
             let loaded: UIImage? = await Task.detached(priority: .utility) {
@@ -984,6 +1025,7 @@ struct EditGarmentView: View {
                 return
             }
             cropMode = .replaceMain
+            pendingPhotoSourceURL = sourceURL
             originalPickedImage = loaded
             pendingCropImage = loaded
             showCropper = true
@@ -993,10 +1035,11 @@ struct EditGarmentView: View {
     private func applyCroppedImage(_ cropped: UIImage, original: UIImage) {
         switch cropMode {
         case .replaceMain:
-            persistMainImage(cropped, original: original)
+            persistNewPhoto(cropped, original: original, makePrimary: true, sourceURL: pendingPhotoSourceURL)
         case .addGallery:
             persistNewPhoto(cropped, original: original, makePrimary: false)
         }
+        pendingPhotoSourceURL = nil
     }
 
     /// Snapshot only photo fields so a failed media save cannot discard unrelated edits.
@@ -1060,11 +1103,7 @@ struct EditGarmentView: View {
         }
     }
 
-    private func persistMainImage(_ display: UIImage, original: UIImage) {
-        persistNewPhoto(display, original: original, makePrimary: true)
-    }
-
-    private func persistNewPhoto(_ display: UIImage, original: UIImage, makePrimary: Bool) {
+    private func persistNewPhoto(_ display: UIImage, original: UIImage, makePrimary: Bool, sourceURL: URL? = nil) {
         guard !isSavingPhoto else { return }
         let generation = UUID()
         photoGeneration = generation
@@ -1093,7 +1132,8 @@ struct EditGarmentView: View {
                 }
                 garment.additionalImagePaths = additional.isEmpty ? nil : additional
                 garment.setPhotoInfo(
-                    GarmentPhotoMetadata(role: role, originalPath: files.original, thumbnailPath: files.thumbnail),
+                    GarmentPhotoMetadata(role: role, originalPath: files.original, thumbnailPath: files.thumbnail,
+                                         sourceURL: sourceURL?.absoluteString),
                     for: files.image
                 )
                 if !savePhotoChanges(previous) {
@@ -1129,7 +1169,8 @@ struct EditGarmentView: View {
                 garment.imageData = nil
                 garment.additionalImagePaths = additional.isEmpty ? nil : additional
                 garment.setPhotoInfo(
-                    GarmentPhotoMetadata(role: info.role, originalPath: info.originalPath, thumbnailPath: thumbnail), for: path
+                    GarmentPhotoMetadata(role: info.role, originalPath: info.originalPath, thumbnailPath: thumbnail,
+                                         sourceURL: info.sourceURL), for: path
                 )
                 if !savePhotoChanges(previous) {
                     await GarmentImagePersistence.shared.remove(paths: [thumbnail])

@@ -983,17 +983,29 @@ final class AIRecommender {
         }
         looks.sort { $0.score > $1.score }
 
-        // Keep looks that differ by at least two pieces, so "the next best" is a real alternative.
+        // Keep at least two different pieces, and rotate bottoms among comparably
+        // good alternatives rather than changing only the top and shoes every time.
         var picked: [ScoredLook] = []
-        for look in looks {
-            let ids = Set(look.garments.map(\.id))
-            let distinct = picked.allSatisfy { other in
-                ids.subtracting(other.garments.map(\.id)).count >= min(2, ids.count)
+        var bottomUses: [UUID: Int] = [:]
+        while picked.count < limit {
+            let eligible = looks.filter { look in
+                let ids = Set(look.garments.map(\.id))
+                return picked.allSatisfy { other in
+                    ids.subtracting(other.garments.map(\.id)).count >= min(2, ids.count)
+                }
             }
-            if distinct {
-                picked.append(look)
+            guard let bestScore = eligible.first?.score else { break }
+            var choice = eligible[0]
+            func uses(_ look: ScoredLook) -> Int {
+                guard lockedCategory != .bottom,
+                      let bottom = look.garments.first(where: { $0.category == .bottom }) else { return 0 }
+                return bottomUses[bottom.id, default: 0]
             }
-            if picked.count >= limit { break }
+            for look in eligible.dropFirst() where look.score >= bestScore - 0.06 {
+                if uses(look) < uses(choice) { choice = look }
+            }
+            picked.append(choice)
+            if let bottom = choice.garments.first(where: { $0.category == .bottom }) { bottomUses[bottom.id, default: 0] += 1 }
         }
 
         guard includeOptionalLayers else { return picked }

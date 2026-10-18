@@ -48,7 +48,8 @@ Tabs (`WearIt/RootView.swift`):
    A flight, or two-plus days at a far pin, opens `TripPackingView` (looks per day, underwear/socks
    counts, swimwear or a coat from the destination forecast). Manual trips live in UserDefaults.
 3. **Wardrobe** (`WardrobeView`): grid with filters, edit item (`EditGarmentView`).
-4. **Add** (`AddGarmentView`): photo → crop/cutout → details; barcode / QR / product
+4. **Shopping** (`ShopPicksView`): personal picks by default, optional general catalog browsing and temporary filters; shopping preferences also open from Profile/Settings.
+5. **Add** (`AddGarmentView`): photo → crop/cutout → details; barcode / QR / product
    URL / clothing-label scan to auto-fill fields.
 
 Also: a home-screen widget (`WearItWidget/`: small / medium / large) showing today's, tonight's and
@@ -92,7 +93,8 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
   (`https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/catalog.json`, plus `il/report.json`).
   In the app: `ShopCatalogService` (download with ETag, cache in Caches, map off the main thread) →
   `PurchaseScorer` (taste + looks with the user's most-worn pieces via `AIRecommender.lookScore` + gap fit + size
-  filter − "already have plenty", then `ShopPreferenceModel` learns from save/open/not for me/bought in
+  filter − "already have plenty", plus actual weather, saved upcoming looks, accessories and optional next-season deals;
+  `ShopPreferenceModel` and attribute signals learn from save/open/not for me/bought in
   `ShopFeedbackStore`, UserDefaults only) → `Views/ShopPicksView` (full list) and `ShopPicksSection` (Stats), also
   linked from the planner's gap card. Products are scored as transient `Garment`s that are never inserted.
 
@@ -189,7 +191,16 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 ## Progress log
 
+- 2026-10-18 · Codex · Dor authorized publishing all latest local changes together: personal shopping, planner advice/layout and wardrobe/photo tools; preparing one PR for main. No build/tests/simulator; device review remains pending.
+
 Newest first. One line per meaningful change: date, tool, what.
+
+- 2026-10-18 · Codex · Shopping fixes: visible purchased actions on product/companion cards, complete-preview removal after purchase/dismiss; fixed nonexistent dsField to dsFieldStyle. Shopping previews rotate suitable owned bottoms within a narrow quality window; rankLooks also diversifies unlocked bottoms across alternatives while preserving saved upcoming looks. No build/tests/simulator/publication; owner checks pending.
+- 2026-10-18 · Codex · Shopping follow-up: dedicated fifth tab, personal default and independent manual catalog search/filters; optional synced profile shopping preferences with department eligibility, source-based automatic fallback and unresolved-choice prompt. Visible catalog tiles select bounded off-main item-only previews or a neutral symbol; no image gender inference. Export/merge and EN/HE included. No build/tests/simulator/publication; owner review pending.
+- 2026-10-18 · Codex · Planner Apply/change advice now has a separate close button, with date/look-scoped local dismissal; worn looks skip advice before score-cache lookup. Visible suggestion participates in DayCardSignature, so close/worn updates the memoized card immediately. Stale Apply is guarded against a worn/changed look. Focused planner/helper changes only; no localization/shop edits, build/tests/simulator or publication.
+- 2026-10-18 · Codex · Personal shopping: removed gender menus; choice/attribute-based taste, useful deals, accessories and complete owned-wardrobe previews; saved upcoming day/evening looks and optional next-season bargains; bounded two-purchase looks, recent-purchase redundancy, content-aware refreshes. Catalog now pairs verified same-variant prices with color/stock evidence and leaves unknown sizes uncertain. No build/tests/simulator or publication; owner device and live catalog review pending.
+- 2026-10-18 · Codex · Audit A06 + wardrobe photos: shared quiet content surfaces and square fit-to-garment frames with cached off-main transparent-padding trim; richer searchable wardrobe cards/density/quick actions; native VisionKit subject selection plus garment candidates in Add/Edit; local visual ranking of catalog photos, web text search and product-link photo import with comparison/confirmation. Previous cover/original retained, optional source URL exported. No build/tests/simulator; device and network review pending.
+- 2026-10-18 · Codex · Audit A05: Today-first planner with one selectable optional suggestion, full upcoming cards, compact typography/spacing and responsive outfit photography. Planner-only calm content surfaces respect Reduce Transparency/contrast; no global theme change. New `UI/PlannerComponents.swift`; no build/tests/simulator or owner visual acceptance yet.
 
 - 2026-10-18 · Codex · Dor reports the Add/calendar/gallery changes work and authorized publication via a focused PR to main. Automated tests, builds and simulator were not run by the agent; performance measurements remain unrecorded.
 - 2026-10-18 · Codex · Item photo gallery: choose the main photo, assign category/type-specific views (front/back, shoe side/sole, bag inside, detail/label/on-body), full-screen path-based viewer; preserve previous covers and crop sources, process media off-main, invalidate thumbnails/refresh widget and export photo roles. Optional `Garment.photoMetadataRaw`; additional image files still local-only. Owner runtime review pending.
@@ -319,11 +330,21 @@ Newest first. One line per meaningful change: date, tool, what.
 
 ## Next steps (backlog)
 
-- Audit A01/A02 and the item photo gallery are implemented locally, owner reports the changes work; detailed scenario checks remain: large-photo Add flows, calendar date switch during import, gallery primary/angle selection, recrop after promotion, removal, legacy inline photos and missing local gallery files. See `WearIt/Docs/iOS-Design-Performance-Audit-2026-10-18.md`; suggested next packet A05 (planner content hierarchy), once selected by Dor. Gallery asset sync remains a separate future task (additional files are local-only today).
+- Publication authorized for the complete 2026-10-18 local change set; after merge, pull main in Xcode and review shopping, planner and photo flows on device. Inspect the next live catalog report; runtime/performance acceptance remains pending.
+
+- Shopping purchase/variety follow-up: owner check of reported compile-error fix, visible purchased actions, complete companion previews after feedback, and pants variety with multiple suitable bottoms (including locked/only-compatible cases). Source-only changes; no agent build/tests/simulator. Details: `WearIt/Docs/Personal-Shopping-2026-10-18.md`.
+
+- Shopping tab/preferences follow-up is local: review department defaults/legacy choices, empty-wardrobe manual browsing, saved preference sync and item-only photo fallback (`WearIt/Docs/Personal-Shopping-2026-10-18.md`). Automatic department uses only explicit retailer-linked evidence; missing evidence asks for a choice. Person/frame photo selection remains heuristic and needs real-device image/scroll review.
+
+- Owner review: close planner Apply advice, reopen the planner, mark the look worn (including widget/calendar refresh), and check that the next day remains eligible. Manual dismissal is local per date/look and does not train taste.
+
+- Personal shopping is implemented locally (`WearIt/Docs/Personal-Shopping-2026-10-18.md`): owner review of relevance, upcoming/seasonal/outfit previews, RTL and latency is pending. Publish the updated crawler when authorized and inspect real retailer prices/color/stock plus `il/report.json` after a real run; old unverified discounts remain hidden until refetched. Conversion and actual purchased-item wear are not measured.
+
+- Audit A01/A02 and item gallery are merged in PR #34; Dor reports they work. A05 and A06 shared content/wardrobe photo tools are implemented locally, pending owner device review. See `WearIt/Docs/iOS-Design-Performance-Audit-2026-10-18.md` for the photo discovery/segmentation limits and review matrix. Whole-web reverse-image search, gallery asset sync, root theme ownership, remaining legacy surfaces and measured performance remain separate follow-ups, selected by Dor.
 
 Ideas, not commitments. The owner picks what to do next.
 
-- Design review phase 2 next (`audits/design-review.md`): glass only on controls (bars, ✓ button, toasts, save bars), content cards as semi-opaque "paper" (`DS.Surface.content`), no shadows on glass, `GlassEffectContainer`, dark mode that follows the system, Reduce Transparency / Increase Contrast. Then 3 Today hero + one nudge slot, 4 wardrobe search/zoom/adaptive grid, 5 add/edit save bars, 6 iOS 26 nav (tab minimize, search tab, today's-look accessory), 7 iPad. iOS 26 APIs behind `#available` in `GlassKit.swift`.
+- Design review phase 2 continuation (`audits/design-review.md`): shared content surfaces and wardrobe search/density are now implemented locally (A06); owner visual review comes first. Remaining ideas: glass only on controls (bars, ✓ button, toasts, save bars), content cards as semi-opaque "paper" (`DS.Surface.content`), no shadows on glass, `GlassEffectContainer`, dark mode that follows the system, Reduce Transparency / Increase Contrast. Then 3 Today hero + one nudge slot, 4 wardrobe search/zoom/adaptive grid, 5 add/edit save bars, 6 iOS 26 nav (tab minimize, search tab, today's-look accessory), 7 iPad. iOS 26 APIs behind `#available` in `GlassKit.swift`.
 - Social phase A, no server (`plans/profile-social-direction.md`): custom camera (timer, raise-hand shot), share a look to Stories + monthly "Wrapped", profile highlights. Phase B (feed between users) is on hold until Dor picks a server.
 Agreed direction (2026-10-04): understand the user better with low-effort, on-device signals,
 and recommend from that. Wardrobe gaps and the trip packing list have shipped; smarter stats is next.

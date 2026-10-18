@@ -6,6 +6,9 @@ struct WardrobeView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var weather: WeatherCenter
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var searchText = ""
+    @AppStorage("wardrobe.gridColumns") private var gridColumnCount = 2
 
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
     @Query private var wearEvents: [WearEvent]
@@ -68,6 +71,13 @@ struct WardrobeView: View {
     // sort comparison.
     private func filtered(latestWearMap: [UUID: Date]) -> [Garment] {
         var result = allGarments
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty {
+            result = result.filter { garment in
+                [garment.displayTitle, garment.brand ?? "", garment.itemType?.title ?? "", garment.notes ?? ""]
+                    .joined(separator: " ").localizedCaseInsensitiveContains(query)
+            }
+        }
         
         if let category = selectedCategory {
             result = result.filter { $0.category == category }
@@ -77,7 +87,7 @@ struct WardrobeView: View {
             result = result.filter { garment in
                 seasonMatches(garment, allowedSeasons: selectedSeasons)
             }
-        } else if seasonScope == .current {
+        } else if seasonScope == .current && query.isEmpty {
             result = result.filter {
                 seasonMatches($0, allowedSeasons: [currentSeason])
             }
@@ -167,6 +177,7 @@ struct WardrobeView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .withLocalAppBackdrop()
                 .navigationTitle(String(localized: "nav_wardrobe"))
+                .searchable(text: $searchText, prompt: Text(String(localized: "wardrobe_search_prompt")))
                 .minimalCollapsingNavBar()
                 .toolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
@@ -175,6 +186,7 @@ struct WardrobeView: View {
                         } label: {
                             Image(systemName: "exclamationmark.triangle")
                         }
+                        gridDensityMenu
                         sortMenu
                         filterButton
                     }
@@ -196,6 +208,9 @@ struct WardrobeView: View {
                     rebuildVisibleGarments()
                     refreshCurrentDate()
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .garmentUpdated)) { _ in
+                    scheduleRebuildVisibleGarments()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .wardrobeRebuildVisible)) { _ in
                     rebuildVisibleGarments()
                 }
@@ -214,6 +229,7 @@ struct WardrobeView: View {
         [
             String(allGarments.count),
             String(wearEvents.count),
+            searchText,
             selectedCategory?.rawValue ?? "-",
             selectedSeasons.map(\.rawValue).sorted().joined(separator: ","),
             seasonScope == .current ? "current" : "all",
@@ -273,13 +289,18 @@ struct WardrobeView: View {
                         } else {
                             DSEmptyState(
                                 icon: "tshirt",
-                                title: String(localized: "wardrobe_empty_title"),
-                                message: String(localized: "wardrobe_empty_message")
+                                title: String(localized: "wardrobe_search_empty_title"),
+                                message: String(localized: "wardrobe_search_empty_message")
                             )
+                            Button(String(localized: "wardrobe_clear_filters")) {
+                                searchText = ""
+                                clearAllFilters()
+                                seasonScope = .all
+                            }.buttonStyle(.bordered)
                         }
                     }
                     .padding(DS.Spacing.lg)
-                    .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+                    .contentSurface()
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.lg)
                     .padding(.bottom, 100)
@@ -289,14 +310,38 @@ struct WardrobeView: View {
                         spacing: DS.Grid.rowSpacing
                     ) {
                         ForEach(visibleGarments) { garment in
-                            NavigationLink {
-                                EditGarmentView(garment: garment)
-                            } label: {
-                                wardrobeTile(garment)
+                            ZStack(alignment: .topTrailing) {
+                                NavigationLink {
+                                    EditGarmentView(garment: garment)
+                                } label: {
+                                    wardrobeTile(garment)
+                                }
+                                .buttonStyle(.plain)
+                                Menu {
+                                    NavigationLink {
+                                        EditGarmentView(garment: garment, initialPhotoTool: .subject)
+                                    } label: {
+                                        Label(String(localized: "photo_tool_select_subject"), systemImage: "person.crop.rectangle")
+                                    }
+                                    NavigationLink {
+                                        EditGarmentView(garment: garment, initialPhotoTool: .findPhoto)
+                                    } label: {
+                                        Label(String(localized: "photo_tool_find_photo"), systemImage: "photo.badge.magnifyingglass")
+                                    }
+                                    Divider()
+                                    wardrobeContextMenu(for: garment)
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.primary)
+                                        .frame(width: 36, height: 36)
+                                        .background(.regularMaterial, in: Circle())
+                                        .frame(width: 44, height: 44)
+                                }
+                                .padding(DS.Spacing.xxs)
+                                .accessibilityLabel(String(localized: "photo_tool_item_actions"))
                             }
-                            .buttonStyle(.plain)
                             .frame(maxWidth: .infinity)
-                            .clipped()
                             .contextMenu { wardrobeContextMenu(for: garment) }
                         }
                     }
@@ -456,7 +501,7 @@ struct WardrobeView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LiquidGlassGroup(spacing: DS.Spacing.xs) {
                 HStack(spacing: DS.Spacing.xs) {
-                    DSChip("All", isSelected: selectedCategory == nil) {
+                    DSChip(String(localized: "wardrobe_all_categories"), isSelected: selectedCategory == nil) {
                         selectedCategory = nil
                     }
                     ForEach(Category.allCases) { cat in
@@ -469,7 +514,6 @@ struct WardrobeView: View {
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
         }
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: false)
         .padding(.horizontal, DS.Spacing.md)
         .padding(.top, DS.Spacing.sm)
     }
@@ -566,7 +610,7 @@ struct WardrobeView: View {
             }
         }
         .padding(DS.Spacing.md)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
         .padding(.horizontal, DS.Spacing.md)
         .padding(.bottom, DS.Spacing.sm)
     }
@@ -651,12 +695,26 @@ struct WardrobeView: View {
     }
 
     private var wardrobeColumns: [GridItem] {
-        // Flexible with no large minimum — 3 columns must fit phone width
-        // without forcing tiles past the screen edge.
-        Array(
-            repeating: GridItem(.flexible(minimum: 0), spacing: DS.Grid.columnSpacing, alignment: .top),
-            count: 3
-        )
+        if dynamicTypeSize.isAccessibilitySize { return [GridItem(.flexible())] }
+        if horizontalSizeClass == .regular {
+            return [GridItem(.adaptive(minimum: gridColumnCount == 3 ? 140 : 180,
+                                       maximum: gridColumnCount == 3 ? 200 : 260),
+                             spacing: DS.Grid.columnSpacing, alignment: .top)]
+        }
+        return Array(repeating: GridItem(.flexible(minimum: 0), spacing: DS.Grid.columnSpacing, alignment: .top),
+                     count: gridColumnCount == 3 ? 3 : 2)
+    }
+
+    private var gridDensityMenu: some View {
+        Menu {
+            Picker(String(localized: "wardrobe_grid_density"), selection: $gridColumnCount) {
+                Text(String(localized: "wardrobe_grid_comfortable")).tag(2)
+                Text(String(localized: "wardrobe_grid_compact")).tag(3)
+            }
+        } label: {
+            Image(systemName: gridColumnCount == 3 ? "square.grid.3x3" : "square.grid.2x2")
+        }
+        .accessibilityLabel(String(localized: "wardrobe_grid_density"))
     }
 
     private var sortMenu: some View {
@@ -747,7 +805,10 @@ struct WardrobeView: View {
             metaLine: wardrobeMetaLine(for: garment),
             categoryIcon: garment.category.icon,
             thumbnailPath: garment.thumbnailPath,
-            imagePath: garment.imagePath
+            imagePath: garment.imagePath,
+            legacyData: garment.imageData,
+            photoCount: garment.galleryPhotoPaths.count,
+            colors: Array(garment.safeColorTags.prefix(3))
         )
         return WardrobeTileView(model: model)
             .equatable()
@@ -784,6 +845,9 @@ private struct WardrobeTileModel: Equatable {
     let categoryIcon: String
     let thumbnailPath: String?
     let imagePath: String?
+    let legacyData: Data?
+    let photoCount: Int
+    let colors: [ColorTag]
 }
 
 private struct WardrobeTileView: View, Equatable {
@@ -795,74 +859,55 @@ private struct WardrobeTileView: View, Equatable {
     }
 
     var body: some View {
-        Color.clear
-            .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
-            .overlay {
-                ZStack(alignment: .bottomLeading) {
-                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                        .fill(Color(.secondarySystemBackground).opacity(0.35))
-
-                    if let image {
-                        Image(uiImage: image)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                            .clipped()
-                    } else {
-                        Image(systemName: model.categoryIcon)
-                            .font(.system(size: DS.IconSize.xl))
-                            .foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            GarmentPhotoCanvas(image: image, placeholder: model.categoryIcon)
+                .aspectRatio(1, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    if model.photoCount > 1 {
+                        Label(model.photoCount.formatted(), systemImage: "square.on.square")
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(.regularMaterial, in: Capsule())
+                            .padding(6)
+                            .accessibilityLabel(String(format: String(localized: "photo_tool_photo_count_format"), model.photoCount))
                     }
-
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.55), Color.black.opacity(0.0)],
-                        startPoint: .bottom,
-                        endPoint: .top
-                    )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.displayTitle)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        Text(model.metaLine)
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                    }
-                    .padding(DS.Spacing.xs)
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.6)
-                    .blendMode(.plusLighter)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
-            .task(id: "\(model.id.uuidString)|\(model.thumbnailPath ?? "")|\(model.imagePath ?? "")") {
-                let cacheKey = model.id.uuidString
-                if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
-                    image = cached
-                    return
-                }
-
-                let thumbPath = model.thumbnailPath
-                let imagePath = model.imagePath
-                let maxPixel: CGFloat = 360
-
-                let loaded: UIImage? = await Task.detached(priority: .utility) {
-                    if let thumbPath,
-                       let thumb = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                        return thumb
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Text(model.displayTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2, reservesSpace: true)
+                Text(model.metaLine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    ForEach(model.colors) { color in
+                        Circle().fill(color.color)
+                            .frame(width: 8, height: 8)
+                            .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 0.5))
+                            .accessibilityLabel(color.title)
                     }
-                    if let imagePath {
-                        return ImageStore.loadThumbnail(path: imagePath, maxPixelSize: maxPixel)
-                    }
-                    return nil as UIImage?
-                }.value
-                image = loaded
+                }.frame(height: 8)
             }
+            .padding(.horizontal, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.sm)
+        }
+        .contentSurface(cornerRadius: DS.Radius.tile)
+        .contentShape(RoundedRectangle(cornerRadius: DS.Radius.tile))
+        .task(id: "\(model.id.uuidString)|\(model.thumbnailPath ?? "")|\(model.imagePath ?? "")") {
+            image = nil
+            let path = model.imagePath
+            let thumb = model.thumbnailPath
+            let legacy = model.legacyData
+            let loaded = await Task.detached(priority: .utility) {
+                ImageStore.loadGarmentPreview(imagePath: path, thumbnailPath: thumb, legacyData: legacy, maxPixelSize: 600)
+            }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
+        }
     }
 }
 

@@ -16,6 +16,7 @@ import gzip
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -173,37 +174,67 @@ def as_list(value):
     return value if isinstance(value, list) else [value]
 
 
-def offer_facts(offers):
-    """Price, currency and availability from Offer / AggregateOffer nodes."""
-    price = currency = None
-    available = None
+def positive_price(value):
+    try:
+        value = float(str(value).replace(",", ""))
+        return value if math.isfinite(value) and value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def availability_of(value):
+    label = str(value or "").rsplit("/", 1)[-1].lower()
+    if label in ("instock", "limitedavailability", "onlineonly", "instoreonly", "in stock"):
+        return True
+    if label in ("outofstock", "soldout", "discontinued", "preorder", "presale", "backorder", "out of stock"):
+        return False
+    return None
+
+
+def offer_details(offers):
+    """A current/regular-price pair from the same Offer, plus tri-state stock.
+
+    AggregateOffer.highPrice is another variant's price, never a crossed-out price.
+    Prefer an in-stock offer so a sold-out variant cannot supply the advertised low price.
+    """
+    facts = []
     for offer in as_list(offers):
         if not isinstance(offer, dict):
             continue
-        for key in ("price", "lowPrice"):
-            if offer.get(key) not in (None, "") and price is None:
-                try:
-                    price = float(str(offer[key]).replace(",", ""))
-                except ValueError:
-                    pass
-        spec = offer.get("priceSpecification")
-        spec = spec[0] if isinstance(spec, list) and spec else spec
-        spec = spec if isinstance(spec, dict) else {}
-        if price is None and spec.get("price") is not None:
-            try:
-                price = float(str(spec["price"]).replace(",", ""))
-            except ValueError:
-                pass
-        currency = currency or offer.get("priceCurrency") or spec.get("priceCurrency")
-        availability = str(offer.get("availability") or "")
-        if availability:
-            in_stock = "InStock" in availability or "LimitedAvailability" in availability or "PreOrder" in availability
-            available = bool(available) or in_stock
-    return price, currency, available
+        if offer.get("offers"):
+            facts.append(offer_details(offer["offers"]))
+            continue
+        price = positive_price(offer.get("price")) or positive_price(offer.get("lowPrice"))
+        currency = offer.get("priceCurrency")
+        regular_prices = []
+        for spec in as_list(offer.get("priceSpecification")):
+            if not isinstance(spec, dict):
+                continue
+            amount = positive_price(spec.get("price"))
+            if amount is None:
+                continue
+            kind = str(spec.get("priceType") or "").rsplit("/", 1)[-1].lower()
+            if kind in ("strikethroughprice", "listprice", "regularprice"):
+                regular_prices.append((amount, spec.get("priceCurrency")))
+            elif not spec.get("eligibleCustomerType") and not spec.get("validForMemberTier"):
+                price = price or amount
+                currency = currency or spec.get("priceCurrency")
+        original = min((p for p, c in regular_prices if price is not None and p > price and (not c or not currency or c == currency)), default=None)
+        facts.append((price, currency, availability_of(offer.get("availability")), original))
+    if not facts:
+        return None, None, None, None
+    availability = True if any(f[2] is True for f in facts) else (None if any(f[2] is None for f in facts) else False)
+    candidates = [f for f in facts if f[2] is availability and f[0] is not None]
+    chosen = min(candidates, key=lambda f: f[0]) if candidates else next(f for f in facts if f[2] is availability)
+    return chosen[0], chosen[1], availability, chosen[3]
+
+
+def offer_facts(offers):
+    return offer_details(offers)[:3]
 
 
 def variant_sizes(variants):
-    sizes, in_stock = [], []
+    sizes, in_stock, known = [], [], []
     for variant in as_list(variants):
         if not isinstance(variant, dict):
             continue
@@ -212,9 +243,10 @@ def variant_sizes(variants):
             continue
         sizes.append(size)
         _, _, available = offer_facts(variant.get("offers"))
+        known.append(available is not None)
         if available:
             in_stock.append(size)
-    return list(dict.fromkeys(sizes)), list(dict.fromkeys(in_stock))
+    return list(dict.fromkeys(sizes)), list(dict.fromkeys(in_stock)), bool(known) and all(known)
 
 
 def breadcrumb_path(nodes):
@@ -236,18 +268,79 @@ def meta_content(page, prop):
 
 
 GENDER_WORDS = [
-    ("kids", r"\b(kids?|children|boys?|girls?|baby|junior)\b|ילדים|ילדות|תינוק|בנים|בנות|נוער"),
+    ("kids", r"\b(kids?|children|boys?|girls?|bab(y|ies)|junior|toddler|youth)\b|ילדים|ילדות|תינוק|בנים|בנות|נוער"),
     ("women", r"\b(women|womens|woman|female|ladies)\b|נשים|אישה|לנשים"),
     ("men", r"\b(men|mens|man|male)\b|גברים|לגבר|לגברים"),
 ]
 
 
 def guess_gender(*hints):
-    joined = " ".join(h for h in hints if h).lower()
-    for gender, pattern in GENDER_WORDS:
-        if re.search(pattern, joined):
-            return gender
+    # Explicit audience is passed first. Do not let broad navigation labels override it.
+    for hint in hints:
+        joined = urllib.parse.unquote(str(hint or "")).lower()
+        if re.search(r"\bunisex\b|יוניסקס", joined):
+            return "unisex"
+        matches = [gender for gender, pattern in GENDER_WORDS if re.search(pattern, joined)]
+        if len(matches) == 1:
+            return matches[0]
     return None
+
+
+def leaf_product_variants(product):
+    """Preserve a color group's fields when its children hold the individual sizes."""
+    variants = []
+    for variant in as_list(product.get("hasVariant")):
+        if not isinstance(variant, dict):
+            continue
+        if variant.get("hasVariant"):
+            # A group's in-stock aggregate does not establish stock for every size below it.
+            own_fields = {"hasVariant", "offers", "size", "sku", "mpn", "gtin", "gtin8", "gtin12", "gtin13", "gtin14"}
+            inherited = {key: value for key, value in variant.items() if key not in own_fields}
+            variants.extend({**inherited, **child} for child in leaf_product_variants(variant))
+        else:
+            variants.append(variant)
+    return variants
+
+
+def select_product_variant(variants, product, page_url):
+    """Select one color before combining any size/stock data."""
+    if not variants:
+        return None, [], True
+    def color_key(value):
+        return re.sub(r"\s+", " ", text(value) or "").strip().lower()
+    def variant_url(variant):
+        raw = text(variant.get("url"))
+        return urllib.parse.urldefrag(urllib.parse.urljoin(page_url, raw))[0] if raw else None
+    page = urllib.parse.urldefrag(page_url)[0]
+    matched = [v for v in variants if variant_url(v) == page]
+    parent_color = color_key(product.get("color"))
+    same_as_parent = [v for v in variants if parent_color and color_key(v.get("color")) == parent_color]
+    candidates = matched or same_as_parent or variants
+    details = [(v, offer_details(v.get("offers"))) for v in candidates]
+    live = [entry for entry in details if entry[1][2] is True]
+    unknown = [entry for entry in details if entry[1][2] is None]
+    pool = live or unknown or details
+    selected = min(pool, key=lambda entry: entry[1][0] if entry[1][0] is not None else float("inf"))[0]
+    selected_color = color_key(selected.get("color"))
+    color_scope_known = True
+    if selected_color:
+        same_color = [v for v in variants if color_key(v.get("color")) == selected_color]
+    elif parent_color and all(not color_key(v.get("color")) for v in variants):
+        # The parent names one color and its size variants do not override it.
+        same_color = variants if not isinstance(product.get("color"), list) else [selected]
+        color_scope_known = not isinstance(product.get("color"), list)
+    else:
+        # Missing child colors cannot establish that another child's sizes belong here.
+        same_color = [selected]
+        color_scope_known = len(variants) == 1
+    return selected, same_color, color_scope_known
+
+
+def has_ambiguous_offers(offers):
+    nodes = [offer for offer in as_list(offers) if isinstance(offer, dict)]
+    if len(nodes) > 1:
+        return True
+    return any("AggregateOffer" in types_of(offer) or offer.get("offers") for offer in nodes)
 
 
 def parse_product_page(page, page_url):
@@ -260,57 +353,71 @@ def parse_product_page(page, page_url):
         return None
     product = product or {}
 
-    variants = product.get("hasVariant")
-    sizes, in_stock_sizes = variant_sizes(variants)
-    price, currency, available = offer_facts(product.get("offers"))
-    if price is None and variants:
-        price, currency, variant_available = offer_facts([o for v in as_list(variants) if isinstance(v, dict) for o in as_list(v.get("offers"))])
-        available = available if available is not None else variant_available
-    if price is None:
-        amount = meta_content(page, "product:price:amount") or meta_content(page, "og:price:amount")
-        try:
-            price = float(amount.replace(",", "")) if amount else None
-        except ValueError:
-            price = None
-        currency = currency or meta_content(page, "product:price:currency") or meta_content(page, "og:price:currency")
-    if available is None:
-        availability = (meta_content(page, "product:availability") or meta_content(page, "og:availability") or "").lower()
-        available = ("in stock" in availability or "instock" in availability) if availability else None
-    if sizes and available is None:
+    variants = leaf_product_variants(product)
+    selected, color_variants, color_scope_known = select_product_variant(variants, product, page_url)
+    concrete = selected or product
+    sizes, in_stock_sizes, size_availability_known = variant_sizes(color_variants)
+    if not color_scope_known:
+        in_stock_sizes, size_availability_known = [], False
+    price, currency, available, original = offer_details(concrete.get("offers"))
+    if color_variants:
+        _, _, color_available = offer_facts([o for v in color_variants for o in as_list(v.get("offers"))])
+        available = color_available
+    meta_price = positive_price(meta_content(page, "product:price:amount") or meta_content(page, "og:price:amount"))
+    meta_currency = meta_content(page, "product:price:currency") or meta_content(page, "og:price:currency")
+    # Page metadata can refer to the initially displayed color, not an arbitrary chosen variant.
+    unambiguous_page = not variants and not has_ambiguous_offers(product.get("offers"))
+    if price is None and not variants:
+        price = meta_price
+    if not variants:
+        currency = currency or meta_currency
+    if available is None and not variants:
+        availability = meta_content(page, "product:availability") or meta_content(page, "og:availability")
+        available = availability_of(availability)
+    if sizes and available is None and size_availability_known:
         available = bool(in_stock_sizes)
-    if not sizes and product.get("size"):
-        sizes = [s.strip() for s in (text(product.get("size")) or "").split(",") if s.strip()]
+    if not sizes and concrete.get("size"):
+        sizes = [s.strip() for s in (text(concrete.get("size")) or "").split(",") if s.strip()]
 
-    original = meta_content(page, "product:original_price:amount")
-    title = text(product.get("name")) or meta_content(page, "og:title")
+    explicit_original = positive_price(meta_content(page, "product:original_price:amount"))
+    same_currency = not currency or not meta_currency or currency == meta_currency
+    if original is None and unambiguous_page and same_currency and meta_price == price and explicit_original is not None and price is not None and explicit_original > price:
+        original = explicit_original
+    title = text(concrete.get("name")) or text(product.get("name")) or meta_content(page, "og:title")
     if not title:
         return None
-    images = images_of(product.get("image"), page_url)
-    if not images:
-        images = images_of(meta_content(page, "og:image"), page_url)
-    for variant in as_list(variants):
-        if isinstance(variant, dict) and len(images) < IMAGE_LIMIT:
+    images = images_of(concrete.get("image"), page_url)
+    for variant in color_variants:
+        if len(images) < IMAGE_LIMIT:
             images += [i for i in images_of(variant.get("image"), page_url) if i not in images]
-    description = text(product.get("description")) or meta_content(page, "og:description")
+    parent_color = text(product.get("color"))
+    concrete_color = text(concrete.get("color")) or parent_color
+    if not images and color_scope_known and parent_color and concrete_color and parent_color.lower() == concrete_color.lower():
+        images = images_of(product.get("image"), page_url)
+    if not images and not variants:
+        images = images_of(meta_content(page, "og:image"), page_url)
+    description = text(concrete.get("description")) or text(product.get("description")) or meta_content(page, "og:description")
     audience = product.get("audience") if isinstance(product.get("audience"), dict) else {}
-    canonical = text(product.get("url")) or meta_content(page, "og:url") or page_url
+    canonical = text(concrete.get("url")) or text(product.get("url")) or meta_content(page, "og:url") or page_url
     canonical = urllib.parse.urljoin(page_url, canonical)
 
     return {
         "url": canonical,
-        "sku": text(product.get("sku") or product.get("productGroupID") or product.get("mpn")),
+        "sku": text(concrete.get("sku") or product.get("sku") or product.get("productGroupID") or product.get("mpn")),
         "title": title,
-        "brand": text(product.get("brand")) or meta_content(page, "product:brand"),
+        "brand": text(concrete.get("brand")) or text(product.get("brand")) or meta_content(page, "product:brand"),
         "description": description[:DESCRIPTION_LIMIT] if description else None,
-        "color": text(product.get("color")) or meta_content(page, "product:color"),
-        "material": text(product.get("material")),
+        "color": text(concrete.get("color")) or (text(product.get("color")) if not isinstance(product.get("color"), list) else None) or (meta_content(page, "product:color") if not variants else None),
+        "material": text(concrete.get("material")) or text(product.get("material")),
         "categoryPath": category_path or text(product.get("category")),
-        "gender": guess_gender(text(audience.get("suggestedGender")), category_path, canonical, title),
+        "gender": guess_gender(text(audience.get("suggestedGender")), text(product.get("gender")), title, category_path, canonical),
         "sizes": sizes,
         "inStockSizes": in_stock_sizes,
+        "sizeAvailabilityKnown": size_availability_known,
         "images": list(dict.fromkeys(images))[:IMAGE_LIMIT],
         "price": price,
-        "originalPrice": float(original) if original and re.fullmatch(r"[\d.]+", original) else None,
+        "originalPrice": original,
+        "originalPriceVerified": original is not None,
         "currency": currency,
         "available": available,
     }
@@ -325,8 +432,9 @@ def shopify_products(store, log):
     while page <= 40:
         try:
             data = json.loads(fetch(f"{base}/products.json?limit=250&page={page}", accept="application/json"))
-        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
-            return None if page == 1 else products
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+            log.append(f"shopify page {page} failed: {error}; using incremental sitemap fallback")
+            return None
         batch = data.get("products") or []
         if not batch:
             break
@@ -337,10 +445,21 @@ def shopify_products(store, log):
             variants = item.get("variants", [])
             def option(variant, index):
                 return variant.get(f"option{index + 1}") if index is not None else None
-            sizes = list(dict.fromkeys(filter(None, (option(v, size_index) for v in variants))))
-            in_stock = list(dict.fromkeys(filter(None, (option(v, size_index) for v in variants if v.get("available")))))
-            prices = [float(v["price"]) for v in variants if v.get("price")]
-            compare = [float(v["compare_at_price"]) for v in variants if v.get("compare_at_price")]
+            live = [v for v in variants if v.get("available") is True]
+            priced = [v for v in (live or variants) if positive_price(v.get("price")) is not None]
+            selected = min(priced, key=lambda v: positive_price(v.get("price"))) if priced else next(iter(live or variants), {})
+            color = option(selected, color_index)
+            # Keep the selected color's stock and imagery with its price.
+            color_variants = [v for v in variants if color_index is None or option(v, color_index) == color]
+            sizes = list(dict.fromkeys(filter(None, (option(v, size_index) for v in color_variants))))
+            in_stock = list(dict.fromkeys(filter(None, (option(v, size_index) for v in color_variants if v.get("available") is True))))
+            price = positive_price(selected.get("price"))
+            original = positive_price(selected.get("compare_at_price"))
+            if original is not None and (price is None or original <= price):
+                original = None
+            images = item.get("images", [])
+            if selected.get("image_id") is not None:
+                images = sorted(images, key=lambda image: image.get("id") != selected["image_id"])
             description = text(item.get("body_html"))
             path = " > ".join(filter(None, [item.get("product_type"), ", ".join(item.get("tags", [])[:8]) if isinstance(item.get("tags"), list) else item.get("tags")]))
             products.append({
@@ -349,17 +468,19 @@ def shopify_products(store, log):
                 "title": text(item.get("title")),
                 "brand": text(item.get("vendor")),
                 "description": description[:DESCRIPTION_LIMIT] if description else None,
-                "color": next(filter(None, (option(v, color_index) for v in variants)), None),
+                "color": color,
                 "material": None,
                 "categoryPath": path or None,
-                "gender": guess_gender(path, item.get("title")),
+                "gender": guess_gender(item.get("title"), path),
                 "sizes": sizes,
                 "inStockSizes": in_stock,
-                "images": [i.get("src") for i in item.get("images", [])[:IMAGE_LIMIT] if i.get("src")],
-                "price": min(prices) if prices else None,
-                "originalPrice": max(compare) if compare else None,
+                "sizeAvailabilityKnown": bool(size_index is not None and color_variants) and all(isinstance(v.get("available"), bool) for v in color_variants),
+                "images": [i.get("src") for i in images[:IMAGE_LIMIT] if i.get("src")],
+                "price": price,
+                "originalPrice": original,
+                "originalPriceVerified": original is not None,
                 "currency": None,
-                "available": any(v.get("available") for v in variants),
+                "available": True if any(v.get("available") is True for v in color_variants) else (False if color_variants and all(v.get("available") is False for v in color_variants) else None),
             })
         page += 1
         time.sleep(store.get("delaySeconds", 1.0))

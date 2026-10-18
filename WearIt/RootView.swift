@@ -15,7 +15,7 @@ struct RootView: View {
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
     @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
     @AppStorage(AppBackdropKeys.customImageIsDark) private var backdropImageIsDark = false
-    enum AppTab: Hashable { case planner, calendar, wardrobe, add }
+    enum AppTab: Hashable { case planner, calendar, wardrobe, shopping, add }
 
     private var backdropScheme: ColorScheme {
         let preset = AppBackdropPreset(rawValue: backdropPresetRaw) ?? .softSky
@@ -39,6 +39,13 @@ struct RootView: View {
 
             Tab(LocalizedStringKey("tab_wardrobe"), systemImage: "square.grid.2x2", value: AppTab.wardrobe) {
                 WardrobeView()
+            }
+
+            Tab(LocalizedStringKey("tab_shopping"), systemImage: "bag", value: AppTab.shopping) {
+                NavigationStack {
+                    ShopPicksView(isRoot: true)
+                        .withLocalAppBackdrop()
+                }
             }
 
             Tab(LocalizedStringKey("tab_add"), systemImage: "plus.circle", value: AppTab.add) {
@@ -103,6 +110,8 @@ struct RootView: View {
                 selected = .planner
             } else if url.host == "add" {
                 selected = .add
+            } else if url.host == "shopping" {
+                selected = .shopping
             } else if url.host == "confirm-worn" {
                 selected = .planner
                 NotificationCenter.default.post(name: .confirmWornFromWidget, object: nil)

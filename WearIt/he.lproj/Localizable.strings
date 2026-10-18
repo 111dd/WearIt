@@ -9,6 +9,7 @@
 "tab_outfits" = "לוקים";
 "tab_calendar" = "יומן";
 "tab_wardrobe" = "ארון";
+"tab_shopping" = "קניות";
 "tab_add" = "הוסף";
 "tab_stats" = "סטטיסטיקה";
 "tab_profile" = "פרופיל";
@@ -466,7 +467,7 @@
 "slot_accessory" = "אביזר";
 
 // MARK: - Planner Board
-"planner_board_title" = "מתכנן 3 ימים";
+"planner_board_title" = "הלוקים שלך";
 "planner_refresh_day" = "רענן";
 "planner_more_like_this" = "עוד כמו זה";
 "planner_something_different" = "משהו אחר";
@@ -1251,14 +1252,10 @@
 
 /* Shop picks */
 "shop_title" = "בחירות בשבילך";
-"shop_subtitle" = "מחנויות בישראל, מדורגות לפי כמה פעמים באמת תלבש כל פריט עם מה שכבר יש לך. הארון שלך נשאר בטלפון.";
-"shop_section_subtitle" = "פריטים חדשים שמתאימים למה שאתה לובש הכי הרבה.";
-"shop_footer" = "המחירים והמלאי מגיעים מאתרי החנויות ומתעדכנים כל לילה. כדאי לבדוק בחנות לפני קנייה.";
-"shop_gender_label" = "הצג";
-"shop_gender_women" = "נשים";
-"shop_gender_men" = "גברים";
-"shop_gender_all" = "הכל";
-"shop_filter_all" = "הכל";
+"shop_subtitle" = "התאמות אישיות לפי ההעדפות שלך, הארון והבחירות שלך בקניות, עם מבצעים שימושיים ורעיונות ללוקים.";
+"shop_section_subtitle" = "התאמות אישיות, מבצעים שימושיים והשלמות ללוקים שלך.";
+"shop_footer" = "המחירים והמלאי בקטלוג עשויים להשתנות או להיות שונים לפי מידה וצבע. לפני קנייה, בדוק בחנות את המבצע, המידה והזמינות העדכניים.";
+"shop_filter_all" = "בשבילך";
 "shop_filter_saved" = "שמורים";
 "shop_empty_wardrobe" = "הוסף לפחות 5 פריטים לארון כדי שההצעות יתאימו לו.";
 "shop_empty_catalog" = "עדיין אין פריטים מהחנויות. משוך למטה כדי לבדוק שוב.";
@@ -1270,15 +1267,15 @@
 "shop_action_save" = "שמור";
 "shop_action_unsave" = "הסר מהשמורים";
 "shop_action_dismiss" = "לא בשבילי";
-"shop_action_bought" = "קניתי";
-"shop_wears_per_month_format" = "בערך %d פעמים בחודש";
+"shop_action_bought" = "רכשתי";
+"shop_wears_per_month_format" = "הערכה: כ־%d פעמים בחודש";
 "shop_reason_gap_rain" = "חסר לך משהו לגשם";
 "shop_reason_gap_cold" = "חסרה לך שכבה חמה יותר";
 "shop_reason_gap_heat" = "עוד משהו לימים חמים";
 "shop_reason_gap_formal" = "לימים שדורשים לבוש מכובד";
 "shop_reason_gap_light_layer" = "שכבה קלה לימי מעבר";
 "shop_reason_gap_category_format" = "אין לך מספיק %@ לגיוון";
-"shop_reason_looks_format" = "מתאים ל־%d לוקים שאתה כבר לובש";
+"shop_reason_looks_format" = "משתלב ב־%d צירופי לבוש עם הארון שלך";
 "shop_reason_color_format" = "ב%@, צבע שאתה לובש הרבה";
 "shop_reason_brand_format" = "%@ הוא מותג שאתה אוהב";
 "shop_reason_worn_type_format" = "אתה לובש הרבה %@";
@@ -1313,3 +1310,115 @@
 "garment_photo_role_label" = "תווית";
 "garment_photo_role_on_body" = "על הגוף";
 "garment_photo_role_clasp" = "סוגר או אבזם";
+
+/* Today-first planner */
+"planner_coming_up" = "בימים הקרובים";
+"planner_more_suggestions" = "הצעות נוספות";
+"planner_connect_calendar_action" = "חבר יומן";
+"planner_explore_style_action" = "לחדד את הסגנון שלי";
+"planner_add_to_look" = "הוסף פריט ללוק";
+
+/* Consistent wardrobe photos and subject selection */
+"wardrobe_search_prompt" = "חיפוש שם, מותג או סוג פריט";
+"wardrobe_grid_density" = "גודל הכרטיסים";
+"wardrobe_grid_comfortable" = "מרווח";
+"wardrobe_grid_compact" = "קומפקטי";
+"wardrobe_all_categories" = "הכול";
+"wardrobe_search_empty_title" = "לא נמצאו פריטים מתאימים";
+"wardrobe_search_empty_message" = "אפשר לנסות שם אחר או לנקות את הסינון.";
+"photo_tool_select_subject" = "בחירת הבגד בתמונה";
+"photo_tool_find_photo" = "מציאת תמונה טובה יותר";
+"photo_tool_item_actions" = "פעולות לפריט";
+"photo_tool_photo_count_format" = "%d תמונות";
+"photo_subject_instructions" = "יש להקיש או ללחוץ לחיצה ארוכה על הבגד. בתמונה של בגד על הגוף אפשר לבחור גם מחלקי הלבוש למטה.";
+"photo_subject_analyzing" = "מזהה אובייקטים…";
+"photo_subject_selection_ready" = "הבחירה שלך. התמונה המקורית תישמר.";
+"photo_subject_use_selection" = "שימוש בבגד שנבחר";
+"photo_subject_no_selection" = "עדיין לא נבחר בגד. אפשר לנסות אובייקט אחר או חלק לבוש למטה. אם לא ניתן להפריד את הבגד, אפשר לחתוך אותו בעורך התמונה.";
+"photo_advice_low_resolution" = "התמונה קטנה. אפשר לחפש תמונה חדה יותר או לייבא תמונה מחנות.";
+"photo_advice_isolate" = "לכרטיס נקי יותר, אפשר לבחור את הבגד ולהפריד אותו מהרקע.";
+"photo_search_explanation" = "תמונות דומות מקטלוג החנויות מדורגות במכשיר לפי הצילום ופרטי הפריט. התמונה שלך אינה מועלת לרשת.";
+"photo_search_product_link" = "יש לך קישור למוצר?";
+"photo_search_link_placeholder" = "הדבקת קישור למוצר בחנות";
+"photo_search_import_link" = "הצגת תמונות המוצר";
+"photo_search_web_action" = "חיפוש תמונות ברשת";
+"photo_search_web_hint" = "החיפוש ייפתח בדפדפן לפי המותג, הסוג והצבע. כדי לייבא תמונות, יש להעתיק לכאן קישור לעמוד המוצר.";
+"photo_search_loading" = "מחפש תמונות…";
+"photo_search_review_notice" = "תמונה דומה עשויה להציג מוצר אחר. כדאי להשוות את הצבע, הגזרה והפרטים לפני הוספה.";
+"photo_search_back_results" = "חזרה לתמונות";
+"photo_search_current" = "התמונה הקיימת";
+"photo_search_suggested" = "התמונה החדשה";
+"photo_search_add_gallery" = "הוספה לגלריה";
+"photo_search_empty" = "לא נמצאו תמונות בקטלוג הזמין. אפשר לנסות קישור למוצר או חיפוש ברשת.";
+"photo_search_invalid_link" = "יש להזין קישור לעמוד מוצר.";
+"photo_search_load_failed" = "לא ניתן לטעון את התמונה. אפשר לנסות תמונה אחרת או קישור למוצר.";
+"photo_search_source" = "מקור התמונה";
+
+/* Personal shopping and outfit ideas */
+"shop_filter_deals" = "מבצעים";
+"shop_filter_upcoming" = "לוקים קרובים";
+"shop_filter_everyday" = "ליומיום";
+"shop_filter_next_season" = "לעונה הבאה";
+"shop_next_season_toggle" = "לכלול מציאות לעונה הבאה";
+"shop_next_season_detail" = "רק הנחות משמעותיות על פריטים שמתאימים לארון ולסגנון שלך.";
+"shop_reason_style" = "מתאים לסגנון שלך";
+"shop_reason_everyday" = "מוסיף גיוון ללבוש היומיומי שלך";
+"shop_reason_completes_look" = "משלים לוקים עם בגדים שכבר יש לך";
+"shop_reason_upcoming_format" = "ללוק שלך ב־%@";
+"shop_reason_upcoming_evening_format" = "ללוק הערב שלך ב־%@";
+"shop_reason_next_season_format" = "מבצע ל%@";
+"shop_reason_check_size" = "בדוק מידה וזמינות בחנות";
+"shop_season_summer" = "קיץ";
+"shop_season_winter" = "חורף";
+"shop_season_transition" = "אביב ולסתיו";
+"shop_season_all" = "כל העונות";
+"shop_preview_title" = "כך זה משתלב עם הארון שלך";
+"shop_preview_owned" = "מהארון שלך";
+"shop_preview_new" = "מהחנות";
+"shop_preview_optional_extra" = "תוספת אפשרית ללוק הזה";
+
+/* Shopping preferences and manual exploration */
+"shop_mode_personalized" = "בשבילך";
+"shop_mode_browse" = "חיפוש חופשי";
+"shop_browse_intro" = "אפשר לעיין בחנויות ולבחור סינון בעצמך. הבחירות כאן לא משנות את ההעדפות האישיות ששמרת.";
+"shop_browse_search" = "חיפוש פריטים, מותגים או חנויות";
+"shop_browse_filters" = "סינון";
+"shop_browse_all" = "כל הפריטים";
+"shop_browse_empty" = "אין פריטים שמתאימים לבחירות האלה. אפשר לשנות את החיפוש או את הסינון.";
+"shop_browse_more" = "הצג עוד פריטים";
+"shop_browse_reset" = "נקה סינון";
+"shop_browse_apply" = "החל";
+"shop_browse_filters_detail" = "בחר את מחלקת החנות שבה תרצה לעיין. הבחירה תקפה רק לחיפוש החופשי.";
+"shop_browse_selected_detail" = "יוצגו רק הצבעים, המותגים והסגנונות שנבחרו. שדה ריק כולל את כל האפשרויות.";
+"shop_preferences_title" = "העדפות קנייה";
+"shop_preferences_row_detail" = "בחירת מחלקת קנייה, צבעים, מותגים והעדפות לתמונות.";
+"shop_choose_preferences" = "בחר את העדפות הקנייה שלך";
+"shop_preferences_summary_format" = "העדפות קנייה: %@";
+"shop_department_label" = "מחלקת קנייה";
+"shop_department_automatic" = "אוטומטי";
+"shop_department_men" = "בגדי גברים";
+"shop_department_women" = "בגדי נשים";
+"shop_department_all" = "כל המחלקות";
+"shop_department_detail" = "הבחירה האוטומטית נשענת על מידע ברור מבחירות הקנייה שלך. אפשר לבחור מחלקה בעצמך בכל רגע.";
+"shop_preferences_colors" = "צבעים";
+"shop_preferences_styles" = "סגנונות";
+"shop_preferences_brands" = "מותגים";
+"shop_preferences_brands_placeholder" = "שמות מותגים, מופרדים בפסיקים";
+"shop_preferences_optional_detail" = "רמזים נוספים להתאמות אישיות. אפשר להשאיר ריק כדי ללמוד מהארון ומבחירות הקנייה שלך.";
+"shop_preferences_automatic" = "ללא הגבלה";
+"shop_preferences_selected_format" = "%d נבחרו";
+"shop_preferences_product_photos" = "להעדיף תמונות של הפריט בלבד";
+"shop_preferences_product_photos_detail" = "יוצגו תמונות של הפריט בלבד כשיש כאלה. אם בחנות יש רק תמונות על דוגמנים, יוצג סמל ניטרלי במקומן.";
+"shop_preferences_sizes_detail" = "גם המידות ששמרת עוזרות להתאים את ההצעות האישיות.";
+"shop_preferences_save_failed" = "לא ניתן לשמור את העדפות הקנייה. נסה שוב.";
+"shop_style_casual" = "יומיומי";
+"shop_style_smart_casual" = "קז׳ואל אלגנטי";
+"shop_style_business" = "עסקי";
+"shop_style_formal" = "רשמי";
+"shop_style_sporty" = "ספורטיבי";
+"shop_style_streetwear" = "אופנת רחוב";
+"shop_style_bohemian" = "בוהמייני";
+"shop_style_minimalist" = "מינימליסטי";
+"shop_style_vintage" = "וינטג׳";
+"shop_department_needed" = "בחר מחלקת קנייה כדי לכלול בגדים שמתאימים לך בהצעות האישיות.";
+"shop_preferences_from_wardrobe" = "לפי הארון שלי";

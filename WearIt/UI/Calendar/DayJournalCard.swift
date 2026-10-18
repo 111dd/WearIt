@@ -91,7 +91,7 @@ struct DayJournalCard: View {
             primaryAction
         }
         .padding(DS.Spacing.md)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
         .photosPicker(isPresented: $showPhotoLibrary, selection: $photosPickerItems, maxSelectionCount: 8, matching: .images)
         .onAppear { syncDrafts() }
         .onChange(of: model.date) { _, _ in
