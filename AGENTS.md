@@ -191,6 +191,7 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-18 · Claude Code · Shop catalog first real crawl fixed (Hebrew URLs, Terminal X product pages only, Castro home/kids skipped, per-store time budget, category from URL folders): Terminal X 2,115 items, Castro 1,080 on `catalog-data`.
 - 2026-10-18 · Codex · Dor reports the Add/calendar/gallery changes work and authorized publication via a focused PR to main. Automated tests, builds and simulator were not run by the agent; performance measurements remain unrecorded.
 - 2026-10-18 · Codex · Item photo gallery: choose the main photo, assign category/type-specific views (front/back, shoe side/sole, bag inside, detail/label/on-body), full-screen path-based viewer; preserve previous covers and crop sources, process media off-main, invalidate thumbnails/refresh widget and export photo roles. Optional `Garment.photoMetadataRaw`; additional image files still local-only. Owner runtime review pending.
 - 2026-10-18 · Codex · Audit A02: calendar photo import captures its destination day before transferable loading and passes it to post creation, so switching dates during loading cannot change the destination; empty processing results no longer show success. No build/tests/simulator.

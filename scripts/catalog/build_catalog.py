@@ -249,6 +249,12 @@ def breadcrumb_path(nodes):
     return None
 
 
+def url_folder_path(page_url):
+    """Category from the URL's folders (castro.com/נשים/חולצות/קצרות/<item> → "נשים > חולצות > קצרות")."""
+    folders = [f for f in urllib.parse.urlsplit(readable(page_url)).path.split("/") if f][:-1]
+    return " > ".join(f.replace("-", " ") for f in folders) or None
+
+
 def meta_content(page, prop):
     pattern = rf'<meta[^>]+(?:property|name)=["\']{re.escape(prop)}["\'][^>]*content=["\']([^"\']*)["\']'
     match = re.search(pattern, page, re.I) or re.search(
@@ -326,7 +332,7 @@ def parse_product_page(page, page_url):
         "description": description[:DESCRIPTION_LIMIT] if description else None,
         "color": text(product.get("color")) or meta_content(page, "product:color"),
         "material": text(product.get("material")),
-        "categoryPath": category_path or text(product.get("category")),
+        "categoryPath": category_path or text(product.get("category")) or url_folder_path(canonical),
         "gender": guess_gender(text(audience.get("suggestedGender")), category_path, readable(canonical), title),
         "sizes": sizes,
         "inStockSizes": in_stock_sizes,
@@ -431,6 +437,8 @@ def crawl_store(store, previous_items, country):
     to_fetch = (fresh + stale)[:budget]
 
     results = {u: item for u, item in known.items() if u in live}
+    for page_url, item in results.items():
+        item["categoryPath"] = item.get("categoryPath") or url_folder_path(page_url)
     failures = not_products = fetched = 0
     # A time budget as well as a page budget: a job that hits the workflow timeout publishes nothing.
     deadline = started + store.get("maxMinutesPerRun", 70) * 60
