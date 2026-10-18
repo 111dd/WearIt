@@ -4,8 +4,8 @@
       "id": "terminalx",
       "name": "Terminal X",
       "base": "https://www.terminalx.com",
-      "productUrlPattern": null,
-      "maxPagesPerRun": 1200,
+      "productUrlPattern": "terminalx\\.com/[a-z]\\d{5,}$",
+      "maxPagesPerRun": 2400,
       "delaySeconds": 1.0,
       "currency": "ILS"
     },
@@ -14,9 +14,10 @@
       "name": "Castro",
       "base": "https://www.castro.com",
       "productUrlPattern": null,
-      "maxPagesPerRun": 1200,
+      "maxPagesPerRun": 2400,
       "delaySeconds": 1.0,
-      "currency": "ILS"
+      "currency": "ILS",
+      "excludeUrlPattern": "/(בית|ילדים|ילדות|בנים|בנות|תינוקות|kids|baby|home)(/|$)|-look-lok"
     }
   ]
 }

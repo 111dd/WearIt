@@ -12,6 +12,11 @@ on:
         description: "Comma-separated store ids (empty = all)"
         required: false
         default: ""
+      probe:
+        description: "Only print what each store exposes (no publish)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -23,7 +28,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -34,13 +39,19 @@ jobs:
             git show FETCH_HEAD:il/catalog.json > previous/il.json 2>/dev/null || rm -f previous/il.json
           fi
 
+      - name: Probe stores
+        if: ${{ inputs.probe }}
+        run: python3 scripts/catalog/build_catalog.py --country IL --out out/il --probe ${{ inputs.only && format('--only {0}', inputs.only) || '' }}
+
       - name: Build catalog
+        if: ${{ !inputs.probe }}
         run: |
           python3 scripts/catalog/build_catalog.py --country IL --out out/il \
             --previous previous/il.json ${{ inputs.only && format('--only {0}', inputs.only) || '' }}
           cat out/il/report.json
 
       - name: Publish to catalog-data
+        if: ${{ !inputs.probe }}
         run: |
           cd out
           git init -q -b catalog-data

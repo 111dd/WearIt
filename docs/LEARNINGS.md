@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-18 — First real shop catalog crawl
+- **Did:** encode Hebrew URLs before fetching (`iri_to_uri`), keep the sitemap page as each item's identity, Castro skips home/kids (`excludeUrlPattern`), Terminal X reads only `/<letter><digits>` product pages (`productUrlPattern`), shuffle unseen pages, 2,400 pages and 70 minutes per store, category from URL folders when the page has none. Result: Terminal X 2,115 items, Castro 1,080.
+- **Why:** the first run published 18 Castro home goods and 0 Terminal X items; a later run hit the 3 h job timeout and published nothing.
+- **Watch:** neither store exposes sizes in JSON-LD; Terminal X has no category or gender for most items (URLs are SKUs only), so the app maps them from the title. Run `catalog.yml` with `probe: true` to see what a store exposes. A branch dispatch publishes to `catalog-data` too.
+
 ## 2026-10-18 — Calendar destination date and item photo roles
 - **Did:** A02 captures `selectedDay` before the calendar's first photo-load await. Item editor gallery now includes main + additional photos with stable path identity, primary selection and per-photo roles tailored to garment category/type. Optional JSON `Garment.photoMetadataRaw` stores role/source/thumb paths; AccountDataService exports primary and roles. No agent build/tests/simulator. Dor later reported the changes work; a detailed validation matrix and timings were not supplied.
 - **Why:** photo imports could land on a later selected day; item photos previously had no primary-selection or view semantics.
