@@ -431,8 +431,14 @@ def crawl_store(store, previous_items, country):
     to_fetch = (fresh + stale)[:budget]
 
     results = {u: item for u, item in known.items() if u in live}
-    failures = not_products = 0
+    failures = not_products = fetched = 0
+    # A time budget as well as a page budget: a job that hits the workflow timeout publishes nothing.
+    deadline = started + store.get("maxMinutesPerRun", 70) * 60
     for page_url in to_fetch:
+        if time.time() > deadline:
+            log.append(f"time budget reached after {fetched} pages")
+            break
+        fetched += 1
         try:
             product = parse_product_page(fetch(page_url), page_url)
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
@@ -456,7 +462,7 @@ def crawl_store(store, previous_items, country):
     items = list({item["id"]: item for item in results.values()}.values())
     report = {
         "status": "ok", "source": "sitemap", "items": len(items), "productUrls": len(urls),
-        "fetched": len(to_fetch), "failed": failures, "notProducts": not_products,
+        "fetched": fetched, "failed": failures, "notProducts": not_products,
         "seconds": round(time.time() - started), "log": log[-20:],
     }
     return items, report
