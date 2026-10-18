@@ -23,6 +23,8 @@ final class UserProfile {
     var avatarImagePath: String?
     /// `WorkDressCode` raw value; nil until the user answers the work question.
     var workDressCodeRaw: String?
+    /// Optional JSON: explicit shopping choices; nil preserves automatic/legacy resolution.
+    var shoppingPreferencesRaw: String?
     /// Usual clothing sizes (`SizeOption` raw values), filled on "My sizes".
     var topSizeRaw: String?
     var bottomSizeRaw: String?

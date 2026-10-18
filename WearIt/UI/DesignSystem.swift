@@ -125,7 +125,7 @@ enum DS {
     
     // MARK: Aspect Ratios
     enum AspectRatio {
-        static let garmentTile: CGFloat = 4.0 / 5.0
+        static let garmentTile: CGFloat = 1
         static let garmentCard: CGFloat = 3.0 / 4.0
         static let thumbnail: CGFloat = 1.0
     }
@@ -154,6 +154,60 @@ enum DS {
     }
 }
 
+// MARK: - Shared content and photography
+
+struct DSContentSurface: ViewModifier {
+    var emphasized = false
+    var cornerRadius: CGFloat = DS.Radius.card
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let opaque = reduceTransparency || contrast == .increased
+        content
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(DS.Surface.bg.opacity(opaque ? 1 : 0.92))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(emphasized ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.07), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
+extension View {
+    func contentSurface(cornerRadius: CGFloat = DS.Radius.card, emphasized: Bool = false) -> some View {
+        modifier(DSContentSurface(emphasized: emphasized, cornerRadius: cornerRadius))
+    }
+}
+
+/// Image bounds and surface stay consistent; the garment never gets stretched
+/// or clipped to fill a card. Transparent source padding is trimmed off-main.
+struct GarmentPhotoCanvas: View {
+    let image: UIImage?
+    var placeholder = "tshirt"
+
+    var body: some View {
+        ZStack {
+            Color(.secondarySystemBackground)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Image(systemName: placeholder)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .clipped()
+    }
+}
+
 // MARK: - Card Modifier
 
 struct DSCard: ViewModifier {
@@ -172,13 +226,7 @@ struct DSCard: ViewModifier {
     }
     
     func body(content: Content) -> some View {
-        content
-            .liquidGlassSurface(
-                cornerRadius: cornerRadius,
-                padding: padding,
-                fallbackMaterial: material,
-                castsShadow: true
-            )
+        content.padding(padding).contentSurface(cornerRadius: cornerRadius)
     }
 }
 
@@ -386,23 +434,9 @@ struct DSGarmentThumbnail: View {
     }
     
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                .fill(Color(.systemGray6))
-            
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: scaledDimension, height: scaledDimension)
-                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
-            } else {
-                Image(systemName: garment.category.icon)
-                    .font(.system(size: scaledIconSize))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(width: scaledDimension, height: scaledDimension)
+        GarmentPhotoCanvas(image: image, placeholder: garment.category.icon)
+            .frame(width: scaledDimension, height: scaledDimension)
+            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                 .strokeBorder(.primary.opacity(0.05), lineWidth: 1)
@@ -411,14 +445,10 @@ struct DSGarmentThumbnail: View {
             let thumbPath = garment.thumbnailPath
             let imagePath = garment.imagePath
             let imageData = garment.imageData
-            let cacheKey = garment.id.uuidString
             let pixelSize = size.dimension * UIScreen.main.scale
             let garmentID = garment.id
 
-            if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
-                image = cached
-                return
-            }
+            image = nil
 
             if let path = imagePath, !ImageStore.fileExists(path: path) {
                 CloudKitImageSyncService.shared.ensureLocalMainImage(
@@ -434,18 +464,8 @@ struct DSGarmentThumbnail: View {
             }
 
             let loaded: UIImage? = await Task.detached(priority: .utility) {
-                if let thumbPath,
-                   let cached = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                    return cached
-                }
-                if let imagePath,
-                   let thumb = ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize) {
-                    return thumb
-                }
-                if let imageData {
-                    return ImageStore.downsample(data: imageData, maxPixelSize: pixelSize)
-                }
-                return nil as UIImage?
+                ImageStore.loadGarmentPreview(imagePath: imagePath, thumbnailPath: thumbPath,
+                                              legacyData: imageData, maxPixelSize: pixelSize)
             }.value
             guard !Task.isCancelled else { return }
             image = loaded
@@ -475,22 +495,7 @@ struct DSGarmentTile: View {
     
     var body: some View {
         VStack(spacing: DS.Spacing.xs) {
-            ZStack {
-                RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                    .fill(Color(.secondarySystemBackground).opacity(0.35))
-                
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                } else {
-                    Image(systemName: garment.category.icon)
-                        .font(.system(size: DS.IconSize.xl))
-                        .foregroundStyle(.tertiary)
-                }
-            }
+            GarmentPhotoCanvas(image: image, placeholder: garment.category.icon)
             .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous))
             .overlay(
@@ -518,16 +523,10 @@ struct DSGarmentTile: View {
             let thumbPath = garment.thumbnailPath
             let imagePath = garment.imagePath
             let imageData = garment.imageData
-            let cacheKey = garment.id.uuidString
             let pixelSize = tilePixelSize
             let garmentID = garment.id
 
-            if let cached = ImageStore.cachedThumbnail(cacheKey: cacheKey) {
-                image = cached
-            } else {
-                // Avoid briefly showing a previous garment while the new image loads.
-                image = nil
-            }
+            image = nil
 
             if let path = imagePath, !ImageStore.fileExists(path: path) {
                 CloudKitImageSyncService.shared.ensureLocalMainImage(
@@ -542,21 +541,9 @@ struct DSGarmentTile: View {
                 )
             }
 
-            if image != nil { return }
-
             let loaded: UIImage? = await Task.detached(priority: .utility) {
-                if let thumbPath,
-                   let thumb = ImageStore.loadStoredThumbnail(path: thumbPath, cacheKey: cacheKey) {
-                    return thumb
-                }
-                if let imagePath,
-                   let thumb = ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize) {
-                    return thumb
-                }
-                if let imageData {
-                    return ImageStore.downsample(data: imageData, maxPixelSize: pixelSize)
-                }
-                return nil as UIImage?
+                ImageStore.loadGarmentPreview(imagePath: imagePath, thumbnailPath: thumbPath,
+                                              legacyData: imageData, maxPixelSize: pixelSize)
             }.value
             guard !Task.isCancelled else { return }
             image = loaded

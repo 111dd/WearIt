@@ -9,6 +9,7 @@
 "tab_outfits" = "Outfits";
 "tab_calendar" = "Calendar";
 "tab_wardrobe" = "Wardrobe";
+"tab_shopping" = "Shopping";
 "tab_add" = "Add";
 "tab_stats" = "Stats";
 "tab_profile" = "Profile";
@@ -537,7 +538,7 @@
 "slot_accessory" = "Accessory";
 
 // MARK: - Planner Board
-"planner_board_title" = "3-Day Planner";
+"planner_board_title" = "Your outfits";
 "planner_refresh_day" = "Refresh";
 "planner_more_like_this" = "More like this";
 "planner_something_different" = "Something different";
@@ -1232,14 +1233,10 @@
 
 /* Shop picks */
 "shop_title" = "Picks for you";
-"shop_subtitle" = "From Israeli shops, ranked by how often you'd actually wear each piece with what you already own. Your wardrobe stays on your phone.";
-"shop_section_subtitle" = "New pieces that go with what you wear most.";
-"shop_footer" = "Prices and stock come from the shops' sites and update nightly. Check the shop before you buy.";
-"shop_gender_label" = "Show";
-"shop_gender_women" = "Women";
-"shop_gender_men" = "Men";
-"shop_gender_all" = "All";
-"shop_filter_all" = "All";
+"shop_subtitle" = "Personal picks from your preferences, wardrobe and shopping choices, with useful deals and outfit ideas.";
+"shop_section_subtitle" = "Personal picks, useful deals and ways to complete your outfits.";
+"shop_footer" = "Catalog prices and stock can change or vary by size and color. Confirm the current offer, size and availability in the shop before buying.";
+"shop_filter_all" = "For you";
 "shop_filter_saved" = "Saved";
 "shop_empty_wardrobe" = "Add at least 5 items to your wardrobe so picks can match it.";
 "shop_empty_catalog" = "No shop items yet. Pull down to check again.";
@@ -1252,14 +1249,14 @@
 "shop_action_unsave" = "Remove from saved";
 "shop_action_dismiss" = "Not for me";
 "shop_action_bought" = "I bought it";
-"shop_wears_per_month_format" = "About %d× a month";
+"shop_wears_per_month_format" = "Estimated %d× a month";
 "shop_reason_gap_rain" = "You're missing something for rain";
 "shop_reason_gap_cold" = "You need a warmer layer";
 "shop_reason_gap_heat" = "More for hot days";
 "shop_reason_gap_formal" = "For your dressier days";
 "shop_reason_gap_light_layer" = "A light layer for in-between days";
 "shop_reason_gap_category_format" = "Your %@ rotation is thin";
-"shop_reason_looks_format" = "Goes with %d looks you already wear";
+"shop_reason_looks_format" = "Works in %d outfit combinations with your wardrobe";
 "shop_reason_color_format" = "In %@, a color you wear a lot";
 "shop_reason_brand_format" = "%@ is a brand you love";
 "shop_reason_worn_type_format" = "You wear %@ often";
@@ -1294,3 +1291,115 @@
 "garment_photo_role_label" = "Label";
 "garment_photo_role_on_body" = "Worn";
 "garment_photo_role_clasp" = "Clasp or buckle";
+
+/* Today-first planner */
+"planner_coming_up" = "Coming up";
+"planner_more_suggestions" = "More suggestions";
+"planner_connect_calendar_action" = "Connect calendar";
+"planner_explore_style_action" = "Explore my style";
+"planner_add_to_look" = "Add to this look";
+
+/* Consistent wardrobe photos and subject selection */
+"wardrobe_search_prompt" = "Search name, brand or item type";
+"wardrobe_grid_density" = "Grid size";
+"wardrobe_grid_comfortable" = "Comfortable";
+"wardrobe_grid_compact" = "Compact";
+"wardrobe_all_categories" = "All";
+"wardrobe_search_empty_title" = "No matching items";
+"wardrobe_search_empty_message" = "Try another name or clear the filters.";
+"photo_tool_select_subject" = "Select the garment";
+"photo_tool_find_photo" = "Find a better photo";
+"photo_tool_item_actions" = "Item actions";
+"photo_tool_photo_count_format" = "%d photos";
+"photo_subject_instructions" = "Tap or press and hold the garment. For a photo of someone wearing it, you can also choose a clothing section below.";
+"photo_subject_analyzing" = "Finding subjects…";
+"photo_subject_selection_ready" = "Your selection. The original photo will be kept.";
+"photo_subject_use_selection" = "Use selected garment";
+"photo_subject_no_selection" = "No selection yet. Try another subject or a clothing section below. If the garment cannot be separated, crop it in the photo editor.";
+"photo_advice_low_resolution" = "This photo is small. You can look for a sharper photo or import one from a shop.";
+"photo_advice_isolate" = "For a cleaner card, select the garment and remove the surrounding background.";
+"photo_search_explanation" = "Similar photos from the shop catalog are ranked on your device using your photo and item details. Your wardrobe photo is not uploaded.";
+"photo_search_product_link" = "Have the product link?";
+"photo_search_link_placeholder" = "Paste a shop product link";
+"photo_search_import_link" = "Show product photos";
+"photo_search_web_action" = "Search images on the web";
+"photo_search_web_hint" = "Search opens in your browser using the brand, type and color. Copy a product page link back here to import its photos.";
+"photo_search_loading" = "Looking for photos…";
+"photo_search_review_notice" = "A similar photo may show a different product. Check the color, cut and details before adding it.";
+"photo_search_back_results" = "Back to photos";
+"photo_search_current" = "Current";
+"photo_search_suggested" = "New photo";
+"photo_search_add_gallery" = "Add to gallery";
+"photo_search_empty" = "No photos found in the available catalog. Try a product link or a web search.";
+"photo_search_invalid_link" = "Enter a link to a product page.";
+"photo_search_load_failed" = "Could not load the photo. Try another photo or product link.";
+"photo_search_source" = "Photo source";
+
+/* Personal shopping and outfit ideas */
+"shop_filter_deals" = "Deals";
+"shop_filter_upcoming" = "Upcoming looks";
+"shop_filter_everyday" = "Everyday";
+"shop_filter_next_season" = "Next season";
+"shop_next_season_toggle" = "Include next-season bargains";
+"shop_next_season_detail" = "Only strong discounts on pieces that fit your wardrobe and style.";
+"shop_reason_style" = "Matches your style";
+"shop_reason_everyday" = "Adds variety to your everyday wardrobe";
+"shop_reason_completes_look" = "Completes outfits with clothes you own";
+"shop_reason_upcoming_format" = "For your %@ look";
+"shop_reason_upcoming_evening_format" = "For your %@ evening look";
+"shop_reason_next_season_format" = "A deal for %@";
+"shop_reason_check_size" = "Check size and availability in the shop";
+"shop_season_summer" = "summer";
+"shop_season_winter" = "winter";
+"shop_season_transition" = "spring and autumn";
+"shop_season_all" = "all seasons";
+"shop_preview_title" = "Wear it with your wardrobe";
+"shop_preview_owned" = "Yours";
+"shop_preview_new" = "Shop piece";
+"shop_preview_optional_extra" = "Optional extra for this look";
+
+/* Shopping preferences and manual exploration */
+"shop_mode_personalized" = "For you";
+"shop_mode_browse" = "Explore";
+"shop_browse_intro" = "Browse the shops and choose your own filters. These choices keep your saved personal preferences as they are.";
+"shop_browse_search" = "Search items, brands or shops";
+"shop_browse_filters" = "Filters";
+"shop_browse_all" = "All items";
+"shop_browse_empty" = "No items match these choices. Try another search or adjust your filters.";
+"shop_browse_more" = "Show more items";
+"shop_browse_reset" = "Clear filters";
+"shop_browse_apply" = "Apply";
+"shop_browse_filters_detail" = "Choose the shop department to browse. This only applies to Explore.";
+"shop_browse_selected_detail" = "Only the selected colors, brands and styles will appear. Leave a field empty to include any.";
+"shop_preferences_title" = "Shopping preferences";
+"shop_preferences_row_detail" = "Choose your shopping department, colors, brands and photo preferences.";
+"shop_choose_preferences" = "Choose your shopping preferences";
+"shop_preferences_summary_format" = "Shopping preferences: %@";
+"shop_department_label" = "Shopping department";
+"shop_department_automatic" = "Automatic";
+"shop_department_men" = "Men’s clothing";
+"shop_department_women" = "Women’s clothing";
+"shop_department_all" = "All departments";
+"shop_department_detail" = "Automatic follows reliable information from your shopping choices. Choose a department yourself whenever you prefer.";
+"shop_preferences_colors" = "Colors";
+"shop_preferences_styles" = "Styles";
+"shop_preferences_brands" = "Brands";
+"shop_preferences_brands_placeholder" = "Brand names, separated by commas";
+"shop_preferences_optional_detail" = "Optional hints for personal recommendations. Leave empty to learn from your wardrobe and shopping choices.";
+"shop_preferences_automatic" = "Any";
+"shop_preferences_selected_format" = "%d selected";
+"shop_preferences_product_photos" = "Prefer photos of the item alone";
+"shop_preferences_product_photos_detail" = "Product-only photos are shown when available. If the shop only shows the item on a person, a neutral placeholder appears instead.";
+"shop_preferences_sizes_detail" = "Your saved sizes also help tailor personal recommendations.";
+"shop_preferences_save_failed" = "Couldn’t save your shopping preferences. Please try again.";
+"shop_style_casual" = "Casual";
+"shop_style_smart_casual" = "Smart casual";
+"shop_style_business" = "Business";
+"shop_style_formal" = "Formal";
+"shop_style_sporty" = "Sporty";
+"shop_style_streetwear" = "Streetwear";
+"shop_style_bohemian" = "Bohemian";
+"shop_style_minimalist" = "Minimalist";
+"shop_style_vintage" = "Vintage";
+"shop_department_needed" = "Choose a shopping department to include the right clothing in your personal picks.";
+"shop_preferences_from_wardrobe" = "From my wardrobe";

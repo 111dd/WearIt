@@ -178,6 +178,27 @@ enum ImageStore {
         return image
     }
 
+    /// A separate, path-versioned display derivative shared by wardrobe, planner
+    /// and gallery. Call off-main. Never put framed images in the raw UUID cache.
+    static func loadGarmentPreview(imagePath: String?, thumbnailPath: String? = nil,
+                                   legacyData: Data? = nil, maxPixelSize: CGFloat) -> UIImage? {
+        let paths = [imagePath, thumbnailPath].compactMap { $0 }
+        let key = "garment-preview-v1|\(paths.joined(separator: "|"))|\(Int(maxPixelSize))"
+        if !paths.isEmpty, let cached = imageCache.object(forKey: key as NSString) { return cached }
+        let preferred = maxPixelSize > thumbnailMaxPixelSize ? imagePath : thumbnailPath
+        let fallback = maxPixelSize > thumbnailMaxPixelSize ? thumbnailPath : imagePath
+        let source = preferred.flatMap { loadThumbnail(path: $0, maxPixelSize: maxPixelSize) }
+            ?? fallback.flatMap { loadThumbnail(path: $0, maxPixelSize: maxPixelSize) }
+            ?? legacyData.flatMap { downsample(data: $0, maxPixelSize: maxPixelSize) }
+        guard let source else { return nil }
+        let framed = GarmentPhotoFraming.trimmed(source)
+        if !paths.isEmpty {
+            imageCache.setObject(framed, forKey: key as NSString, cost: framed.wearItApproximateByteCost)
+            for path in paths { registerCacheKey(key, for: path) }
+        }
+        return framed
+    }
+
     /// ImageIO downsample from an absolute file URL. Safe off the main actor.
     static func downsample(url: URL, maxPixelSize: CGFloat) -> UIImage? {
         let state = signposter.beginInterval("downsample")

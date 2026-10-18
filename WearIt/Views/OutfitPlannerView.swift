@@ -33,6 +33,7 @@ struct OutfitPlannerView: View {
     /// Single hover target — cheaper than a Set that churns on every drag frame.
     @State private var targetedSlot: SlotTarget?
     @AppStorage("planner.allowRepeatedItems") private var allowRepeatedItems = true
+    @AppStorage("planner.changeSuggestions.hiddenLooks") private var hiddenChangeSuggestionLooks = ""
     @State private var garmentActionTarget: SlotTarget?
     /// Item whose inline alternatives strip is open (tap a tile to toggle).
     @State private var quickSwapTarget: SlotTarget?
@@ -42,6 +43,8 @@ struct OutfitPlannerView: View {
     @State private var widgetAlternativesMemo: [String: [[OutfitSlot: UUID]]] = [:]
     @State private var expandedDayDetails: Set<Int> = []
     @State private var selectedDayIndex: Int = 0
+    @State private var preferredSuggestion: PlannerSuggestionKind?
+    @State private var rediscoveryDismissed = false
     @State private var availableGarmentsCache: [Garment] = []
     @State private var currentDate: Date = Date()
     @State private var availableGarmentsSignature: String = ""
@@ -357,92 +360,27 @@ struct OutfitPlannerView: View {
 
     private var plannerContent: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            VStack(alignment: .leading, spacing: DS.Spacing.xxl) {
-                plannerSubtitle
-                    .padding(.horizontal, DS.Spacing.md)
-
-                if let nudge = unwornNudge {
-                    unwornNudgeCard(nudge)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                if let gap = wardrobeGapNudge {
-                    wardrobeGapCard(gap)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                if showsCalendarConnectCard {
-                    CalendarConnectCard(
-                        onConnect: {
-                            Task { _ = await CalendarContextService.shared.connect() }
-                        },
-                        onDismiss: {
-                            UserDefaults.standard.set(true, forKey: "calendar.connectCardDismissed")
-                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
-                                calendarConnectDismissed = true
-                            }
-                        }
-                    )
-                    .padding(.horizontal, DS.Spacing.md)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                } else if showsWorkDressCodeCard {
-                    WorkDressCodeCard(
-                        onPick: { setWorkDressCode($0) },
-                        onDismiss: {
-                            let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
-                            UserDefaults.standard.set(today, forKey: "calendar.workQuestionDismissedDay")
-                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
-                                workQuestionDismissedDay = today
-                            }
-                        }
-                    )
-                    .padding(.horizontal, DS.Spacing.md)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                if styleSwipeOffered, StyleSwipeDeckBuilder.isEligible(allGarments) {
-                    StyleSwipeEntryCard(
-                        deckSize: styleSwipeDeckSize,
-                        isOnboarding: StyleSwipeSchedule.needsOnboarding,
-                        progress: AIRecommender.shared.learningProgress(profileID: activeProfile?.id, modelContext: context),
-                        onOpen: {
-                            styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
-                            showStyleSwipe = true
-                        },
-                        onDismiss: {
-                            StyleSwipeSchedule.dismissForToday()
-                            withAnimation(reduceMotion ? nil : DS.Animation.standard) {
-                                styleSwipeOffered = false
-                            }
-                        }
-                    )
-                    .padding(.horizontal, DS.Spacing.md)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
+            VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 if allGarments.isEmpty {
+                    plannerSubtitle
                     emptyWardrobeCard
-                        .padding(.horizontal, DS.Spacing.md)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 } else {
-                    ForEach(0..<3, id: \.self) { dayIndex in
-                        if dayIndex < boardState.days.count {
-                            dayColumn(for: dayIndex)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, DS.Spacing.md)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                    removal: .opacity
-                                ))
-                        }
+                    if !boardState.days.isEmpty {
+                        dayColumn(for: 0)
+                    }
+
+                    plannerSuggestionSection
+
+                    if boardState.days.count > 1 {
+                        upcomingDaysSection
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, DS.Spacing.sm)
-            .padding(.bottom, DS.Spacing.xxl)
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(.horizontal, DS.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, DS.Spacing.xs)
+            .padding(.bottom, DS.Spacing.lg)
         }
         .frame(maxWidth: .infinity)
         .withLocalAppBackdrop()
@@ -462,6 +400,218 @@ struct OutfitPlannerView: View {
         .animation(reduceMotion ? nil : DS.Animation.standard, value: statusToast)
     }
 
+    private var upcomingDaysSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                Text(String(localized: "planner_coming_up"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+            }
+            ForEach(Array(boardState.days.dropFirst().prefix(2))) { day in
+                dayColumn(for: day.id)
+            }
+        }
+    }
+
+    // MARK: - One optional suggestion, after today's outfit
+
+    private enum PlannerSuggestionKind: String, Identifiable {
+        case workDress, calendar, gap, rediscover, styleSwipe
+        var id: String { rawValue }
+    }
+
+    private var availablePlannerSuggestions: [PlannerSuggestionKind] {
+        guard !allGarments.isEmpty, !boardState.days.isEmpty else { return [] }
+        // Give a question that changes today's outfit the whole attention slot.
+        guard plannerQuestion?.dayIndex != 0 else { return [] }
+        var options: [PlannerSuggestionKind] = []
+        if showsWorkDressCodeCard { options.append(.workDress) }
+        if showsCalendarConnectCard { options.append(.calendar) }
+        if wardrobeGapNudge != nil { options.append(.gap) }
+        let offersSwipe = styleSwipeOffered && StyleSwipeDeckBuilder.isEligible(allGarments)
+        if offersSwipe && StyleSwipeSchedule.needsOnboarding { options.append(.styleSwipe) }
+        if !rediscoveryDismissed, canReplanForCalendar(0), !isUniformOnlyDay(0), unwornNudge != nil {
+            options.append(.rediscover)
+        }
+        if offersSwipe && !StyleSwipeSchedule.needsOnboarding { options.append(.styleSwipe) }
+        return options
+    }
+
+    @ViewBuilder
+    private var plannerSuggestionSection: some View {
+        let options = availablePlannerSuggestions
+        if let kind = preferredSuggestion.flatMap({ options.contains($0) ? $0 : nil }) ?? options.first {
+            PlannerSuggestionCard(
+                title: suggestionTitle(kind), message: suggestionMessage(kind),
+                systemImage: suggestionIcon(kind), onDismiss: { dismissSuggestion(kind) }
+            ) {
+                if options.count > 1 {
+                    Menu {
+                        ForEach(options) { option in
+                            Button {
+                                withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+                                    preferredSuggestion = option
+                                }
+                            } label: {
+                                if kind == option {
+                                    Label(suggestionTitle(option), systemImage: "checkmark")
+                                } else {
+                                    Text(suggestionTitle(option))
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(String(localized: "planner_more_suggestions"))
+                }
+            } actions: {
+                plannerSuggestionActions(kind)
+            }
+        }
+    }
+
+    private func suggestionTitle(_ kind: PlannerSuggestionKind) -> String {
+        switch kind {
+        case .workDress: return String(localized: "work_dress_question")
+        case .calendar: return String(localized: "calendar_connect_title")
+        case .gap:
+            guard let gap = wardrobeGapNudge else { return String(localized: "planner_more_suggestions") }
+            return WardrobeGapsSection.title(for: gap, garmentsByID: [:])
+        case .rediscover: return String(localized: "planner_unworn_nudge_title")
+        case .styleSwipe: return String(localized: "style_swipe_title")
+        }
+    }
+
+    private func suggestionMessage(_ kind: PlannerSuggestionKind) -> String {
+        switch kind {
+        case .workDress: return String(localized: "work_dress_question_subtitle")
+        case .calendar: return String(localized: "calendar_connect_subtitle")
+        case .gap:
+            return wardrobeGapNudge.map { WardrobeGapsSection.reasonText(for: $0.reason) } ?? ""
+        case .rediscover:
+            guard let nudge = unwornNudge else { return "" }
+            return String(format: NSLocalizedString("planner_unworn_nudge_message_format", comment: ""), nudge.count, nudge.sampleTitle)
+        case .styleSwipe:
+            return String(format: NSLocalizedString(
+                StyleSwipeSchedule.needsOnboarding ? "style_swipe_entry_onboarding_format" : "style_swipe_entry_daily_format",
+                comment: ""
+            ), styleSwipeDeckSize)
+        }
+    }
+
+    private func suggestionIcon(_ kind: PlannerSuggestionKind) -> String {
+        switch kind {
+        case .workDress: return "briefcase"
+        case .calendar: return "calendar.badge.checkmark"
+        case .gap: return "hanger"
+        case .rediscover: return "clock.arrow.circlepath"
+        case .styleSwipe: return "rectangle.stack"
+        }
+    }
+
+    @ViewBuilder
+    private func plannerSuggestionActions(_ kind: PlannerSuggestionKind) -> some View {
+        switch kind {
+        case .workDress:
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+                ForEach(WorkDressCode.allCases) { code in
+                    Button {
+                        DS.haptic(0.4)
+                        setWorkDressCode(code)
+                    } label: {
+                        Label(code.title, systemImage: code.icon)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .buttonStyle(PlannerSuggestionActionStyle())
+                }
+            }
+        case .calendar:
+            Button {
+                Task { _ = await CalendarContextService.shared.connect() }
+            } label: {
+                Label(String(localized: "planner_connect_calendar_action"), systemImage: "calendar.badge.plus")
+            }
+            .buttonStyle(PlannerSuggestionActionStyle())
+        case .gap:
+            if let gap = wardrobeGapNudge {
+                gapSuggestionActions(gap)
+            }
+        case .rediscover:
+            Button {
+                DS.haptic(0.4)
+                prioritizeUnwornInToday()
+            } label: {
+                Label(String(localized: "planner_unworn_nudge_action"), systemImage: "arrow.triangle.2.circlepath")
+            }
+            .buttonStyle(PlannerSuggestionActionStyle())
+        case .styleSwipe:
+            Button {
+                styleSwipeDeckSize = StyleSwipeSchedule.nextDeckSize
+                showStyleSwipe = true
+            } label: {
+                Label(String(localized: "planner_explore_style_action"), systemImage: "rectangle.stack")
+            }
+            .buttonStyle(PlannerSuggestionActionStyle())
+        }
+    }
+
+    private func gapSuggestionActions(_ gap: WardrobeGapAnalyzer.Gap) -> some View {
+        // Adaptive actions wrap for long Hebrew labels and accessibility text sizes.
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: DS.Spacing.xs)], spacing: DS.Spacing.xs) {
+            Button {
+                DS.haptic(0.4)
+                activeSheet = .addToWardrobe(gap.suggestion.category)
+            } label: {
+                Label(
+                    String(format: NSLocalizedString("planner_gap_add_format", comment: ""),
+                           gap.suggestion.itemType?.title ?? gap.suggestion.category.title),
+                    systemImage: "plus"
+                )
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(PlannerSuggestionActionStyle())
+            NavigationLink {
+                ShopPicksView().withLocalAppBackdrop()
+            } label: {
+                Label(String(localized: "planner_gap_shop"), systemImage: "bag")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .buttonStyle(PlannerSuggestionActionStyle())
+        }
+    }
+
+    private func dismissSuggestion(_ kind: PlannerSuggestionKind) {
+        DS.haptic(0.25)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            switch kind {
+            case .workDress:
+                let day = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
+                UserDefaults.standard.set(day, forKey: "calendar.workQuestionDismissedDay")
+                workQuestionDismissedDay = day
+            case .calendar:
+                UserDefaults.standard.set(true, forKey: "calendar.connectCardDismissed")
+                calendarConnectDismissed = true
+            case .gap:
+                if let gap = wardrobeGapNudge { snoozeGapNudge(gap) }
+            case .rediscover:
+                rediscoveryDismissed = true
+            case .styleSwipe:
+                StyleSwipeSchedule.dismissForToday()
+                styleSwipeOffered = false
+            }
+        }
+    }
+
     private var emptyWardrobeCard: some View {
         EmptyWardrobeState(
             title: String(localized: "planner_empty_wardrobe_title"),
@@ -470,7 +620,8 @@ struct OutfitPlannerView: View {
         ) {
             activeSheet = .addNewItem(dayIndex: 0, slot: .top, lookTime: .day)
         }
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, padding: DS.Spacing.md, castsShadow: true)
+        .padding(DS.Spacing.md)
+        .modifier(PlannerCardSurface())
     }
 
     private func handleAppear() {
@@ -697,11 +848,13 @@ struct OutfitPlannerView: View {
         let state = boardState.days[dayIndex]
         let reasons = lookReasons(for: dayIndex)
         let tip = layerTip(for: dayIndex)
+        let changes = changeSuggestions(for: dayIndex, lookTime: .day)
         let signature = DayCardSignature(
             dayIndex: dayIndex,
             state: state,
             isExpanded: isDetailsExpanded(dayIndex),
             isSelected: selectedDayIndex == dayIndex,
+            welcomeLine: dayIndex == 0 ? plannerWelcomeLine : nil,
             isConfirmed: isConfirmed(dayIndex),
             forecastKey: forecastKey(for: state.forecast),
             assignedSignature: assignedGarmentSignature(for: dayIndex),
@@ -718,6 +871,7 @@ struct OutfitPlannerView: View {
             ].compactMap { $0 }.joined(separator: "#"),
             placeWeather: placeWeatherSignature(for: dayIndex),
             layerTip: tip.map { "\($0.when.rawValue)|\(Int($0.temperatureC.rounded()))|\($0.jacketID?.uuidString ?? "-")" },
+            changeSuggestion: changes.first,
             question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
@@ -733,15 +887,6 @@ struct OutfitPlannerView: View {
 
                 if let schedule = uniformWorkSchedule(for: dayIndex) {
                     workDayRow(dayIndex: dayIndex, schedule: schedule)
-                }
-
-                if let reminder = calendarReminder(for: dayIndex) {
-                    calendarReminderRow(reminder)
-                }
-
-                if let question = plannerQuestion, question.dayIndex == dayIndex {
-                    plannerQuestionCard(question)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if state.assignedGarmentIDs.isEmpty {
@@ -764,12 +909,20 @@ struct OutfitPlannerView: View {
                     }
                 }
 
+                if let reminder = calendarReminder(for: dayIndex) {
+                    calendarReminderRow(reminder)
+                }
+
+                if let question = plannerQuestion, question.dayIndex == dayIndex {
+                    plannerQuestionCard(question)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 if state.useEveningLook {
                     eveningSection(for: dayIndex)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                let changes = changeSuggestions(for: dayIndex, lookTime: .day)
                 if !changes.isEmpty {
                     changeSuggestionsView(changes, dayIndex: dayIndex)
                 }
@@ -784,12 +937,7 @@ struct OutfitPlannerView: View {
 
             }
             .padding(DS.Spacing.md)
-            .liquidGlassSurface(
-                cornerRadius: DS.Radius.card,
-                tint: Color(.systemBackground).opacity(0.35),
-                fallbackMaterial: .regularMaterial,
-                castsShadow: true
-            )
+            .modifier(PlannerCardSurface(isToday: dayIndex == 0))
         }
         .equatable()
         // Generate explanations only when their details are requested, not for
@@ -946,103 +1094,6 @@ struct OutfitPlannerView: View {
         }
     }
 
-    private func wardrobeGapCard(_ gap: WardrobeGapAnalyzer.Gap) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-            HStack(alignment: .top, spacing: DS.Spacing.sm) {
-                Image(systemName: WardrobeGapsSection.icon(for: gap))
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(WardrobeGapsSection.title(for: gap, garmentsByID: [:]))
-                        .font(.subheadline.weight(.semibold))
-                    Text(WardrobeGapsSection.reasonText(for: gap.reason))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    DS.haptic(0.3)
-                    snoozeGapNudge(gap)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(String(localized: "gap_action_dismiss"))
-            }
-            Button {
-                DS.haptic(0.4)
-                activeSheet = .addToWardrobe(gap.suggestion.category)
-            } label: {
-                Label(
-                    String(
-                        format: NSLocalizedString("planner_gap_add_format", comment: ""),
-                        gap.suggestion.itemType?.title ?? gap.suggestion.category.title
-                    ),
-                    systemImage: "plus.circle.fill"
-                )
-                .font(.footnote.weight(.semibold))
-                .frame(maxWidth: .infinity, minHeight: 36)
-            }
-            .buttonStyle(SoftPressButtonStyle())
-            NavigationLink {
-                ShopPicksView()
-                    .withLocalAppBackdrop()
-            } label: {
-                Label(String(localized: "planner_gap_shop"), systemImage: "bag")
-                    .font(.footnote.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 32)
-            }
-            .buttonStyle(SoftPressButtonStyle())
-        }
-        .padding(DS.Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.accentColor.opacity(0.08))
-    }
-
-    private func unwornNudgeCard(_ nudge: UnwornNudge) -> some View {
-        HStack(alignment: .center, spacing: DS.Spacing.sm) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: "planner_unworn_nudge_title"))
-                    .font(.subheadline.weight(.semibold))
-                Text(
-                    String(
-                        format: NSLocalizedString("planner_unworn_nudge_message_format", comment: ""),
-                        nudge.count,
-                        nudge.sampleTitle
-                    )
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-
-            Button {
-                DS.haptic(0.4)
-                prioritizeUnwornInToday()
-            } label: {
-                Text(String(localized: "planner_unworn_nudge_action"))
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-            }
-            .buttonStyle(SoftPressButtonStyle())
-            .fixedSize()
-        }
-        .padding(DS.Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlassSurface(cornerRadius: DS.Radius.md, tint: Color.orange.opacity(0.08))
-    }
-
     /// Stale garments that are temperature-suitable for at least one of the 3 board days.
     private func boardRelevantStaleGarments() -> [Garment] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -21, to: currentDate) ?? currentDate
@@ -1061,6 +1112,7 @@ struct OutfitPlannerView: View {
     }
 
     private func prioritizeUnwornInToday() {
+        guard !boardState.days.isEmpty, canReplanForCalendar(0), !isUniformOnlyDay(0) else { return }
         // Prefer long-unworn pieces that fit the 3-day board weather, in unlocked day slots.
         func isStaleAndRelevant(_ garment: Garment) -> Bool {
             guard !garment.isCurrentlyUnavailable else { return false }
@@ -1106,32 +1158,37 @@ struct OutfitPlannerView: View {
     
     /// Day title with the forecast and any dress-relevant calendar event as
     /// plain subtitle lines (no glass, so they stay readable on any backdrop).
+    private var plannerWelcomeLine: String {
+        guard let location = weather.locationName, !location.isEmpty else { return greetingLine }
+        return "\(greetingLine) · \(location)"
+    }
+
     private func dayTopBar(for state: PlannerDayState, dayIndex: Int) -> some View {
-        let dayLabel = dayName(for: state.id)
-        let dateText = formattedDate(state.date)
-        let header = "\(dayLabel) · \(dateText)"
-        let event = dayEventLine(for: dayIndex)
-
-        return HStack(alignment: .top, spacing: DS.Spacing.sm) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(header)
-                    .font(.title3.weight(.bold))
-                    // Today is the accented one. Tinting whatever card was last
-                    // tapped looked like a selection that does nothing.
-                    .foregroundStyle(dayIndex == 0 ? Color.accentColor : .primary)
-                    .lineLimit(1)
-
+        HStack(alignment: .top, spacing: DS.Spacing.xs) {
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                if dayIndex == 0 {
+                    Text(plannerWelcomeLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+                    Text(dayName(for: state.id))
+                        .font(dayIndex == 0 ? .title2.weight(.bold) : .headline)
+                        .foregroundStyle(.primary)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(formattedDate(state.date))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 if let forecast = forecastForLook(dayIndex: dayIndex, isEvening: false) {
                     dayWeatherLine(forecast, placeName: dressedPlaceName(for: dayIndex, isEvening: false))
                 }
-
-                if let event {
+                if let event = dayEventLine(for: dayIndex) {
                     dayEventLabel(event, dayIndex: dayIndex)
                 }
             }
-
-            Spacer(minLength: DS.Spacing.xs)
-
+            .frame(maxWidth: .infinity, alignment: .leading)
             dayActionMenu(for: dayIndex)
         }
     }
@@ -1219,7 +1276,7 @@ struct OutfitPlannerView: View {
             Image(systemName: "ellipsis")
                 .font(.body.weight(.bold))
                 .foregroundStyle(.primary)
-                .frame(width: 36, height: 32)
+                .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .accessibilityLabel(String(localized: "planner_day_options"))
@@ -1351,7 +1408,7 @@ struct OutfitPlannerView: View {
             Image(systemName: forecast.condition.icon)
                 .foregroundStyle(weatherIconColor(for: forecast.condition))
             Text(line)
-                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
             if rain >= 30 {
                 Image(systemName: "umbrella.fill")
                     .foregroundStyle(.blue)
@@ -2273,6 +2330,12 @@ struct OutfitPlannerView: View {
     private func changeSuggestions(for dayIndex: Int, lookTime: LookTime) -> [OutfitChangeSuggestion] {
         guard dayIndex < boardState.days.count else { return [] }
         let day = boardState.days[dayIndex]
+        // Check visibility before consulting the score memo: wearing or closing
+        // advice must hide even a previously cached suggestion immediately.
+        guard lookWearStatus(dayIndex: dayIndex, lookTime: lookTime) != .worn,
+              !PlannerChangeSuggestionVisibility.isHidden(
+                in: hiddenChangeSuggestionLooks, date: day.date, lookTime: lookTime
+              ) else { return [] }
         let filled = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
         guard !filled.isEmpty else { return [] }
 
@@ -2306,53 +2369,68 @@ struct OutfitPlannerView: View {
         // Only the strongest suggestion: one optional nudge keeps the card light.
         VStack(alignment: .leading, spacing: DS.Spacing.xs) {
             ForEach(suggestions.prefix(1)) { suggestion in
-                Button {
-                    applyChangeSuggestion(suggestion, dayIndex: dayIndex)
-                } label: {
-                    HStack(spacing: DS.Spacing.sm) {
-                        // The piece it suggests, so it's clear what you'd get.
-                        if let better = garment(for: suggestion.betterGarmentID) {
-                            DSGarmentThumbnail(better, size: .small)
-                                .scaleEffect(0.8)
-                                .frame(width: 40, height: 40)
-                                .accessibilityHidden(true)
-                        } else {
-                            Image(systemName: suggestion.slot == .shoes ? "shoe" : "arrow.triangle.2.circlepath")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.tint)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(
-                                String(
-                                    format: NSLocalizedString("planner_change_slot_format", comment: ""),
-                                    changeItemName(garment(for: suggestion.currentGarmentID), slot: suggestion.slot)
-                                )
-                            )
-                            .font(.caption.weight(.semibold))
+                HStack(spacing: DS.Spacing.xxs) {
+                    Button {
+                        applyChangeSuggestion(suggestion, dayIndex: dayIndex)
+                    } label: {
+                        HStack(spacing: DS.Spacing.sm) {
+                            // The piece it suggests, so it's clear what you'd get.
                             if let better = garment(for: suggestion.betterGarmentID) {
+                                DSGarmentThumbnail(better, size: .small)
+                                    .scaleEffect(0.8)
+                                    .frame(width: 40, height: 40)
+                                    .accessibilityHidden(true)
+                            } else {
+                                Image(systemName: suggestion.slot == .shoes ? "shoe" : "arrow.triangle.2.circlepath")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tint)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
                                 Text(
                                     String(
-                                        format: NSLocalizedString("planner_change_to_format", comment: ""),
-                                        better.displayTitle
+                                        format: NSLocalizedString("planner_change_slot_format", comment: ""),
+                                        changeItemName(garment(for: suggestion.currentGarmentID), slot: suggestion.slot)
                                     )
                                 )
-                                .font(.caption2.weight(.medium))
-                                .lineLimit(1)
+                                .font(.caption.weight(.semibold))
+                                if let better = garment(for: suggestion.betterGarmentID) {
+                                    Text(
+                                        String(
+                                            format: NSLocalizedString("planner_change_to_format", comment: ""),
+                                            better.displayTitle
+                                        )
+                                    )
+                                    .font(.caption2.weight(.medium))
+                                    .lineLimit(1)
+                                }
+                                Text(suggestion.reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
                             }
-                            Text(suggestion.reason)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                            Spacer(minLength: 0)
+                            Text(String(localized: "planner_change_apply"))
+                                .font(.caption2.weight(.semibold))
                         }
-                        Spacer(minLength: 0)
-                        Text(String(localized: "planner_change_apply"))
-                            .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, DS.Spacing.sm)
+                        .padding(.vertical, DS.Spacing.xs)
+                        .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.08))
                     }
-                    .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.vertical, DS.Spacing.xs)
-                    .liquidGlassPill(interactive: true, tint: Color.accentColor.opacity(0.08))
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+
+                    Button {
+                        dismissChangeSuggestions(dayIndex: dayIndex, lookTime: suggestion.lookTime)
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(String(localized: "action_close"))
                 }
-                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -2364,8 +2442,23 @@ struct OutfitPlannerView: View {
         return type.title
     }
 
+    private func dismissChangeSuggestions(dayIndex: Int, lookTime: LookTime) {
+        guard boardState.days.indices.contains(dayIndex) else { return }
+        hiddenChangeSuggestionLooks = PlannerChangeSuggestionVisibility.hiding(
+            in: hiddenChangeSuggestionLooks, date: boardState.days[dayIndex].date, lookTime: lookTime
+        )
+    }
+
     private func applyChangeSuggestion(_ suggestion: OutfitChangeSuggestion, dayIndex: Int) {
         guard dayIndex < boardState.days.count else { return }
+        guard lookWearStatus(dayIndex: dayIndex, lookTime: suggestion.lookTime) != .worn,
+              !PlannerChangeSuggestionVisibility.isHidden(
+                in: hiddenChangeSuggestionLooks, date: boardState.days[dayIndex].date, lookTime: suggestion.lookTime
+              ) else { return }
+        let currentID = suggestion.lookTime == .evening
+            ? boardState.days[dayIndex].eveningGarmentID(for: suggestion.slot)
+            : boardState.days[dayIndex].garmentID(for: suggestion.slot)
+        guard currentID == suggestion.currentGarmentID else { return }
         if suggestion.lookTime == .evening {
             boardState.days[dayIndex].setEveningGarment(suggestion.betterGarmentID, for: suggestion.slot)
         } else {
@@ -2927,68 +3020,77 @@ struct OutfitPlannerView: View {
             }
         }
         let canAdd = !availableSlots(for: dayIndex, lookTime: lookTime).isEmpty
-        let rowItemCount = assignedSlots.count + (canAdd ? 1 : 0)
-        let thumbnailSize: DSGarmentThumbnail.ThumbnailSize = rowItemCount >= 5 ? .small : .medium
-
-        return HStack(spacing: DS.Spacing.sm) {
-            ForEach(assignedSlots, id: \.self) { slot in
-                let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
-                let id: UUID? = {
-                    if isLinked {
-                        return day.garmentID(for: slot)
-                    } else if lookTime == .evening {
-                        return day.eveningGarmentID(for: slot)
-                    } else {
-                        return day.garmentID(for: slot)
+        return Group {
+            if assignedSlots.isEmpty {
+                if canAdd {
+                    Button {
+                        openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
+                    } label: {
+                        Label(String(localized: "planner_add_to_look"), systemImage: "plus")
                     }
-                }()
+                    .buttonStyle(PlannerSuggestionActionStyle())
+                }
+            } else {
+                PlannerOutfitLayout() {
+                    ForEach(assignedSlots, id: \.self) { slot in
+                        let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
+                        let id: UUID? = {
+                            if isLinked {
+                                return day.garmentID(for: slot)
+                            } else if lookTime == .evening {
+                                return day.eveningGarmentID(for: slot)
+                            } else {
+                                return day.garmentID(for: slot)
+                            }
+                        }()
 
-                Group {
-                    if let id, let garment = garment(for: id) {
-                        let isLocked = isLinked || (lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot))
-                        draggableGarmentTile(
-                            garment: garment,
-                            slot: slot,
+                        Group {
+                            if let id, let garment = garment(for: id) {
+                                let isLocked = isLinked || (lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot))
+                                draggableGarmentTile(
+                                    garment: garment,
+                                    slot: slot,
+                                    dayIndex: dayIndex,
+                                    lookTime: lookTime,
+                                    isLocked: isLocked,
+                                    isLinked: isLinked
+                                )
+                                .transition(.asymmetric(
+                                    insertion: .scale(scale: 0.92).combined(with: .opacity),
+                                    removal: .opacity
+                                ))
+                            }
+                        }
+                    }
+
+                    if canAdd {
+                        addItemsButton(
                             dayIndex: dayIndex,
-                            lookTime: lookTime,
-                            isLocked: isLocked,
-                            isLinked: isLinked,
-                            thumbnailSize: thumbnailSize
+                            lookTime: lookTime
                         )
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.92).combined(with: .opacity),
-                            removal: .opacity
-                        ))
                     }
                 }
-            }
-
-            if canAdd {
-                addItemsButton(
-                    dayIndex: dayIndex,
-                    lookTime: lookTime,
-                    thumbnailSize: thumbnailSize
-                )
             }
         }
         .animation(reduceMotion ? nil : DS.Animation.standard, value: assignedSlots)
     }
 
-    private func addItemsButton(
-        dayIndex: Int,
-        lookTime: LookTime,
-        thumbnailSize: DSGarmentThumbnail.ThumbnailSize
-    ) -> some View {
-        let dimension = thumbnailSize.dimension
-        let iconSize = thumbnailSize.iconSize
-        return Button {
+    private func addItemsButton(dayIndex: Int, lookTime: LookTime) -> some View {
+        Button {
             openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
         } label: {
-            Image(systemName: "plus")
-                .font(.system(size: iconSize, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: dimension, height: dimension)
-                .liquidGlassSurface(cornerRadius: DS.Radius.tile, interactive: true)
+            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                .fill(Color.accentColor.opacity(0.035))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                }
+                .overlay {
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(String(localized: "planner_add_new_item"))
@@ -3080,7 +3182,8 @@ struct OutfitPlannerView: View {
     }
 
     private func eveningSection(for dayIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Divider().overlay(Color.primary.opacity(0.04))
             Text(String(localized: workAttire(for: dayIndex) == .uniform ? "planner_after_work_look" : "planner_evening_look"))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -3160,15 +3263,14 @@ struct OutfitPlannerView: View {
         dayIndex: Int,
         lookTime: LookTime,
         isLocked: Bool,
-        isLinked: Bool,
-        thumbnailSize: DSGarmentThumbnail.ThumbnailSize
+        isLinked: Bool
     ) -> some View {
         let day = boardState.days[dayIndex]
         let status = availabilityStatus(for: garment, dayIndex: dayIndex, lookTime: lookTime)
         let isDimmed = !AvailabilityService.isRecommendedEligible(status)
         let canDrag = !isLocked && !isLinked
         let baseTile = ZStack(alignment: .topTrailing) {
-            DSGarmentThumbnail(garment, size: thumbnailSize)
+            DSGarmentTile(garment, showTitle: false)
                 .opacity(isDimmed ? 0.6 : 1.0)
 
         }
@@ -6136,7 +6238,7 @@ struct OutfitPlannerView: View {
         if name.isEmpty {
             return greetingTitle
         }
-        return "\(greetingTitle), \(name)."
+        return "\(greetingTitle), \(name)"
     }
 
     private var headerLine: String {
@@ -6300,6 +6402,7 @@ private struct DayCardSignature: Equatable {
     let state: PlannerDayState
     let isExpanded: Bool
     let isSelected: Bool
+    let welcomeLine: String?
     let isConfirmed: Bool
     let forecastKey: String
     let assignedSignature: String
@@ -6316,6 +6419,8 @@ private struct DayCardSignature: Equatable {
     let placeWeather: String?
     /// "Cool evening, take a jacket?" tip ("evening|17|<jacket id>"), if any.
     let layerTip: String?
+    /// Includes dismissal/wear visibility so the memoized card removes advice immediately.
+    let changeSuggestion: OutfitChangeSuggestion?
     /// The question shown on this card ("short with a jacket?" / "what is this event?").
     let question: String?
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.

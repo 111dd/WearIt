@@ -166,6 +166,9 @@ enum AccountDataService {
         json["bio"] = profile.bio
         json["birthday"] = profile.birthday.map(iso)
         json["workDressCode"] = profile.workDressCodeRaw
+        if let raw = profile.shoppingPreferencesRaw, let data = raw.data(using: .utf8) {
+            json["shoppingPreferences"] = try? JSONSerialization.jsonObject(with: data)
+        }
         json["topSize"] = profile.topSizeRaw
         json["bottomSize"] = profile.bottomSizeRaw
         json["shoeSize"] = profile.shoeSizeRaw
@@ -194,11 +197,13 @@ enum AccountDataService {
         json["primaryPhoto"] = garment.imagePath.flatMap { photoFiles[$0] }
         json["photoDetails"] = garment.galleryPhotoPaths.compactMap { path -> [String: Any]? in
             guard let file = photoFiles[path] else { return nil }
-            return [
+            var detail: [String: Any] = [
                 "file": file,
                 "role": garment.photoInfo(for: path).role.rawValue,
                 "isPrimary": path == garment.imagePath
             ]
+            detail["sourceURL"] = garment.photoInfo(for: path).sourceURL
+            return detail
         }
         json["itemType"] = garment.itemType?.rawValue
         json["brand"] = garment.brand

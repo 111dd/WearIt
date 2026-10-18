@@ -369,7 +369,7 @@ struct CalendarLookView: View {
             .dsSecondaryButton()
         }
         .padding(DS.Spacing.md)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var planTripButton: some View {

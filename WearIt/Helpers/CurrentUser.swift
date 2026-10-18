@@ -128,6 +128,7 @@ extension CurrentUser {
         if keeper.birthday == nil { keeper.birthday = other.birthday }
         if keeper.bio == nil { keeper.bio = other.bio }
         if keeper.workDressCodeRaw == nil { keeper.workDressCodeRaw = other.workDressCodeRaw }
+        if keeper.shoppingPreferencesRaw == nil { keeper.shoppingPreferencesRaw = other.shoppingPreferencesRaw }
         if keeper.topSizeRaw == nil { keeper.topSizeRaw = other.topSizeRaw }
         if keeper.bottomSizeRaw == nil { keeper.bottomSizeRaw = other.bottomSizeRaw }
         if keeper.shoeSizeRaw == nil { keeper.shoeSizeRaw = other.shoeSizeRaw }

@@ -34,10 +34,12 @@ enum ProductFieldMapper {
             }
             return bestScore(haystack, phrases)
         }()
-        let accessoryScore = bestScore(haystack, [
-            "sunglass", "jewellery", "jewelry", "accessor", "scarf", "watch", "belt", "bag", "hat", "cap", "tie",
-            "משקפיים", "צעיף", "חגורה", "תיק", "כובע", "שעון"
-        ])
+        // Match a jewelry ring as a word, never the substring in "spring" apparel.
+        let isRing = haystack.range(of: #"\brings?\b"#, options: .regularExpression) != nil
+        let accessoryScore = max(isRing ? 4 : 0, bestScore(haystack, [
+            "sunglass", "jewellery", "jewelry", "necklace", "bracelet", "earring", "pendant", "accessor", "scarf", "watch", "belt", "bag", "hat", "cap", "tie",
+            "משקפיים", "צעיף", "חגורה", "תיק", "כובע", "שעון", "תכשיט", "שרשרת", "צמיד", "עגיל", "טבעת", "עניבה"
+        ]))
 
         // Fixed priority when scores tie across buckets.
         struct Candidate { let category: Category; let score: Int; let priority: Int }
@@ -76,6 +78,7 @@ enum ProductFieldMapper {
         }
         let haystack = normalize("\(path) \(title ?? "")")
         guard !haystack.isEmpty else { return nil }
+        if category == .accessory, haystack.range(of: #"\brings?\b"#, options: .regularExpression) != nil { return .jewelry }
 
         let pairs: [(ItemType, [String])] = [
             (.tshirt, ["t-shirt", "tshirt", "tshirts", "crew neck", "tee ", " tee", "טי שרט", "טי-שרט", "טישרט", "טישירט"]),
@@ -112,14 +115,14 @@ enum ProductFieldMapper {
             (.jacket, ["jacket", "גקט", "ג'קט"]),
             (.coat, ["coat", "מעיל"]),
             (.sunglasses, ["sunglass", "משקפי שמש"]),
-            (.jewelry, ["jewel"]),
+            (.jewelry, ["jewel", "necklace", "bracelet", "earring", "pendant", "תכשיט", "שרשרת", "צמיד", "עגיל", "טבעת"]),
             (.scarf, ["scarf", "צעיף"]),
             (.belt, ["belt", "חגורה"]),
             (.watch, ["watch", "שעון"]),
             (.bag, ["bag", "backpack", "tote", "תיק"]),
             (.hat, ["hat", "beanie", "כובע"]),
             (.cap, ["cap", "baseball cap"]),
-            (.tie, ["tie", "necktie"])
+            (.tie, ["tie", "necktie", "עניבה"])
         ]
 
         var best: (type: ItemType, score: Int)?
@@ -286,6 +289,31 @@ enum ProductFieldMapper {
             if keys.contains(normalized) { return size }
         }
         return nil
+    }
+
+    // MARK: - Style
+
+    /// Explicit retailer style language supplements type defaults (which cannot describe boho/minimal/vintage).
+    static func mapStyles(_ raw: String?) -> [StyleTag] {
+        guard let raw else { return [] }
+        let text = normalize(raw)
+        let aliases: [(StyleTag, [String], [String])] = [
+            (.casual, ["casual"], ["יומיומי", "קזואל", "קז׳ואל"]),
+            (.smart_casual, ["smart casual", "smart-casual"], ["קזואל אלגנט", "קז׳ואל אלגנט"]),
+            (.business, ["business", "officewear"], ["עסקי"]),
+            (.formal, ["formal", "black tie"], ["רשמי"]),
+            (.sporty, ["sport", "sports", "sporty", "athletic", "activewear"], ["ספורט"]),
+            (.streetwear, ["streetwear", "street wear"], ["סטריט", "אופנת רחוב"]),
+            (.bohemian, ["bohemian", "boho"], ["בוהמ", "בוהו"]),
+            (.minimalist, ["minimalist", "minimalism"], ["מינימליסט"]),
+            (.vintage, ["vintage", "retro"], ["וינטג", "רטרו"])
+        ]
+        return aliases.compactMap { tag, english, hebrew in
+            let matched = english.contains { phrase in
+                text.range(of: "\\b" + NSRegularExpression.escapedPattern(for: phrase) + "\\b", options: .regularExpression) != nil
+            } || hebrew.contains { text.contains($0) }
+            return matched ? tag : nil
+        }
     }
 
     // MARK: - Materials

@@ -48,16 +48,19 @@ struct GarmentPhotoMetadata: Codable {
     var roleRaw: String
     var originalPath: String?
     var thumbnailPath: String?
+    /// Public product page, if the user imported this photograph from a shop.
+    var sourceURL: String?
 
     var role: GarmentPhotoRole {
         get { GarmentPhotoRole(rawValue: roleRaw) ?? .other }
         set { roleRaw = newValue.rawValue }
     }
 
-    init(role: GarmentPhotoRole = .other, originalPath: String? = nil, thumbnailPath: String? = nil) {
+    init(role: GarmentPhotoRole = .other, originalPath: String? = nil, thumbnailPath: String? = nil, sourceURL: String? = nil) {
         roleRaw = role.rawValue
         self.originalPath = originalPath
         self.thumbnailPath = thumbnailPath
+        self.sourceURL = sourceURL
     }
 }
 

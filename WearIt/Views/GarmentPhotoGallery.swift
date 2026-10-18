@@ -27,7 +27,7 @@ struct GarmentPhotoGallery: View {
                         VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                             Button { onOpen(path) } label: {
                                 GarmentGalleryImage(path: path, maxPixel: 300)
-                                    .frame(width: 104, height: 112)
+                                    .frame(width: 104, height: 104)
                                     .background(Color(.secondarySystemBackground))
                                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile))
                                     .overlay(alignment: .topLeading) {
@@ -91,6 +91,12 @@ private struct GarmentPhotoMenu: View {
                             Text(role.title)
                         }
                     }
+                }
+            }
+            if let source = garment.photoInfo(for: path).sourceURL,
+               let url = URL(string: source), ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                Link(destination: url) {
+                    Label(String(localized: "photo_search_source"), systemImage: "link")
                 }
             }
             Button(role: .destructive, action: onRemove) {
@@ -211,7 +217,7 @@ private struct GarmentGalleryImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFit()
+                GarmentPhotoCanvas(image: image)
             } else if failed {
                 VStack(spacing: DS.Spacing.xxs) {
                     Image(systemName: "photo")
@@ -231,7 +237,7 @@ private struct GarmentGalleryImage: View {
             let imagePath = path
             let pixelSize = maxPixel
             let loaded = await Task.detached(priority: .utility) {
-                ImageStore.loadThumbnail(path: imagePath, maxPixelSize: pixelSize)
+                ImageStore.loadGarmentPreview(imagePath: imagePath, maxPixelSize: pixelSize)
             }.value
             guard !Task.isCancelled else { return }
             image = loaded
