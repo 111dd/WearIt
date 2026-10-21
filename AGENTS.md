@@ -191,6 +191,8 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 ## Progress log
 
+- 2026-10-21 · Codex · Dor authorized publishing and running the catalog crawler: encode Hebrew product URLs, extract verified same-product/color prices and full galleries/stock facts, prioritize existing-item refreshes, and report actual attempts. Focused crawler publication; local app changes remain separate. No app build/tests/simulator; live run results pending.
+
 - 2026-10-18 · Codex · Dor authorized publishing all latest local changes together: personal shopping, planner advice/layout and wardrobe/photo tools; preparing one PR for main. No build/tests/simulator; device review remains pending.
 
 Newest first. One line per meaningful change: date, tool, what.
@@ -329,6 +331,8 @@ Newest first. One line per meaningful change: date, tool, what.
 - 2025-09-05 · Initial commit.
 
 ## Next steps (backlog)
+
+- Catalog publication: inspect the next manually dispatched Shop catalog run and catalog-data report for successful refreshes and verified price pairs. App UI/ranking/photo changes are local and are not part of this focused crawler publication.
 
 - Publication authorized for the complete 2026-10-18 local change set; after merge, pull main in Xcode and review shopping, planner and photo flows on device. Inspect the next live catalog report; runtime/performance acceptance remains pending.
 
