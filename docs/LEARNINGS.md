@@ -2,6 +2,11 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+## 2026-10-21 — Publish the corrected catalog crawler
+- **Did:** Dor authorized merging the local crawler fixes and manually running Shop catalog. Publish only scripts/catalog/build_catalog.py and focused shared notes; the existing dirty app work is not included.
+- **Why:** the live catalog has no verified old/current price pairs; Hebrew requests fail before network access and new URLs previously starved product refreshes.
+- **Watch:** confirm the dispatched run uses the merged main revision, then inspect catalog-data timestamps, actual attempted/refreshed counts and verified discounts. A green workflow does not prove stores were refreshed. No app build/tests/simulator; outcome pending at publication.
+
 ## 2026-10-18 — Publish the complete local change set
 - **Did:** Dor authorized committing, pushing and merging all current shopping, planner and wardrobe/photo changes through one PR.
 - **Why:** bring main up to date so Dor can pull it in Xcode.
