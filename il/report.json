@@ -1,0 +1,54 @@
+{
+  "generatedAt": "2026-10-24T03:38:46+00:00",
+  "stores": {
+    "terminalx": {
+      "name": "Terminal X",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 2388,
+      "productUrls": 87028,
+      "scheduled": 1200,
+      "attempted": 745,
+      "fetched": 716,
+      "refreshed": 716,
+      "failed": 29,
+      "notProducts": 0,
+      "verifiedDiscounts": 1312,
+      "missingImages": 0,
+      "seconds": 1823,
+      "log": [
+        "shopify page 1 failed: HTTP Error 404: Not Found; using incremental sitemap fallback",
+        "page failed https://www.terminalx.com/r891790001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r728500001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r363460003: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r985540001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/x030940005: HTTP Error 404: Not Found",
+        "too many failures, stopping this store; unrefreshed products kept with their original fetch dates"
+      ]
+    },
+    "castro": {
+      "name": "Castro",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 1861,
+      "productUrls": 4334,
+      "scheduled": 1200,
+      "attempted": 1200,
+      "fetched": 1195,
+      "refreshed": 922,
+      "failed": 5,
+      "notProducts": 273,
+      "verifiedDiscounts": 321,
+      "missingImages": 0,
+      "seconds": 4721,
+      "log": [
+        "shopify page 1 failed: Expecting value: line 1 column 1 (char 0); using incremental sitemap fallback",
+        "page failed https://www.castro.com/נשים/שמלות/מיני/שמלת-מיני-צווארון-קפה-6110741: The read operation timed out",
+        "page failed https://www.castro.com/גברים/תחתונים-גרביים/תחתונים/מארז-שלישיית-תחתוני-בוקסר-מולטי-u670191: The read operation timed out",
+        "page failed https://www.castro.com/נשים/מכנסיים/ארוכים/מכנסיים-מחויטים-עם-חגורה-שחור-3010891: The read operation timed out",
+        "page failed https://www.castro.com/גברים/חולצות/פולו/פולו-בייסיק-צווארון-סיני-שחור-7770380: The read operation timed out",
+        "page failed https://www.castro.com/מגבת-כותנה-אפור-בהיר-sd90033: The read operation timed out"
+      ]
+    }
+  }
+}
