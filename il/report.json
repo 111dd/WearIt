@@ -1,0 +1,50 @@
+{
+  "generatedAt": "2026-10-31T04:16:28+00:00",
+  "stores": {
+    "terminalx": {
+      "name": "Terminal X",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 2335,
+      "productUrls": 87028,
+      "scheduled": 1200,
+      "attempted": 745,
+      "fetched": 710,
+      "refreshed": 710,
+      "failed": 35,
+      "notProducts": 0,
+      "verifiedDiscounts": 1289,
+      "missingImages": 0,
+      "seconds": 1061,
+      "log": [
+        "shopify page 1 failed: HTTP Error 404: Not Found; using incremental sitemap fallback",
+        "page failed https://www.terminalx.com/r594592023: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r569842012: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r621410001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r538300001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/w833600001: HTTP Error 404: Not Found",
+        "too many failures, stopping this store; unrefreshed products kept with their original fetch dates"
+      ]
+    },
+    "castro": {
+      "name": "Castro",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 2973,
+      "productUrls": 4292,
+      "scheduled": 1200,
+      "attempted": 1200,
+      "fetched": 1199,
+      "refreshed": 867,
+      "failed": 1,
+      "notProducts": 332,
+      "verifiedDiscounts": 540,
+      "missingImages": 0,
+      "seconds": 4807,
+      "log": [
+        "shopify page 1 failed: Expecting value: line 1 column 1 (char 0); using incremental sitemap fallback",
+        "page failed https://www.castro.com/גברים/חולצות/קצרות/חולצת-ריזורט-עם-טקסטורה-אספרסו-8270655: The read operation timed out"
+      ]
+    }
+  }
+}
