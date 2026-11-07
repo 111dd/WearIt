@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-11-07T04:57:33+00:00",
+  "stores": {
+    "terminalx": {
+      "name": "Terminal X",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 3202,
+      "productUrls": 95440,
+      "scheduled": 1200,
+      "attempted": 1200,
+      "fetched": 1192,
+      "refreshed": 1192,
+      "failed": 8,
+      "notProducts": 0,
+      "verifiedDiscounts": 2733,
+      "missingImages": 0,
+      "seconds": 1680,
+      "log": [
+        "shopify page 1 failed: HTTP Error 404: Not Found; using incremental sitemap fallback",
+        "page failed https://www.terminalx.com/x05850: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/x05896: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/x16976: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/x27307: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/x35771: HTTP Error 404: Not Found"
+      ]
+    },
+    "castro": {
+      "name": "Castro",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 3318,
+      "productUrls": 4444,
+      "scheduled": 1200,
+      "attempted": 1200,
+      "fetched": 1200,
+      "refreshed": 835,
+      "failed": 0,
+      "notProducts": 365,
+      "verifiedDiscounts": 1888,
+      "missingImages": 0,
+      "seconds": 5244,
+      "log": [
+        "shopify page 1 failed: Expecting value: line 1 column 1 (char 0); using incremental sitemap fallback"
+      ]
+    }
+  }
+}
