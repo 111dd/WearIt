@@ -11,9 +11,11 @@ struct ShopResultFilters: Hashable, Sendable {
     var dealsOnly = false
     var savedOnly = false
     var focus: Focus = .all
+    /// Empty means every store. Store IDs come from the catalog, never display names.
+    var storeIDs: Set<String> = []
 
     var isDefault: Bool {
-        category == nil && itemType == nil && !dealsOnly && !savedOnly && focus == .all
+        category == nil && itemType == nil && !dealsOnly && !savedOnly && focus == .all && storeIDs.isEmpty
     }
 
     mutating func selectCategory(_ category: Category?) {
@@ -23,6 +25,7 @@ struct ShopResultFilters: Hashable, Sendable {
     }
 
     func includes(_ pick: PurchaseScorer.Pick) -> Bool {
+        if !storeIDs.isEmpty && !storeIDs.contains(pick.product.item.store) { return false }
         if let category, pick.product.category != category { return false }
         if let itemType, pick.product.itemType != itemType { return false }
         if dealsOnly && pick.product.discountPercent == nil { return false }

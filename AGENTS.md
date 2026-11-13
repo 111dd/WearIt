@@ -91,9 +91,15 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 - Shop catalog (`plans/shopping-israel.md` in the project): `scripts/catalog/build_catalog.py` (stdlib Python) reads each
   store in `scripts/catalog/stores.json` (per country, IL first: Terminal X, Castro) through robots.txt → sitemaps → JSON-LD
   Product/ProductGroup + Open Graph, or `/products.json` for Shopify. It stores raw fields only; the app maps them through
-  `ProductPageMetadataService.makeProduct` / `ProductFieldMapper`. Published nightly to the `catalog-data` branch
-  (`https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/catalog.json`, plus `il/report.json`).
-  In the app: `ShopCatalogService` (download with ETag, cache in Caches, map off the main thread) →
+  `ProductPageMetadataService.makeProduct` / `ProductFieldMapper`. New pages are fetched likely-clothing-first and
+  newest-first (sitemap title + lastmod); pages the app would discard (children's, non-wearable, sold out, not a
+  product) are remembered in `il/state.json` until a retry date. Stores run side by side, each with a page and time
+  budget. Published nightly to the `catalog-data` branch under
+  `https://raw.githubusercontent.com/111dd/WearIt/catalog-data/il/`: `index.json` (version 2) lists
+  `shards/<store>-<men|women|other>-<n>.json` with a content hash each; `catalog.json` (version 1, newest 8,000 items)
+  stays for app versions that predate the index; `report.json` has the run's counts.
+  In the app: `ShopCatalogService` (index with ETag, only changed files downloaded, decoded one file at a time, cache
+  in Caches, falls back to `catalog.json` while no index is published) →
   `PurchaseScorer` (taste + looks with the user's most-worn pieces via `AIRecommender.lookScore` + gap fit + size
   filter − "already have plenty", plus actual weather, saved upcoming looks, accessories and optional next-season deals;
   `ShopPreferenceModel` and attribute signals learn from save/open/not for me/bought in
@@ -195,6 +201,10 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
   All-day EventKit end dates are exclusive (the morning after the last day).
 
 ## Progress log
+
+- 2026-11-13 · Claude · At Dor's request ("תעלה לגיט ותמזג את כל השינויים"), after his own Xcode build passed, committed the whole working tree on `claude/catalog-files-and-local-work` in two commits (shop catalog; the remaining local work: look exposure log, look sharing, profile, planner and shopping edits) and merged it into `main`. No build/tests/simulator by the agent.
+- 2026-11-13 · Claude · Shop catalog without a server: the crawler reads product titles and change dates from the sitemaps, never fetches children's/non-wearable pages, fetches likely clothing first, remembers unusable pages in `state.json`, skips Castro homeware, runs stores side by side with a time limit (Terminal X 3,600 pages a night), and publishes `index.json` + per-store/department files next to a capped `catalog.json`. `ShopCatalogService` reads the index and files. Also fixed adult items treated as children's or as an unknown department because of Terminal X's collection list or Hebrew substrings ("אבנים", "לבנות"). Crawler checked offline against the live catalog and a saved sitemap; Swift is source-reviewed only. Not committed, not published, no build/tests/simulator.
+- 2026-11-13 · Claude · Wrote `design-docs/Exposure-Logging-Plan-2026-11-13.md`: stage 1a of the personal recommender (record looks actually shown, local file store, two small PRs, no behavior change). Plan only, awaiting Dor's three decisions. No build/tests/simulator.
 
 - 2026-11-13 · Claude · Code review of PR #38 and four fixes Dor chose: moved `WearIt/Docs` to `design-docs/` and the quality-report tool to `scripts/` (both were shipping inside the app bundle); removed the in-app DuckDuckGo/Bing image scraping (photo search now imports from a pasted product link, with the existing open-in-browser button); For You slots are freed when the product is owned or has been out of the ranking for 14 days; "dress" before another garment (loafers, watch, coat) no longer maps to a dress. Added unit tests for the slot rules and the mapper. Tests were written but not run. No build/tests/simulator.
 
@@ -367,6 +377,9 @@ Newest first. One line per meaningful change: date, tool, what.
 - 2025-09-05 · Initial commit.
 
 ## Next steps (backlog)
+
+- Shop catalog files: the crawler change takes effect only once it is on `main` (the Action runs from there). After the first run, read `il/report.json` (`added`, `notFetched`, `skipped`, `outOfTime`, `waitingNew`) and confirm `il/index.json` exists. Owner build: Shopping loads from the cached catalog, then from the index (first launch after the update re-downloads everything once); check that white items ("לבנות"/"לבנים") and adult Terminal X shoes now appear under Men/Women. The phone still downloads every department; choosing files by department needs a design for Automatic department detection, which reads products of both departments.
+- Exposure logging: Dor chooses storage (local file recommended), the day/evening feedback-key fix and the dwell time in `design-docs/Exposure-Logging-Plan-2026-11-13.md`; then implement PR 1 (log, summaries, tests, export/deletion).
 
 - Review-fix owner check: after an owner build, run `ShopPersonalSelectionTests` and the new `ProductFieldMapperTests` cases; confirm the app bundle no longer contains `.md`/`.py` files; open Find a better photo (no automatic web results, product-link import and the browser button still work, Hebrew and English text); buy a For You product and confirm its place is refilled.
 

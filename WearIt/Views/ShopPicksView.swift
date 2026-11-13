@@ -41,6 +41,7 @@ enum ShopPicksEngine {
         context: ModelContext,
         upcomingPlans: [DayPlan] = [],
         includeNextSeasonDeals: Bool = false,
+        storeIDs: Set<String> = [],
         contentSignature: Int
     ) async -> ShopRankingWorker.Result {
         guard !Task.isCancelled else { return .init() }
@@ -49,13 +50,15 @@ enum ShopPicksEngine {
             return .init()
         }
         let preferences = profile?.shoppingPreferences ?? ShoppingPreferences()
-        let retainedIDs = ShopPersonalSelection.retainedIDs(profileID: profile?.id, preferences: preferences)
+        let retainedIDs = storeIDs.isEmpty
+            ? ShopPersonalSelection.retainedIDs(profileID: profile?.id, preferences: preferences) : []
         let state = AIRecommender.shared.ensureState(context: context, profileID: profile?.id)
         var hash = Hasher()
         hash.combine(contentSignature)
         hash.combine(profile?.id)
         hash.combine(preferences)
         hash.combine(retainedIDs)
+        if !storeIDs.isEmpty { hash.combine(storeIDs) }
         hash.combine(state.lookWeights)
         hash.combine(state.lookBias)
         hash.combine(state.lookInteractionCount)
@@ -92,7 +95,7 @@ enum ShopPicksEngine {
                 department: preferences.department == .automatic ? resolution.department : preferences.department,
                 comfort: GarmentWeatherHistory(events: recommendations, garments: ordered, profileID: profile?.id),
                 hidden: Set(feedback.state.actions.keys.filter { feedback.isHidden($0, now: now) }).union(ordered.compactMap(\.shopProductID)),
-                now: now, retainedIDs: retainedIDs)
+                now: now, retainedIDs: retainedIDs, storeIDs: storeIDs)
         }
     }
 
@@ -140,12 +143,14 @@ enum ShopPicksEngine {
     nonisolated static func browse(
         products: [ShopProduct], preferences: ShoppingPreferences, hidden: Set<String>,
         matches: [String: PurchaseScorer.Match], category: Category?, dealsOnly: Bool,
-        query: String = "", limit: Int = 100, itemType: ItemType? = nil, includesAccessories: Bool = false
+        query: String = "", limit: Int = 100, itemType: ItemType? = nil, includesAccessories: Bool = false,
+        storeIDs: Set<String> = []
     ) -> [PurchaseScorer.Pick] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let matching = products.filter { product in
             guard !Task.isCancelled, product.item.available != false, !hidden.contains(product.id),
                   preferences.allows(product: product) else { return false }
+            if !storeIDs.isEmpty && !storeIDs.contains(product.item.store) { return false }
             if let category { if product.category != category { return false } }
             else if product.category == .accessory && !includesAccessories { return false }
             if let itemType, product.itemType != itemType { return false }
@@ -387,6 +392,7 @@ enum ShopPicksEngine {
 
 struct ShopPicksView: View {
     private let isRoot: Bool
+    private let initialSavedOnly: Bool
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -408,6 +414,7 @@ struct ShopPicksView: View {
     @State private var browseFilters = ShopResultFilters()
     @State private var picks: [PurchaseScorer.Pick] = []
     @State private var personalPicks: [PurchaseScorer.Pick] = []
+    @State private var rankedStoreIDs: Set<String> = []
     @State private var productDetails: PurchaseScorer.Pick?
     @State private var refreshGeneration = 0
     @State private var matches: [String: PurchaseScorer.Match] = [:]
@@ -444,8 +451,12 @@ struct ShopPicksView: View {
         }
     }
 
-    init(isRoot: Bool = false) {
+    init(isRoot: Bool = false, initialSavedOnly: Bool = false) {
         self.isRoot = isRoot
+        self.initialSavedOnly = initialSavedOnly
+        var filters = ShopResultFilters()
+        filters.savedOnly = initialSavedOnly
+        _personalFilters = State(initialValue: filters)
         _wearEvents = Query(ShopPicksEngine.wearDescriptor())
         _recommendationEvents = Query(ShopPicksEngine.recommendationDescriptor())
         let today = Calendar.current.startOfDay(for: .now)
@@ -456,6 +467,7 @@ struct ShopPicksView: View {
 
     private var shown: [PurchaseScorer.Pick] {
         if mode == .browse { return browseResultKey == browseKey ? browsedPicks : [] }
+        if !personalFilters.savedOnly && rankedStoreIDs != personalFilters.storeIDs { return [] }
         let department = ShoppingPreferences.resolvedDepartment(profile: profile, garments: garments,
             feedback: feedback, products: catalog.products).department ?? .automatic
         if personalFilters.isDefault {
@@ -472,6 +484,23 @@ struct ShopPicksView: View {
 
     private var activeFilters: ShopResultFilters {
         mode == .personalized ? personalFilters : browseFilters
+    }
+
+    private var activeFiltersBinding: Binding<ShopResultFilters> {
+        mode == .personalized ? $personalFilters : $browseFilters
+    }
+
+    private var availableStores: [ShopStoreOption] {
+        var names: [String: String] = [:]
+        for product in catalog.products { names[product.item.store] = product.storeName }
+        // A bookmark can outlive its product in the current catalog.
+        for product in savedProducts where names[product.item.store] == nil {
+            names[product.item.store] = product.storeName
+        }
+        return names.map { ShopStoreOption(id: $0.key, name: $0.value) }.sorted {
+            let order = $0.name.localizedStandardCompare($1.name)
+            return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
+        }
     }
 
     private func updateActiveFilters(_ update: (inout ShopResultFilters) -> Void) {
@@ -525,7 +554,8 @@ struct ShopPicksView: View {
         let task = Task.detached(priority: .userInitiated) {
             ShopPicksEngine.browse(products: products, preferences: key.preferences, hidden: hidden,
                 matches: reports, category: key.filters.category, dealsOnly: key.filters.dealsOnly, query: key.query,
-                limit: key.limit, itemType: key.filters.itemType, includesAccessories: key.filters.savedOnly)
+                limit: key.limit, itemType: key.filters.itemType, includesAccessories: key.filters.savedOnly,
+                storeIDs: key.filters.storeIDs)
         }
         let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         guard !Task.isCancelled, key == browseKey else { return }
@@ -560,7 +590,7 @@ struct ShopPicksView: View {
             feedback: feedback, products: catalog.products).department ?? .automatic
         return savedProducts.compactMap { product in
             guard department.includes(product.audience, category: product.category) else { return nil }
-            if let pick = byID[product.id] { return pick }
+            if rankedStoreIDs == personalFilters.storeIDs, let pick = byID[product.id] { return pick }
             // No evaluated upcoming/everyday/seasonal claim is available for an unranked bookmark.
             guard personalFilters.focus == .all else { return nil }
             return PurchaseScorer.Pick(product: product, score: 0, wearsPerMonth: nil, looks: 0,
@@ -625,7 +655,7 @@ struct ShopPicksView: View {
         }
         .sheet(isPresented: $showBrowseFilters) {
             ShopBrowseFiltersView(preferences: Binding(get: { effectiveBrowsePreferences }, set: { browsePreferences = $0 }),
-                filters: $browseFilters)
+                filters: $browseFilters, stores: availableStores)
         }
         .task {
             await catalog.refreshIfNeeded()
@@ -656,8 +686,12 @@ struct ShopPicksView: View {
         }
         .onChange(of: profile?.id) { _, _ in
             picks = []; personalPicks = []; matches = [:]; browsedPicks = []; purchaseNotice = nil; productDetails = nil
+            rankedStoreIDs = []
             browsePreferences = ShoppingPreferences(); browseResultKey = nil; hasInitializedBrowsePreferences = false
-            personalFilters = ShopResultFilters(); browseFilters = ShopResultFilters(); browseQuery = ""; browseLimit = 60
+            var filters = ShopResultFilters()
+            filters.savedOnly = initialSavedOnly
+            personalFilters = filters
+            browseFilters = ShopResultFilters(); browseQuery = ""; browseLimit = 60
             matchRevision += 1
         }
         .onChange(of: browseFilters) { old, new in
@@ -743,6 +777,7 @@ struct ShopPicksView: View {
                         selected: activeFilters.category == nil && activeFilters.focus == .all) {
                             updateActiveFilters { $0.selectCategory(nil); $0.focus = .all }
                         }
+                    storeFilterMenu
                     ForEach(Category.allCases) { category in
                         chip(category.title, selected: activeFilters.category == category, icon: category.icon) {
                             updateActiveFilters {
@@ -785,6 +820,25 @@ struct ShopPicksView: View {
         }
     }
 
+    private var storeFilterMenu: some View {
+        let selected = !activeFilters.storeIDs.isEmpty
+        let title = selected
+            ? String(format: NSLocalizedString("shop_filter_stores_count_format", comment: ""), activeFilters.storeIDs.count)
+            : String(localized: "shop_filter_stores")
+        return Menu {
+            ShopStoreFilterChoices(stores: availableStores, storeIDs: activeFiltersBinding.storeIDs)
+        } label: {
+            Label(title, systemImage: "storefront")
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .padding(.horizontal, DS.Spacing.sm)
+                .padding(.vertical, DS.Spacing.xs)
+                .background(Capsule().fill(selected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.1)))
+                .foregroundStyle(selected ? Color.accentColor : Color.primary)
+        }
+        .accessibilityLabel(String(localized: "shop_filter_stores"))
+        .accessibilityValue(selected ? title : String(localized: "shop_filter_all_stores"))
+    }
+
     private func focusChip(_ title: String, _ focus: ShopResultFilters.Focus, icon: String) -> some View {
         chip(title, selected: personalFilters.focus == focus, icon: icon) {
             personalFilters.focus = personalFilters.focus == focus ? .all : focus
@@ -823,7 +877,8 @@ struct ShopPicksView: View {
             }
         } else if mode == .browse, browseResultKey != browseKey {
             ProgressView(String(localized: "shop_loading")).frame(maxWidth: .infinity).padding()
-        } else if isRanking && mode == .personalized && !personalFilters.savedOnly && shown.isEmpty {
+        } else if mode == .personalized && !personalFilters.savedOnly && shown.isEmpty
+                    && (isRanking || rankedStoreIDs != personalFilters.storeIDs) {
             ProgressView(String(localized: "shop_matching")).frame(maxWidth: .infinity).padding()
         } else if shown.isEmpty, activeFilters.dealsOnly, catalog.isLoading {
             ProgressView(String(localized: "shop_loading")).frame(maxWidth: .infinity).padding()
@@ -1000,6 +1055,7 @@ struct ShopPicksView: View {
     @MainActor private func rebuild() async {
         let signature = rankingSignature
         let profileID = profile?.id
+        let storeIDs = personalFilters.storeIDs
         isRanking = true
         defer { if !Task.isCancelled { isRanking = false } }
         let result = await ShopPicksEngine.picks(
@@ -1013,6 +1069,7 @@ struct ShopPicksView: View {
             context: context,
             upcomingPlans: upcomingPlans,
             includeNextSeasonDeals: includeNextSeasonDeals,
+            storeIDs: storeIDs,
             contentSignature: signature
         )
         guard !Task.isCancelled else { return }
@@ -1021,10 +1078,14 @@ struct ShopPicksView: View {
             return
         }
         picks = result.picks.filter { !feedback.isHidden($0.id) }
+        rankedStoreIDs = storeIDs
         let owned = Set(ShopPicksEngine.personalWardrobe(garments, profile: profile).compactMap(\.shopProductID))
-        personalPicks = ShopPersonalSelection.select(from: picks, profileID: profileID,
-            preferences: profile?.shoppingPreferences ?? ShoppingPreferences(),
-            isOwned: { feedback.has(.bought, $0) || owned.contains($0) })
+        // Temporary store filters must not release or replace the held For You slots.
+        if storeIDs.isEmpty {
+            personalPicks = ShopPersonalSelection.select(from: picks, profileID: profileID,
+                preferences: profile?.shoppingPreferences ?? ShoppingPreferences(),
+                isOwned: { feedback.has(.bought, $0) || owned.contains($0) })
+        }
         matches = result.matches
         matchRevision += 1
     }
@@ -1038,6 +1099,7 @@ struct ShopPicksView: View {
         )
         var hash = Hasher()
         hash.combine(base)
+        if !personalFilters.storeIDs.isEmpty { hash.combine(personalFilters.storeIDs) }
         hash.combine(personalSelection.revision)
         for state in recommendationStates where state.profileID == profile?.id {
             hash.combine(state.lookWeights); hash.combine(state.lookBias); hash.combine(state.lookInteractionCount)
@@ -1144,6 +1206,37 @@ struct ShoppingPreferencesView: View {
     }
 }
 
+private struct ShopStoreOption: Identifiable {
+    let id: String
+    let name: String
+}
+
+private struct ShopStoreFilterChoices: View {
+    let stores: [ShopStoreOption]
+    @Binding var storeIDs: Set<String>
+
+    var body: some View {
+        Button {
+            storeIDs = []
+        } label: {
+            if storeIDs.isEmpty {
+                Label(String(localized: "shop_filter_all_stores"), systemImage: "checkmark")
+            } else {
+                Text(String(localized: "shop_filter_all_stores"))
+            }
+        }
+        .accessibilityAddTraits(storeIDs.isEmpty ? .isSelected : [])
+        ForEach(stores) { store in
+            Toggle(store.name, isOn: Binding(
+                get: { storeIDs.contains(store.id) },
+                set: { selected in
+                    if selected { storeIDs.insert(store.id) }
+                    else { storeIDs.remove(store.id) }
+                }))
+        }
+    }
+}
+
 private struct ShopBrowseFiltersView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var preferences: ShoppingPreferences
@@ -1151,8 +1244,10 @@ private struct ShopBrowseFiltersView: View {
     @State private var draft: ShoppingPreferences
     @State private var draftFilters: ShopResultFilters
     @State private var brands: String
+    let stores: [ShopStoreOption]
 
-    init(preferences: Binding<ShoppingPreferences>, filters: Binding<ShopResultFilters>) {
+    init(preferences: Binding<ShoppingPreferences>, filters: Binding<ShopResultFilters>, stores: [ShopStoreOption]) {
+        self.stores = stores
         _preferences = preferences
         _filters = filters
         _draft = State(initialValue: preferences.wrappedValue)
@@ -1181,6 +1276,13 @@ private struct ShopBrowseFiltersView: View {
                     }
                     Toggle(String(localized: "shop_filter_deals"), isOn: $draftFilters.dealsOnly)
                     Toggle(String(localized: "shop_filter_saved"), isOn: $draftFilters.savedOnly)
+                }
+                Section {
+                    ShopStoreFilterChoices(stores: stores, storeIDs: $draftFilters.storeIDs)
+                } header: {
+                    Text(String(localized: "shop_filter_stores"))
+                } footer: {
+                    Text(String(localized: "shop_filter_stores_detail"))
                 }
                 ShopPreferenceFields(preferences: $draft, brands: $brands, isManual: true)
                 Section {

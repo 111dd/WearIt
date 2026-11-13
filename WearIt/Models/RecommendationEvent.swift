@@ -34,6 +34,7 @@ final class RecommendationEvent {
     var rainTolerance: Int = 3
     var lookTimeRaw: String = LookTime.day.rawValue
     var modelVersion: Int = 2
+    var exposureID: UUID?
 
     init(
         deduplicationKey: String,
@@ -77,7 +78,8 @@ enum RecommendationEventStore {
         dayPlanID: UUID?,
         context: RecoContext,
         modelContext: ModelContext,
-        save: Bool = true
+        save: Bool = true,
+        exposureID: UUID? = nil
     ) -> Bool {
         let selectedIDs = Array(Set(selectedGarmentIDs)).sorted { $0.uuidString < $1.uuidString }
         let shownIDs = Array(Set(shownGarmentIDs)).sorted { $0.uuidString < $1.uuidString }
@@ -85,7 +87,9 @@ enum RecommendationEventStore {
             kind: kind,
             selectedGarmentIDs: selectedIDs,
             dayPlanID: dayPlanID,
-            date: context.now
+            date: context.now,
+            lookTime: context.lookTime.rawValue,
+            profileID: context.profileID
         )
 
         let descriptor = FetchDescriptor<RecommendationEvent>(
@@ -93,12 +97,21 @@ enum RecommendationEventStore {
                 event.deduplicationKey == key
             }
         )
-        if (try? modelContext.fetchCount(descriptor)) ?? 0 > 0 {
-            return false
-        }
+        let legacyPlan = dayPlanID?.uuidString ?? Self.dayFormatter.string(from: context.now)
+        let legacyGarments = selectedIDs.map(\.uuidString).joined(separator: ",")
+        let legacyKey = "v2|\(legacyPlan)|\(kind.rawValue)|\(legacyGarments)"
+        let lookTime = context.lookTime.rawValue
+        let profileID = context.profileID
+        let legacy = FetchDescriptor<RecommendationEvent>(predicate: #Predicate { event in
+            event.deduplicationKey == legacyKey && event.lookTimeRaw == lookTime && event.profileID == profileID
+        })
+        do {
+            let currentCount = try modelContext.fetchCount(descriptor)
+            let legacyCount = try modelContext.fetchCount(legacy)
+            if currentCount > 0 || legacyCount > 0 { return false }
+        } catch { return false } // A failed read must not insert/train a possible duplicate.
 
-        modelContext.insert(
-            RecommendationEvent(
+        let event = RecommendationEvent(
                 deduplicationKey: key,
                 profileID: context.profileID,
                 dayPlanID: dayPlanID,
@@ -107,7 +120,8 @@ enum RecommendationEventStore {
                 shownGarmentIDs: shownIDs,
                 context: context
             )
-        )
+        event.exposureID = exposureID
+        modelContext.insert(event)
         if save {
             try? modelContext.save()
         }
@@ -126,11 +140,13 @@ enum RecommendationEventStore {
         kind: RecommendationFeedbackKind,
         selectedGarmentIDs: [UUID],
         dayPlanID: UUID?,
-        date: Date
+        date: Date,
+        lookTime: String,
+        profileID: UUID?
     ) -> String {
         let planPart = dayPlanID?.uuidString ?? Self.dayFormatter.string(from: date)
         let garmentPart = selectedGarmentIDs.map(\.uuidString).joined(separator: ",")
-        return "v2|\(planPart)|\(kind.rawValue)|\(garmentPart)"
+        return "v3|\(planPart)|\(lookTime)|\(kind.rawValue)|\(garmentPart)|\(profileID?.uuidString ?? "legacy")"
     }
 
     private static let dayFormatter: DateFormatter = {

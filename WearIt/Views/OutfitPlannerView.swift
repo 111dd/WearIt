@@ -14,6 +14,7 @@ import os
 struct OutfitPlannerView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.exposureSurfaceActive) private var exposureSurfaceActive
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var weather: WeatherCenter
@@ -305,6 +306,8 @@ struct OutfitPlannerView: View {
 
     private var plannerWithSheets: some View {
         plannerStack
+            .environment(\.exposureSurfaceActive, exposureSurfaceActive && activeSheet == nil &&
+                         !showStyleSwipe && !showFeedbackAlert && !boardState.showUnavailableAlert)
             .onReceive(NotificationCenter.default.publisher(for: .confirmWornFromWidget)) { _ in
                 confirmWorn(dayIndex: 0)
             }
@@ -2542,6 +2545,9 @@ struct OutfitPlannerView: View {
     }
 
     private func applyChangeSuggestion(_ suggestion: OutfitChangeSuggestion, dayIndex: Int) {
+        guard boardState.days.indices.contains(dayIndex) else { return }
+        let exposurePrevious = assignmentIDs(dayIndex: dayIndex, lookTime: suggestion.lookTime)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: dayIndex, lookTime: suggestion.lookTime, origin: .slotSwap) }
         guard dayIndex < boardState.days.count else { return }
         guard lookWearStatus(dayIndex: dayIndex, lookTime: suggestion.lookTime) != .worn,
               !PlannerChangeSuggestionVisibility.isHidden(
@@ -2763,6 +2769,9 @@ struct OutfitPlannerView: View {
                     )
                 } else {
                     outfitRow(for: dayIndex, lookTime: lookTime)
+                        .recordLookExposure(exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime),
+                            enabled: activeSheet == nil && !showStyleSwipe && !showFeedbackAlert &&
+                                !boardState.showUnavailableAlert && status != .worn)
                     if let target = quickSwapTarget, target.dayIndex == dayIndex, target.lookTime == lookTime {
                         quickSwapStrip(for: target)
                             .transition(.opacity.combined(with: .move(edge: .top)))
@@ -2935,6 +2944,9 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count,
               replacedID != chosen.id,
               let replaced = garment(for: replacedID) else { return }
+        if let snapshot = exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime, origin: .slotSwap) {
+            ExposureLog.shared.rememberOrigin(snapshot, session: ExposureLog.shared.sessionToken())
+        }
         let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         AIRecommender.shared.learnPreference(
             chosen: chosen,
@@ -4017,6 +4029,8 @@ struct OutfitPlannerView: View {
     @discardableResult
     private func refreshDayLook(_ dayIndex: Int, variation: LookVariation? = nil) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
+        let exposurePrevious = assignmentIDs(dayIndex: dayIndex, lookTime: .day)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: dayIndex, lookTime: .day, origin: .refreshed) }
         let referenceDate = boardState.days[dayIndex].date
         let previousIDsBySlot: [OutfitSlot: UUID] = OutfitSlot.allCases.reduce(into: [:]) { result, slot in
             if let id = boardState.days[dayIndex].garmentID(for: slot) {
@@ -4150,6 +4164,9 @@ struct OutfitPlannerView: View {
     /// DismissedOutfit, RecommendationEvent, TasteProfile, or affinity updates.
     @discardableResult
     private func replaceLookNeutrally(dayIndex: Int, lookTime: LookTime) -> Bool {
+        if let snapshot = exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime) {
+            _ = ExposureLog.shared.interaction(snapshot)
+        }
         switch lookTime {
         case .day:
             return refreshDayLook(dayIndex)
@@ -4176,6 +4193,36 @@ struct OutfitPlannerView: View {
             return
         }
         activeSheet = .addNewItem(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
+    }
+
+    // MARK: - Exposure snapshots (never a ranking/learning side effect)
+
+    private func exposureSnapshot(dayIndex: Int, lookTime: LookTime,
+                                  origin: LookExposure.Origin = .unknown) -> LookExposure? {
+        guard boardState.days.indices.contains(dayIndex), let profile = activeProfile else { return nil }
+        let day = boardState.days[dayIndex]
+        let assignments = assignmentIDs(dayIndex: dayIndex, lookTime: lookTime)
+        guard !assignments.isEmpty else { return nil }
+        // Preserve stored legacy maps. Only the value snapshot canonicalizes a legacy dress slot.
+        var slots = Dictionary(uniqueKeysWithValues: assignments.map { ($0.key.rawValue, $0.value) })
+        if let top = assignments[.top], garment(for: top)?.itemType?.isOnePiece == true {
+            slots.removeValue(forKey: "top")
+            slots["onePiece"] = top
+        }
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        let planID = dayPlans.first { Calendar.current.isDate($0.date, inSameDayAs: day.date) }?.id
+        return LookExposure(profileID: profile.id, dayPlanID: planID, plannedDate: day.date,
+                            lookTime: lookTime.rawValue, slots: slots, origin: origin, surface: .planner,
+                            temperatureC: ctx.temperatureC, wasRaining: ctx.isRaining,
+                            desiredFormality: ctx.desiredFormality, modelVersion: RecoState.currentVersion)
+    }
+
+    private func rememberExposureOrigin(previous: [OutfitSlot: UUID], dayIndex: Int,
+                                        lookTime: LookTime, origin: LookExposure.Origin) {
+        guard boardState.days.indices.contains(dayIndex),
+              previous != assignmentIDs(dayIndex: dayIndex, lookTime: lookTime),
+              let snapshot = exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime, origin: origin) else { return }
+        ExposureLog.shared.rememberOrigin(snapshot, session: ExposureLog.shared.sessionToken())
     }
 
     private func assignmentIDs(dayIndex: Int, lookTime: LookTime) -> [OutfitSlot: UUID] {
@@ -5013,6 +5060,9 @@ struct OutfitPlannerView: View {
         lookTime: LookTime,
         allowUnavailable: Bool = false
     ) -> Bool {
+        guard boardState.days.indices.contains(dayIndex) else { return false }
+        let exposurePrevious = assignmentIDs(dayIndex: dayIndex, lookTime: lookTime)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: dayIndex, lookTime: lookTime, origin: .manual) }
         let previousID = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime)
         let slot = placementSlot(for: garment, requestedSlot: slot)
         guard canPlace(garment, in: slot, dayIndex: dayIndex, lookTime: lookTime) else { return false }
@@ -5196,6 +5246,11 @@ struct OutfitPlannerView: View {
             return
         }
 
+        if let snapshot = exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime) {
+            _ = ExposureLog.shared.interaction(snapshot)
+        }
+        let exposurePrevious = assignmentIDs(dayIndex: dayIndex, lookTime: lookTime)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: dayIndex, lookTime: lookTime, origin: .slotSwap) }
         let referenceDate = boardState.days[dayIndex].date
         let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         let state = boardState.days[dayIndex]
@@ -5382,6 +5437,8 @@ struct OutfitPlannerView: View {
         guard !isUniformOnlyDay(i) else { return }
         let status = lookWearStatus(dayIndex: i, lookTime: .day)
         guard !fillMissingOnly || (status != .planned && status != .worn) else { return }
+        let exposurePrevious = assignmentIDs(dayIndex: i, lookTime: .day)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: i, lookTime: .day, origin: .generated) }
         let state = boardState.days[i]
         let signposter = WearItPerformance.plannerSignposter
         let missingSlots = Set(OutfitSlot.allCases.filter {
@@ -5458,6 +5515,8 @@ struct OutfitPlannerView: View {
         guard dayIndex < boardState.days.count else { return }
         guard boardState.days[dayIndex].useEveningLook else { return }
 
+        let exposurePrevious = assignmentIDs(dayIndex: dayIndex, lookTime: .evening)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: dayIndex, lookTime: .evening, origin: rotate ? .refreshed : .generated) }
         let referenceDate = boardState.days[dayIndex].date
         let ctx = recoContext(for: dayIndex, isEvening: true)
         let (baseExcludedIDs, softPenalizedIDs) = eveningExclusions(for: dayIndex)
@@ -5516,6 +5575,8 @@ struct OutfitPlannerView: View {
             return
         }
 
+        let exposurePrevious = assignmentIDs(dayIndex: i, lookTime: .evening)
+        defer { rememberExposureOrigin(previous: exposurePrevious, dayIndex: i, lookTime: .evening, origin: .generated) }
         let ctx = recoContext(for: i, isEvening: true)
         let referenceDate = boardState.days[i].date
         let (baseExcludedIDs, softPenalizedIDs) = eveningExclusions(for: i)
@@ -5842,16 +5903,49 @@ struct OutfitPlannerView: View {
         for command in WidgetCommandService.takePlannerFeedback() {
             guard let date = DateFormatter.widgetDate.date(from: command.date),
                   let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
-            else { continue }
-            switch command.value {
-            case WidgetCommand.feedbackLoved:
-                submitFeedback(for: index, rating: .loved)
-            case WidgetCommand.feedbackTooCold:
-                submitTemperatureFeedback(for: index, feedback: .tooCold)
-            case WidgetCommand.feedbackTooWarm:
-                submitTemperatureFeedback(for: index, feedback: .tooWarm)
-            default:
-                break
+            else {
+                WidgetCommandService.keepUnattributedFeedback(command)
+                continue
+            }
+            let lookTime: LookTime = command.lookKind == WidgetLook.kindEvening ? .evening : .day
+            let current = assignmentIDs(dayIndex: index, lookTime: lookTime)
+            guard let raw = command.slots else {
+                WidgetCommandService.keepUnattributedFeedback(command)
+                continue
+            }
+            let selected = raw.compactMapValues(UUID.init(uuidString:))
+            let currentRaw = Dictionary(uniqueKeysWithValues: current.map { ($0.key.rawValue, $0.value) })
+            guard !selected.isEmpty, selected.count == raw.count, selected == currentRaw else {
+                WidgetCommandService.keepUnattributedFeedback(command)
+                continue
+            }
+            // Widget reactions are actions, not evidence of an app viewport display.
+            if lookTime == .day {
+                switch command.value {
+                case WidgetCommand.feedbackLoved:
+                    submitFeedback(for: index, rating: .loved, recordsInteraction: false)
+                case WidgetCommand.feedbackTooCold:
+                    submitTemperatureFeedback(for: index, feedback: .tooCold, recordsInteraction: false)
+                case WidgetCommand.feedbackTooWarm:
+                    submitTemperatureFeedback(for: index, feedback: .tooWarm, recordsInteraction: false)
+                default: break
+                }
+            } else {
+                switch command.value {
+                case WidgetCommand.feedbackLoved:
+                    if learnFromPlannerFeedback(dayIndex: index, kind: .loved, reward: 0.92,
+                                                lookTime: .evening, recordsInteraction: false) {
+                        for id in selected.values {
+                            if let garment = garmentsByID[id] { garment.loveScore = min(100, garment.loveScore + 8) }
+                        }
+                        try? context.save()
+                    }
+                case WidgetCommand.feedbackTooCold, WidgetCommand.feedbackTooWarm:
+                    let kind: RecommendationFeedbackKind = command.value == WidgetCommand.feedbackTooCold ? .tooCold : .tooWarm
+                    applyDirectionalFeedback(dayIndex: index, kind: kind, lookTime: .evening, recordsInteraction: false)
+                default: break
+                }
+                refreshAffinityCaches()
             }
         }
     }
@@ -5866,7 +5960,7 @@ struct OutfitPlannerView: View {
         persistPlans(for: Array(0..<boardState.days.count))
     }
     
-    private func submitFeedback(for dayIndex: Int, rating: OutfitFeedbackRating) {
+    private func submitFeedback(for dayIndex: Int, rating: OutfitFeedbackRating, recordsInteraction: Bool = true) {
         guard dayIndex < boardState.days.count else { return }
         let previousRating = boardState.days[dayIndex].feedback
         guard previousRating != rating else { return }
@@ -5894,7 +5988,7 @@ struct OutfitPlannerView: View {
         case .worn: kind = .worn
         case .neutral: kind = .justRight
         }
-        learnFromPlannerFeedback(dayIndex: dayIndex, kind: kind, reward: reward)
+        learnFromPlannerFeedback(dayIndex: dayIndex, kind: kind, reward: reward, recordsInteraction: recordsInteraction)
         persistDayPlan(dayIndex, immediate: true)
         try? context.save()
 
@@ -5920,7 +6014,7 @@ struct OutfitPlannerView: View {
         try? context.save()
     }
 
-    private func submitTemperatureFeedback(for dayIndex: Int, feedback: TemperatureFeedback) {
+    private func submitTemperatureFeedback(for dayIndex: Int, feedback: TemperatureFeedback, recordsInteraction: Bool = true) {
         guard dayIndex < boardState.days.count else { return }
         guard boardState.days[dayIndex].temperatureFeedback != feedback else { return }
         DS.haptic(0.4)
@@ -5931,11 +6025,11 @@ struct OutfitPlannerView: View {
         case .tooWarm: kind = .tooWarm
         case .tooCold: kind = .tooCold
         case .justRight:
-            learnFromPlannerFeedback(dayIndex: dayIndex, kind: .justRight, reward: 0.7)
+            learnFromPlannerFeedback(dayIndex: dayIndex, kind: .justRight, reward: 0.7, recordsInteraction: recordsInteraction)
             persistDayPlan(dayIndex, immediate: true)
             return
         }
-        applyDirectionalFeedback(dayIndex: dayIndex, kind: kind)
+        applyDirectionalFeedback(dayIndex: dayIndex, kind: kind, recordsInteraction: recordsInteraction)
         persistDayPlan(dayIndex, immediate: true)
     }
 
@@ -5968,24 +6062,28 @@ struct OutfitPlannerView: View {
         }
     }
 
+    @discardableResult
     private func learnFromPlannerFeedback(
         dayIndex: Int,
         kind: RecommendationFeedbackKind,
-        reward: Double
-    ) {
-        guard dayIndex < boardState.days.count else { return }
+        reward: Double,
+        lookTime: LookTime = .day,
+        recordsInteraction: Bool = true
+    ) -> Bool {
+        guard dayIndex < boardState.days.count else { return false }
         let day = boardState.days[dayIndex]
-        let selected = day.assignedGarmentIDs.compactMap { id in
+        let ids = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
+        let selected = ids.compactMap { id in
             allGarments.first { $0.id == id }
         }
-        guard !selected.isEmpty else { return }
+        guard !selected.isEmpty else { return false }
 
         guard recordLearningEvent(
             dayIndex: dayIndex,
-            kind: kind
-        ) else { return }
+            kind: kind, lookTime: lookTime, recordsInteraction: recordsInteraction
+        ) else { return false }
 
-        let ctx = recoContext(for: dayIndex)
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         AIRecommender.shared.learnLook(
             selected,
             reward: reward,
@@ -5999,28 +6097,31 @@ struct OutfitPlannerView: View {
             reward: reward,
             modelContext: context
         )
+        return true
     }
 
-    private func applyDirectionalFeedback(dayIndex: Int, kind: RecommendationFeedbackKind) {
+    private func applyDirectionalFeedback(dayIndex: Int, kind: RecommendationFeedbackKind, lookTime: LookTime = .day, recordsInteraction: Bool = true) {
         guard dayIndex < boardState.days.count else { return }
         guard recordLearningEvent(
             dayIndex: dayIndex,
-            kind: kind
+            kind: kind, lookTime: lookTime, recordsInteraction: recordsInteraction
         ) else { return }
         AIRecommender.shared.applyDirectionalFeedback(
             kind,
-            ctx: recoContext(for: dayIndex),
+            ctx: recoContext(for: dayIndex, isEvening: lookTime == .evening),
             modelContext: context
         )
     }
 
     private func recordLearningEvent(
         dayIndex: Int,
-        kind: RecommendationFeedbackKind
+        kind: RecommendationFeedbackKind,
+        lookTime: LookTime = .day,
+        recordsInteraction: Bool = true
     ) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
         let day = boardState.days[dayIndex]
-        let garmentIDs = day.assignedGarmentIDs
+        let garmentIDs = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
         guard !garmentIDs.isEmpty else { return false }
         let plan = DayPlanService.shared.planFor(date: day.date, context: context)
         // Only this look was evaluated. Unseen day/evening alternatives are not rejections.
@@ -6030,8 +6131,9 @@ struct OutfitPlannerView: View {
             selectedGarmentIDs: garmentIDs,
             shownGarmentIDs: garmentIDs,
             dayPlanID: plan.id,
-            context: recoContext(for: dayIndex),
-            modelContext: context
+            context: recoContext(for: dayIndex, isEvening: lookTime == .evening),
+            modelContext: context,
+            exposureID: recordsInteraction ? exposureSnapshot(dayIndex: dayIndex, lookTime: lookTime).flatMap { ExposureLog.shared.interaction($0) } : nil
         )
     }
     

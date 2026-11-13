@@ -44,6 +44,8 @@ struct DayJournalModel {
     let weather: (text: String, icon: String)?
     let photoPaths: [String]
     var events: [DayJournalEvent] = []
+    var dayExposure: LookExposure? = nil
+    var eveningExposure: LookExposure? = nil
 
     var hasLook: Bool { !dayItems.isEmpty || !eveningItems.isEmpty }
 }
@@ -67,6 +69,7 @@ struct DayJournalActions {
 struct DayJournalCard: View {
     let model: DayJournalModel
     let actions: DayJournalActions
+    var exposureEnabled = true
     @Binding var photosPickerItems: [PhotosPickerItem]
 
     @State private var lookTime: LookTime = .day
@@ -287,6 +290,8 @@ struct DayJournalCard: View {
                         .frame(maxWidth: .infinity, minHeight: 80)
                 } else {
                     lookGrid(items)
+                        .recordLookExposure(lookTime == .evening ? model.eveningExposure : model.dayExposure,
+                                            enabled: exposureEnabled && !showPhotoLibrary)
                         .id(lookTime)
                         .transition(.opacity)
                 }

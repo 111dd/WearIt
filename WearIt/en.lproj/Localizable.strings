@@ -851,6 +851,14 @@
 "profile_looks_empty" = "Photos of the looks you wear will show here.";
 "profile_avatar_change" = "Change profile photo";
 "profile_avatar_remove_photo" = "Remove photo";
+"profile_sections" = "Profile sections";
+"profile_personal_area" = "Personal area";
+"profile_style_summary_format" = "Style from your wardrobe: %@";
+"profile_looks_private_notice" = "Your profile and looks are private for now. Photos are shared only when you choose to share them.";
+"profile_personal_private_title" = "Just for you";
+"profile_personal_private_detail" = "Your sizes, shopping preferences and learned insights stay private and help personalize your recommendations.";
+"profile_saved_products" = "Saved products";
+"profile_saved_products_detail" = "Revisit pieces you saved while shopping";
 "action_share" = "Share";
 
 // MARK: - AI look explanations (Foundation Models)
@@ -1232,10 +1240,29 @@
 "look_post_items_title" = "In this look";
 "look_post_show_tag" = "Show tag";
 "look_post_show_tag_a11y_format" = "Show a tag for %@";
-"look_post_tags_footer" = "Tags stay private. Once sharing arrives, only the items you turn on will show, with their type and brand. The rest of your wardrobe never does.";
+"look_post_tags_footer" = "Selected tags are suggested on your share card. You can review them before sharing; only the type and brand appear.";
 "look_post_pin" = "Pin to top";
 "look_post_unpin" = "Unpin";
 "look_post_options" = "Photo options";
+
+/* Look share card */
+"look_share_title" = "Share this look";
+"look_share_card_subtitle" = "My look";
+"look_share_photo_only" = "Share photo only";
+"look_share_preview" = "Preview of the image you will share";
+"look_share_preparing" = "Preparing your card…";
+"look_share_failed" = "Couldn't prepare this look photo.";
+"look_share_retry" = "Try again";
+"look_share_format" = "Image format";
+"look_share_format_post" = "Post · 4:5";
+"look_share_format_story" = "Story · 9:16";
+"look_share_details" = "On this card";
+"look_share_identity" = "Show name and username";
+"look_share_identity_missing" = "You can add a name and username in Edit profile.";
+"look_share_caption" = "Include caption";
+"look_share_tags" = "Items to show";
+"look_share_tags_detail" = "Only type and brand are included. Personal item names and sizes stay private.";
+"look_share_footer" = "Share the image shown above using your iPhone's share sheet. This doesn't publish your profile or look in WearIt.";
 
 /* Shop picks */
 "shop_title" = "Picks for you";
@@ -1244,6 +1271,10 @@
 "shop_footer" = "Catalog prices and stock can change or vary by size and color. Confirm the current offer, size and availability in the shop before buying.";
 "shop_filter_all" = "For you";
 "shop_filter_saved" = "Saved";
+"shop_filter_stores" = "Stores";
+"shop_filter_all_stores" = "All stores";
+"shop_filter_stores_count_format" = "Stores: %d";
+"shop_filter_stores_detail" = "Choose one or more stores, or select All stores. Only products from the selected stores will appear.";
 "shop_empty_wardrobe" = "Add at least 5 items to your wardrobe so picks can match it.";
 "shop_empty_catalog" = "No shop items yet. Pull down to check again.";
 "shop_empty_saved" = "Tap the heart on a pick to keep it here.";

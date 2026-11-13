@@ -870,6 +870,14 @@
 "profile_looks_empty" = "תמונות של הלוקים שלבשת יופיעו כאן.";
 "profile_avatar_change" = "שינוי תמונת פרופיל";
 "profile_avatar_remove_photo" = "הסרת תמונה";
+"profile_sections" = "אזורי הפרופיל";
+"profile_personal_area" = "האזור האישי";
+"profile_style_summary_format" = "סגנון מהארון שלך: %@";
+"profile_looks_private_notice" = "הפרופיל והלוקים פרטיים כרגע. תמונות משותפות רק כשבוחרים לשתף אותן.";
+"profile_personal_private_title" = "רק בשבילך";
+"profile_personal_private_detail" = "המידות, העדפות הקנייה והתובנות שנלמדו נשארות פרטיות ועוזרות להתאים לך את ההמלצות.";
+"profile_saved_products" = "מוצרים ששמרתי";
+"profile_saved_products_detail" = "חזרה לפריטים ששמרת בזמן הקניות";
 "action_share" = "שיתוף";
 
 // MARK: - AI look explanations (Foundation Models)
@@ -1251,10 +1259,29 @@
 "look_post_items_title" = "בלוק הזה";
 "look_post_show_tag" = "הצג תג";
 "look_post_show_tag_a11y_format" = "הצג תג עבור %@";
-"look_post_tags_footer" = "התגים פרטיים. כשיהיה שיתוף, יופיעו רק הפריטים שהדלקת, עם הסוג והמותג. שאר הארון לא נחשף אף פעם.";
+"look_post_tags_footer" = "התגים שסימנת יוצעו בכרטיס השיתוף. אפשר לעבור עליהם לפני השיתוף; יוצגו רק הסוג והמותג.";
 "look_post_pin" = "נעץ למעלה";
 "look_post_unpin" = "בטל נעיצה";
 "look_post_options" = "אפשרויות תמונה";
+
+/* Look share card */
+"look_share_title" = "שיתוף הלוק";
+"look_share_card_subtitle" = "הלוק שלי";
+"look_share_photo_only" = "שיתוף תמונה בלבד";
+"look_share_preview" = "תצוגה מקדימה של התמונה לשיתוף";
+"look_share_preparing" = "מכין את הכרטיס…";
+"look_share_failed" = "לא הצלחנו להכין את תמונת הלוק.";
+"look_share_retry" = "נסה שוב";
+"look_share_format" = "פורמט התמונה";
+"look_share_format_post" = "פוסט · 4:5";
+"look_share_format_story" = "סטורי · 9:16";
+"look_share_details" = "בכרטיס הזה";
+"look_share_identity" = "הצג שם ושם משתמש";
+"look_share_identity_missing" = "אפשר להוסיף שם ושם משתמש בעריכת הפרופיל.";
+"look_share_caption" = "הוסף את הכיתוב";
+"look_share_tags" = "פריטים להצגה";
+"look_share_tags_detail" = "יוצגו רק הסוג והמותג. שמות אישיים של פריטים ומידות נשארים פרטיים.";
+"look_share_footer" = "התמונה שמופיעה למעלה תשותף דרך חלונית השיתוף של האייפון. הפעולה לא מפרסמת את הפרופיל או הלוק בתוך WearIt.";
 
 /* Shop picks */
 "shop_title" = "בחירות בשבילך";
@@ -1263,6 +1290,10 @@
 "shop_footer" = "המחירים והמלאי בקטלוג עשויים להשתנות או להיות שונים לפי מידה וצבע. לפני קנייה, בדוק בחנות את המבצע, המידה והזמינות העדכניים.";
 "shop_filter_all" = "בשבילך";
 "shop_filter_saved" = "שמורים";
+"shop_filter_stores" = "חנויות";
+"shop_filter_all_stores" = "כל החנויות";
+"shop_filter_stores_count_format" = "חנויות: %d";
+"shop_filter_stores_detail" = "אפשר לבחור חנות אחת או כמה, או לבחור בכל החנויות. יוצגו רק מוצרים מהחנויות שנבחרו.";
 "shop_empty_wardrobe" = "הוסף לפחות 5 פריטים לארון כדי שההצעות יתאימו לו.";
 "shop_empty_catalog" = "עדיין אין פריטים מהחנויות. משוך למטה כדי לבדוק שוב.";
 "shop_empty_saved" = "הקש על הלב בהצעה כדי לשמור אותה כאן.";
