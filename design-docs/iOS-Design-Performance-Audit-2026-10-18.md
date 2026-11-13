@@ -223,4 +223,4 @@ Do not introduce a new package, full app architecture migration, broad @Observab
 
 ## Relationship to earlier reviews
 
-`docs/LEARNINGS.md` records the October 7 design fixes and references `audits/design-review.md`, but that older report was not found in this checkout. The battery/CloudKit report exists at `WearIt/Docs/BatteryCloudKitAuditReport.md`. This audit uses the current code and does not assume previously fixed issues are still open. Existing local modification to `WearIt.xcodeproj/project.pbxproj` was left untouched.
+`docs/LEARNINGS.md` records the October 7 design fixes and references `audits/design-review.md`, but that older report was not found in this checkout. The battery/CloudKit report exists at `design-docs/BatteryCloudKitAuditReport.md`. This audit uses the current code and does not assume previously fixed issues are still open. Existing local modification to `WearIt.xcodeproj/project.pbxproj` was left untouched.

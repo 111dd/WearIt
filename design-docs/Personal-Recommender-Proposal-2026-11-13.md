@@ -87,7 +87,7 @@ Perform heavy pure calculations on immutable snapshots off the main actor; apply
 
 ## Evaluation and owner validation
 
-Record the existing baseline before changing behavior. With an owner-authorized fresh export, the existing `Tools/recommendation_quality_report.py` can describe historical wear variety and explicit feedback coverage, but cannot recover unseen exposures or prove a counterfactual policy improvement.
+Record the existing baseline before changing behavior. With an owner-authorized fresh export, the existing `scripts/recommendation_quality_report.py` can describe historical wear variety and explicit feedback coverage, but cannot recover unseen exposures or prove a counterfactual policy improvement.
 
 Once exposure logging exists, track:
 

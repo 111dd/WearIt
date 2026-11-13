@@ -3,7 +3,7 @@
 Use a fresh **Settings → Your data → Export my data** archive after both observation windows have ended. The report reads only the exported JSON, writes nothing, makes no network requests and never extracts or reads photos. It prints aggregates, without names, notes, garment titles or UUIDs.
 
 ```sh
-python3 Tools/recommendation_quality_report.py "/path/to/WearIt Export.zip" --cutover 2026-10-22 --days 14
+python3 scripts/recommendation_quality_report.py "/path/to/WearIt Export.zip" --cutover 2026-10-22 --days 14
 ```
 
 `--cutover` is the first local day using the updated app on the device, not the day its source was edited. The date above is an example only; the agent has not built or deployed this change. The example's equal windows are October 8–21 and October 22–November 4, with November 5 excluded. A full comparison for that example requires an export made on or after November 5 in the selected time zone. An earlier export is clearly marked partial and is descriptive only.

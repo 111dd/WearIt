@@ -7,8 +7,6 @@ struct GarmentPhotoSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var suggestions: [GarmentPhotoSuggestion] = []
-    @State private var isSearching = true
-    @State private var webSearchID = 1
     @State private var isImporting = false
     @State private var productLink = ""
     @State private var importID = 0
@@ -37,10 +35,7 @@ struct GarmentPhotoSearchView: View {
             }
             .withLocalAppBackdropPainted()
         }
-        .task(id: webSearchID) {
-            guard webSearchID > 0 else { return }
-            await searchWeb()
-        }
+        .task { await loadCurrentPhoto() }
         .task(id: importID) {
             guard importID > 0 else { return }
             await importLink()
@@ -68,11 +63,7 @@ struct GarmentPhotoSearchView: View {
                 TextField(String(localized: "photo_search_link_placeholder"), text: $productLink)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .textFieldStyle(.roundedBorder)
-                Button(String(localized: "photo_search_import_link")) {
-                    webSearchID = 0
-                    isSearching = false
-                    importID += 1
-                }
+                Button(String(localized: "photo_search_import_link")) { importID += 1 }
                     .disabled(productLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isImporting)
                 Button {
                     if let url = webSearchURL { openURL(url) }
@@ -81,27 +72,14 @@ struct GarmentPhotoSearchView: View {
                 }
                 Text(String(localized: "photo_search_web_hint")).font(.caption).foregroundStyle(.secondary)
             }.padding(DS.Spacing.md).contentSurface()
-            if isSearching || isImporting {
+            if isImporting {
                 ProgressView(String(localized: "photo_search_loading")).frame(maxWidth: .infinity)
             }
             if let message { Text(message).font(.subheadline).foregroundStyle(.secondary) }
             if !suggestions.isEmpty {
-                Group {
-                    if suggestions.contains(where: \.matchesItem) {
-                        Text(String(localized: "photo_search_review_same"))
-                    } else {
-                        Text(String(localized: "photo_search_review_notice"))
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                Group {
-                    if suggestions.contains(where: \.matchesItem) {
-                        Text(String(localized: "photo_search_page_photos"))
-                    } else {
-                        Text(String(localized: "photo_search_web_results"))
-                    }
-                }
-                .font(.headline)
+                Text(String(localized: "photo_search_review_same"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(String(localized: "photo_search_page_photos")).font(.headline)
                 photoGrid(suggestions)
             }
         }
@@ -123,14 +101,8 @@ struct GarmentPhotoSearchView: View {
                 }
             }.padding(DS.Spacing.sm).contentSurface()
             Text(suggestion.title).font(.headline)
-            Group {
-                if suggestion.matchesItem {
-                    Text(String(localized: "photo_search_review_same"))
-                } else {
-                    Text(String(localized: "photo_search_review_notice"))
-                }
-            }
-            .font(.subheadline).foregroundStyle(.secondary)
+            Text(String(localized: "photo_search_review_same"))
+                .font(.subheadline).foregroundStyle(.secondary)
             Link(suggestion.sourceName, destination: suggestion.sourceURL)
             if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
             if fullImage == nil, message == nil { ProgressView() }
@@ -157,12 +129,12 @@ struct GarmentPhotoSearchView: View {
                         Text(suggestion.title).font(.caption.weight(.medium)).lineLimit(2)
                         Text(suggestion.sourceName).font(.caption2).foregroundStyle(.secondary)
                     }.padding(DS.Spacing.xs).contentSurface(cornerRadius: DS.Radius.tile)
-                }.buttonStyle(.plain).disabled(isSearching || isImporting)
+                }.buttonStyle(.plain).disabled(isImporting)
             }
         }
     }
 
-    /// Name the item for a public image search. The photo itself stays on the device.
+    /// Name the item for the browser search the user opens. The photo itself stays on the device.
     private var itemSearchWords: String {
         let custom = [garment.userTitleOverride, garment.legacyName]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -193,18 +165,6 @@ struct GarmentPhotoSearchView: View {
         }.value
         guard !Task.isCancelled else { return }
         currentImage = image
-    }
-
-    @MainActor private func searchWeb() async {
-        isSearching = true
-        message = nil
-        async let current: Void = loadCurrentPhoto()
-        let found = await GarmentPhotoDiscovery.shared.webPhotos(matching: itemSearchWords)
-        _ = await current
-        guard !Task.isCancelled else { return }
-        suggestions = found
-        isSearching = false
-        if found.isEmpty { message = String(localized: "photo_search_empty") }
     }
 
     @MainActor private func importLink() async {

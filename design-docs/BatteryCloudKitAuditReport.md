@@ -63,7 +63,7 @@
 - `WearIt/Views/ProfileView.swift`
 - `WearIt/Views/WardrobeView.swift`
 - `WearIt/BootstrapView.swift`
-- `WearIt/Docs/BatteryCloudKitAuditReport.md` (this file)
+- `design-docs/BatteryCloudKitAuditReport.md` (this file)
 
 ---
 

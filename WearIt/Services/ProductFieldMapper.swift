@@ -453,6 +453,15 @@ enum ProductFieldMapper {
 
     // MARK: - Scoring helpers
 
+    /// "Dress" used as an adjective before another garment ("dress loafers", "dress watch").
+    /// Nouns that also follow a real dress ("dress tie waist") are left out on purpose.
+    private static let dressQualifierPattern = #"\bdress[\s-]+(?:"# + [
+        "shirts?", "pants?", "trousers?", "slacks", "chinos?", "shorts",
+        "shoes?", "loafers?", "oxfords?", "derby", "derbies", "brogues?", "sneakers?",
+        "sandals?", "heels", "pumps", "flats", "boots?", "socks?", "belts?",
+        "watch", "watches", "coats?", "jackets?", "blazers?", "vests?", "code"
+    ].joined(separator: "|") + #")\b"#
+
     /// A dress shirt/shoe is still a shirt/shoe; one-piece silhouettes need
     /// explicit words rather than the substring in "dressing" or "address".
     private static func onePieceType(in raw: String) -> ItemType? {
@@ -461,8 +470,7 @@ enum ProductFieldMapper {
             return .jumpsuit
         }
         let withoutDressQualifiers = text.replacingOccurrences(
-            of: #"\bdress[\s-]+(?:shirts?|pants?|trousers?|shoes?|socks?|boots?|belts?)\b"#,
-            with: "", options: .regularExpression
+            of: dressQualifierPattern, with: "", options: .regularExpression
         )
         if withoutDressQualifiers.range(of: #"\b(?:dress|dresses|sundress|sundresses|שמלה|שמלות|שמלת)\b"#,
             options: .regularExpression) != nil {

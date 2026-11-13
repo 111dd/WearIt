@@ -1325,14 +1325,13 @@
 "photo_subject_no_selection" = "No selection yet. Try another subject or a clothing section below. If the garment cannot be separated, crop it in the photo editor.";
 "photo_advice_low_resolution" = "This photo is small. You can look for a sharper photo or import one from a shop.";
 "photo_advice_isolate" = "For a cleaner card, select the garment and remove the surrounding background.";
-"photo_search_explanation" = "Searches the web for this item by its name, brand, type and color. Your wardrobe photo is not uploaded. A result may be a different product, so check it before using it.";
+"photo_search_explanation" = "Paste this item's shop product link to import its photos. Your wardrobe photo is not uploaded. Check the color and version before using a photo.";
 "photo_search_product_link" = "Have the product link?";
 "photo_search_link_placeholder" = "Paste a shop product link";
 "photo_search_import_link" = "Show product photos";
 "photo_search_web_action" = "Search images on the web";
-"photo_search_web_hint" = "Opens the same search in your browser. Copy a product page link back here to import its photos.";
-"photo_search_loading" = "Searching the web…";
-"photo_search_review_notice" = "This photo is from the web and may show a different item. Check the color, cut and details before adding it.";
+"photo_search_web_hint" = "Opens a web image search for this item in your browser. Copy a product page link back here to import its photos.";
+"photo_search_loading" = "Loading photos…";
 "photo_search_same_item" = "Photos of this item";
 "photo_search_similar" = "Similar items";
 "photo_search_review_same" = "These photos are from a product that matches this item. Check the color and version before adding one.";
@@ -1340,8 +1339,7 @@
 "photo_search_current" = "Current";
 "photo_search_suggested" = "New photo";
 "photo_search_add_gallery" = "Add to gallery";
-"photo_search_empty" = "No web photos found. Try a product link, or open the search in the browser.";
-"photo_search_web_results" = "From the web";
+"photo_search_empty" = "No photos found on that page. Try another product link.";
 "photo_search_page_photos" = "Photos from this page";
 "photo_polish_explanation" = "Softens a face and the room behind the person, on this device, the same way a daily look photo can. The clothing stays sharp.";
 "photo_polish_no_person" = "No person was found in this photo, so the face and background can't be softened.";

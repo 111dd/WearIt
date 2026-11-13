@@ -26,7 +26,7 @@ The fragment was read as source and wrapped with the bundled renderer. Browser i
 
 ## Measuring outcomes
 
-See `Recommendation-Quality-Guide-2026-10-22.md` and `Tools/recommendation_quality_report.py`. The local, read-only report consumes a fresh export and compares equal windows around the actual first device-use date of the change. It counts explicit comfort/style responses among responding looks and distinct garment wear-days/core items, with profile/legacy/unknown-category and partial-window coverage. It never reads photos, uploads data, replays current weights as historical predictions or labels observed counts as recommendation accuracy. The tool itself has received source review only and has not been executed.
+See `Recommendation-Quality-Guide-2026-10-22.md` and `scripts/recommendation_quality_report.py`. The local, read-only report consumes a fresh export and compares equal windows around the actual first device-use date of the change. It counts explicit comfort/style responses among responding looks and distinct garment wear-days/core items, with profile/legacy/unknown-category and partial-window coverage. It never reads photos, uploads data, replays current weights as historical predictions or labels observed counts as recommendation accuracy. The tool itself has received source review only and has not been executed.
 
 ## Owner-run acceptance scenarios
 

@@ -1021,8 +1021,10 @@ struct ShopPicksView: View {
             return
         }
         picks = result.picks.filter { !feedback.isHidden($0.id) }
+        let owned = Set(ShopPicksEngine.personalWardrobe(garments, profile: profile).compactMap(\.shopProductID))
         personalPicks = ShopPersonalSelection.select(from: picks, profileID: profileID,
-            preferences: profile?.shoppingPreferences ?? ShoppingPreferences())
+            preferences: profile?.shoppingPreferences ?? ShoppingPreferences(),
+            isOwned: { feedback.has(.bought, $0) || owned.contains($0) })
         matches = result.matches
         matchRevision += 1
     }
@@ -1843,8 +1845,10 @@ struct ShopPicksSection: View {
             refreshGeneration += 1
             return
         }
+        let owned = Set(ShopPicksEngine.personalWardrobe(garments, profile: profile).compactMap(\.shopProductID))
         picks = Array(ShopPersonalSelection.select(from: result.picks.filter { !feedback.isHidden($0.id) },
-            profileID: profile?.id, preferences: profile?.shoppingPreferences ?? ShoppingPreferences()).prefix(3))
+            profileID: profile?.id, preferences: profile?.shoppingPreferences ?? ShoppingPreferences(),
+            isOwned: { feedback.has(.bought, $0) || owned.contains($0) }).prefix(3))
     }
 
     private var rankingSignature: Int {
