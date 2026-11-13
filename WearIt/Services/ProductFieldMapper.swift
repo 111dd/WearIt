@@ -9,6 +9,7 @@ enum ProductFieldMapper {
     static func mapCategory(path: String, title: String?) -> Category? {
         let haystack = normalize("\(path) \(title ?? "")")
         guard !haystack.isEmpty else { return nil }
+        if let title, onePieceType(in: title) != nil { return .top }
 
         // Scored phrases — longer / more specific wins within each bucket.
         let shoesScore = bestScore(haystack, [
@@ -19,11 +20,11 @@ enum ProductFieldMapper {
             "outerwear", "raincoat", "windbreaker", "puffer", "parka", "blazer", "jacket", "coat",
             "מעיל", "גקט", "ג'קט", "בלייזר"
         ])
-        let topScore = bestScore(haystack, [
+        let topScore = max(onePieceType(in: haystack) == nil ? 0 : 9, bestScore(haystack, [
             "t-shirt", "tshirt", "tshirts", "knit shirt", "crew neck", "short sleeve", "long sleeve",
             "blouse", "cardigan", "sweater", "hoodie", "polo", "tank", "shirt", "shirts", "top", "tee", "vest",
             "טי שרט", "טי-שרט", "טישרט", "טישירט", "חולצה", "חולצות", "גופיה", "קפוצון", "סווטשירט", "סוודר", "פולו"
-        ])
+        ]))
         let bottomScore: Int = {
             let phrases = [
                 "sweatpant", "legging", "trouser", "jogger", "chino", "skirt", "jean", "jeans", "pant", "pants", "bottom", "shorts",
@@ -78,6 +79,9 @@ enum ProductFieldMapper {
         }
         let haystack = normalize("\(path) \(title ?? "")")
         guard !haystack.isEmpty else { return nil }
+        if category == nil || category == .top, let onePiece = onePieceType(in: haystack) {
+            return onePiece
+        }
         if category == .accessory, haystack.range(of: #"\brings?\b"#, options: .regularExpression) != nil { return .jewelry }
 
         let pairs: [(ItemType, [String])] = [
@@ -448,6 +452,32 @@ enum ProductFieldMapper {
     }
 
     // MARK: - Scoring helpers
+
+    /// "Dress" used as an adjective before another garment ("dress loafers", "dress watch").
+    /// Nouns that also follow a real dress ("dress tie waist") are left out on purpose.
+    private static let dressQualifierPattern = #"\bdress[\s-]+(?:"# + [
+        "shirts?", "pants?", "trousers?", "slacks", "chinos?", "shorts",
+        "shoes?", "loafers?", "oxfords?", "derby", "derbies", "brogues?", "sneakers?",
+        "sandals?", "heels", "pumps", "flats", "boots?", "socks?", "belts?",
+        "watch", "watches", "coats?", "jackets?", "blazers?", "vests?", "code"
+    ].joined(separator: "|") + #")\b"#
+
+    /// A dress shirt/shoe is still a shirt/shoe; one-piece silhouettes need
+    /// explicit words rather than the substring in "dressing" or "address".
+    private static func onePieceType(in raw: String) -> ItemType? {
+        let text = normalize(raw)
+        if text.range(of: #"\b(?:jumpsuits?|playsuits?|rompers?|אוברול(?:ים)?)\b"#, options: .regularExpression) != nil {
+            return .jumpsuit
+        }
+        let withoutDressQualifiers = text.replacingOccurrences(
+            of: dressQualifierPattern, with: "", options: .regularExpression
+        )
+        if withoutDressQualifiers.range(of: #"\b(?:dress|dresses|sundress|sundresses|שמלה|שמלות|שמלת)\b"#,
+            options: .regularExpression) != nil {
+            return .dress
+        }
+        return nil
+    }
 
     /// Score = longest matching phrase length. 0 if nothing matches.
     static func bestScore(_ haystack: String, _ phrases: [String]) -> Int {

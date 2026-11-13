@@ -1,3 +1,5 @@
+> Latest implementation: [Shopping follow-up — 2026-10-21](Shopping-2026-10-21.md). It supersedes the historical MainActor-ranking, feedback-only purchase, and strict item-only photo behavior below. No agent build/tests/simulator.
+
 # Personal shopping — 2026-10-18
 
 Status: implemented locally; owner device review and retailer-data review pending. No build, tests, simulator, app launch, commit or push performed by the agents.

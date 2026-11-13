@@ -3,27 +3,56 @@
 import Foundation
 import SwiftData
 
-@MainActor
 enum PurchaseScorer {
+    struct Profile: Sendable {
+        let id: UUID
+        let warmthSensitivity: Int
+        let rainTolerance: Int
+        let sizes: [Category: SizeOption]
+    }
+    struct PlannedInput: Sendable {
+        let ids: [UUID]
+        let date: Date
+        let isEvening: Bool
+        let temperature: Double?
+        let raining: Bool
+    }
+    struct Match: Sendable {
+        let taste: Double
+        var wardrobe: Double? = nil
+        var weather: Double? = nil
+        var signals: Int = 0
+        /// Component fit index, not a calibrated probability or model-accuracy claim.
+        var percent: Int {
+            var sum = taste * 0.5, weight = 0.5
+            if let wardrobe { sum += wardrobe * 0.35; weight += 0.35 }
+            if let weather { sum += weather * 0.15; weight += 0.15 }
+            return Int((min(1, max(0, sum / weight)) * 100).rounded())
+        }
+    }
     struct Input {
         var garments: [Garment]
         var wearCounts: [UUID: Int]
         var windowDays: Int = 90
         var taste: TasteAffinityBuilder.Profile
         var gaps: [WardrobeGapAnalyzer.Gap]
-        var profile: UserProfile?
+        var profile: Profile?
         var model: ShopPreferenceModel
-        var modelContext: ModelContext
+        var lookState: RecoState
         var now = Date()
         var forecasts: [DayForecast] = []
-        var upcomingPlans: [DayPlan] = []
+        var upcomingPlans: [PlannedInput] = []
         var includeNextSeasonDeals = false
         var feedbackSignals: ShopFeedbackStore.Signals = .empty
         var preferences = ShoppingPreferences()
         var department: ShopDepartment? = nil
+        var comfort = GarmentWeatherHistory()
+        var signalCount = 0
+        /// Category-specific, confidence-damped evidence adjusts order after existing gates.
+        var searchProfile: ShopSearchProfile? = nil
     }
 
-    enum Reason: Hashable {
+    enum Reason: Hashable, Sendable {
         case fillsGap(WardrobeGapAnalyzer.Kind, Category)
         case opensLooks(Int)
         case lovedColor(ColorTag)
@@ -37,9 +66,9 @@ enum PurchaseScorer {
         case nextSeasonDeal(SeasonSuitability)
     }
 
-    enum Intent { case everyday, upcoming, nextSeason }
+    enum Intent: Sendable { case everyday, upcoming, nextSeason }
 
-    struct LookPreview {
+    struct LookPreview: Sendable {
         var ownedGarmentIDs: [UUID]
         var date: Date? = nil
         var isEvening = false
@@ -47,7 +76,7 @@ enum PurchaseScorer {
         var companions: [Pick] = []
     }
 
-    struct Pick: Identifiable {
+    struct Pick: Identifiable, Sendable {
         let product: ShopProduct
         let score: Double
         let wearsPerMonth: Double?
@@ -55,6 +84,7 @@ enum PurchaseScorer {
         let reasons: [Reason]
         /// Existing positions are preserved; new features are appended.
         let features: [Double]
+        var match: Match? = nil
         var intent: Intent = .everyday
         var preview: LookPreview? = nil
         var id: String { product.id }
@@ -70,7 +100,29 @@ enum PurchaseScorer {
 
     private static let deepPoolSize = 70
 
-    static func rank(_ products: [ShopProduct], input: Input, isHidden: (String) -> Bool, limit: Int = 40) -> [Pick] {
+    private struct ProductEvidence {
+        let metrics: Affinity.Metrics
+        let reaction: Double
+    }
+
+    /// Evaluate cheap catalog evidence once for both Explore estimates and the deep shortlist.
+    static func rankAndMatch(_ products: [ShopProduct], input: Input, isHidden: (String) -> Bool,
+        limit: Int = 40, retainedIDs: [String] = []) -> (picks: [Pick], matches: [String: Match]) {
+        let evidence = productEvidence(products, input: input)
+        guard !Task.isCancelled else { return ([], [:]) }
+        let matches = browseMatches(evidence, input: input)
+        let picks = rank(products, input: input, isHidden: isHidden, limit: limit,
+            retainedIDs: retainedIDs, evidence: evidence)
+        return Task.isCancelled ? ([], [:]) : (picks, matches)
+    }
+
+    static func rank(_ products: [ShopProduct], input: Input, isHidden: (String) -> Bool, limit: Int = 40,
+        retainedIDs: [String] = []) -> [Pick] {
+        rank(products, input: input, isHidden: isHidden, limit: limit, retainedIDs: retainedIDs, evidence: nil)
+    }
+
+    private static func rank(_ products: [ShopProduct], input: Input, isHidden: (String) -> Bool, limit: Int,
+        retainedIDs: [String], evidence: [String: ProductEvidence]?) -> [Pick] {
         let wardrobe = input.garments.filter { !$0.isBlocked && ($0.ownerID == nil || input.profile == nil || $0.ownerID == input.profile?.id) }
         guard !wardrobe.isEmpty, limit > 0 else { return [] }
         let shares = wornTypeShare(wardrobe, wearCounts: input.wearCounts)
@@ -78,15 +130,15 @@ enum PurchaseScorer {
         let categoryCounts = Dictionary(grouping: wardrobe, by: \.category).mapValues(\.count)
         var usualSizes: [Category: SizeOption] = [:]
         for category in [Category.top, .bottom, .shoes, .outer] {
-            usualSizes[category] = MySizesView.usualSize(for: category, profile: input.profile, garments: wardrobe)
+            usualSizes[category] = input.profile?.sizes[category]
         }
         let candidates: [Candidate] = products.compactMap { product in
-            guard product.item.available != false, product.itemType != nil, product.itemType != .other, !isHidden(product.id),
+            guard !Task.isCancelled, product.item.available != false, product.itemType != nil, product.itemType != .other, !isHidden(product.id),
                   (input.department ?? .automatic).includes(product.audience, category: product.category),
                   fitsUsualSize(product, usualSize: usualSizes[product.category]) else { return nil }
-            let metrics = affinity.metrics(product, typeShares: shares)
+            let metrics = evidence?[product.id]?.metrics ?? affinity.metrics(product, typeShares: shares)
             let need = bestGap(for: product, in: input.gaps)
-            let reaction = input.feedbackSignals.score(for: product)
+            let reaction = evidence?[product.id]?.reaction ?? input.feedbackSignals.score(for: product)
             // A new type in a well-established category needs evidence beyond a generic color/style.
             let unfamiliar = metrics.type == 0 && (categoryCounts[product.category] ?? 0) >= 3 && product.category != .accessory
             let strongExploration = metrics.personal >= 0.55
@@ -99,25 +151,68 @@ enum PurchaseScorer {
             guard metrics.personal >= (accessoryEvidence ? 0.2 : 0.28), metrics.evidence >= 2 || accessoryEvidence,
                   metrics.avoid < 0.8, reaction > -0.6 else { return nil }
             let quick = metrics.personal + 0.22 * (need?.priority ?? 0) + 0.15 * reaction
-                + 0.06 * Double(product.discountPercent ?? 0) / 100
+                + searchBonus(product, profile: input.searchProfile)
+                + usefulDealBoost(product, personal: metrics.personal, usefulness: 0.65,
+                    need: need?.priority ?? 0, redundancy: 0)
             return Candidate(product: product, metrics: metrics, need: need, reaction: reaction, quickScore: quick)
         }
         let sorted = candidates.sorted { $0.quickScore == $1.quickScore ? $0.product.id < $1.product.id : $0.quickScore > $1.quickScore }
-        // Leave room for accessories and personally relevant offers before the expensive look pass.
+        // Diversify before the expensive cutoff; a dominant type must not consume every slot.
         var shortlist: [Candidate] = []
-        var seen = Set<String>()
-        func append(_ pool: [Candidate], count: Int) {
-            for candidate in pool.prefix(count) where seen.insert(candidate.product.id).inserted { shortlist.append(candidate) }
+        var selectedIDs = Set<String>()
+        var categories: [Category: Int] = [:]
+        var types: [ItemType: Int] = [:]
+        var brands: [String: Int] = [:]
+        func adjusted(_ candidate: Candidate) -> Double {
+            let product = candidate.product
+            return candidate.quickScore - 0.06 * Double(categories[product.category, default: 0])
+                - 0.04 * Double(product.itemType.map { types[$0, default: 0] } ?? 0)
+                - 0.02 * Double(brands[product.item.brand.map(BrandStore.normalizeBrandKey) ?? "", default: 0])
         }
-        append(sorted.filter { $0.product.category == .accessory }, count: 10)
-        append(sorted.filter { $0.product.discountPercent != nil }, count: 15)
-        append(sorted, count: deepPoolSize)
-        shortlist = Array(shortlist.prefix(deepPoolSize))
+        func append(_ candidate: Candidate) {
+            guard selectedIDs.insert(candidate.product.id).inserted else { return }
+            shortlist.append(candidate)
+            categories[candidate.product.category, default: 0] += 1
+            if let type = candidate.product.itemType { types[type, default: 0] += 1 }
+            brands[candidate.product.item.brand.map(BrandStore.normalizeBrandKey) ?? "", default: 0] += 1
+        }
+        func bestIndex(in pool: [Candidate]) -> Int? {
+            pool.indices.max {
+                let left = adjusted(pool[$0]), right = adjusted(pool[$1])
+                return left == right ? pool[$0].product.id > pool[$1].product.id : left < right
+            }
+        }
+        // Recheck held recommendations even when new stock changes the cheap top 500.
+        // Holding a position never bypasses the personal, stock or deep suitability gates.
+        let candidatesByID = Dictionary(candidates.map { ($0.product.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for id in retainedIDs.prefix(20) {
+            if let candidate = candidatesByID[id], candidate.product.category != .accessory { append(candidate) }
+        }
+        // Offers have a separate diverse reserve inside the same bounded deep pass.
+        var offers = Array(sorted.filter {
+            $0.product.category != .accessory && $0.product.discountPercent != nil && !selectedIDs.contains($0.product.id)
+        }.prefix(500))
+        var reservedOffers = 0
+        while reservedOffers < 15, shortlist.count < deepPoolSize, !offers.isEmpty, !Task.isCancelled {
+            guard let index = bestIndex(in: offers) else { break }
+            append(offers.remove(at: index))
+            reservedOffers += 1
+        }
+        var remaining = Array(sorted.filter {
+            $0.product.category != .accessory && !selectedIDs.contains($0.product.id)
+        }.prefix(500))
+        while shortlist.count < deepPoolSize, !remaining.isEmpty, !Task.isCancelled {
+            guard let index = bestIndex(in: remaining) else { break }
+            append(remaining.remove(at: index))
+        }
+        shortlist += sorted.filter { $0.product.category == .accessory }.prefix(10)
 
         let current = currentContext(input)
         let nextSeason = nextSeason(after: input.now)
-        let state = AIRecommender.shared.ensureState(context: input.modelContext, profileID: input.profile?.id)
-        let partners = ShoppingPartnerPool(wardrobe: wardrobe, wearCounts: input.wearCounts, ctx: current.context, state: state)
+        let state = input.lookState
+        let partnerPools = (0..<3).map { offset in
+            ShoppingPartnerPool(wardrobe: wardrobe, wearCounts: input.wearCounts, ctx: current.context, state: state, rotationOffset: offset * 2)
+        }
         let plans = plannedLooks(input: input, wardrobe: wardrobe)
         let rates = monthlyWearRate(wardrobe, wearCounts: input.wearCounts, windowDays: input.windowDays)
         // Learning adjusts ordering; the structural relevance and usefulness gates stay in charge.
@@ -126,16 +221,20 @@ enum PurchaseScorer {
         var previewAlternatives: [String: [[Garment]]] = [:]
 
         for candidate in shortlist {
+            guard !Task.isCancelled else { return [] }
             let product = candidate.product
             let garment = transientGarment(for: product)
-            let nowFits = !current.hasWeather || weatherFit(garment, context: current.context)
+            let hasSuitableLayer = garment.category == .top && current.context.temperatureC < 20
+                && wardrobe.contains { $0.category == .outer && !$0.isCurrentlyUnavailable && weatherFit($0, context: current.context) }
+            let nowFits = !current.hasWeather || weatherFit(garment, context: current.context) || hasSuitableLayer
             let planned = bestPlannedLook(for: garment, plans: plans, state: state, input: input)
             let future = !nowFits && planned == nil && input.includeNextSeasonDeals && garment.seasonSuitability == nextSeason
                 && (product.discountPercent ?? 0) >= 30 && candidate.metrics.personal >= 0.45
             guard nowFits || future || planned != nil else { continue }
             let lookContext = planned?.context ?? (future ? context(input: input, temperature: seasonalTemperature(nextSeason), raining: false) : current.context)
             let checkWeather = planned?.hasWeather ?? (future || current.hasWeather)
-            let matches = partners.goodLooks(with: garment, ctx: lookContext, state: state, checkWeather: checkWeather)
+            let poolIndex = product.id.utf8.reduce(0) { ($0 * 31 + Int($1)) % partnerPools.count }
+            let matches = partnerPools[poolIndex].goodLooks(with: garment, ctx: lookContext, state: state, checkWeather: checkWeather)
             // Neither discounts nor learned positive bias can pass an item without an actual look.
             guard matches.count > 0 || planned != nil else { continue }
             let usefulness = max(matches.share, planned == nil ? 0 : 1)
@@ -146,13 +245,17 @@ enum PurchaseScorer {
             let discount = Double(product.discountPercent ?? 0) / 100
             let need = candidate.need?.priority ?? 0
             let prior = 0.42 * candidate.metrics.personal + 0.28 * usefulness + 0.15 * need
-                + 0.08 * (planned == nil ? 0 : 1) + 0.07 * discount - redundancy
+                + 0.08 * (planned == nil ? 0 : 1) - redundancy
                 + 0.12 * candidate.reaction
+            // The item must be worth recommending before its price earns any priority.
+            guard prior >= 0.27 else { continue }
             let features = featureVector(taste: candidate.metrics.personal, looks: usefulness, need: need,
                 discount: discount, redundancy: redundancy, product: product,
                 metrics: candidate.metrics, planned: planned != nil, future: future, reaction: candidate.reaction)
             let score = (1 - learnedShare) * prior + learnedShare * input.model.predict(features)
-            guard prior >= 0.27 else { continue }
+                + searchBonus(product, profile: input.searchProfile)
+                + usefulDealBoost(product, personal: candidate.metrics.personal, usefulness: usefulness,
+                    need: need, redundancy: redundancy)
 
             var reasons: [Reason] = []
             if future { reasons.append(.nextSeasonDeal(nextSeason)) }
@@ -164,8 +267,9 @@ enum PurchaseScorer {
             if let color = product.colors.first(where: { (affinity.colors[$0] ?? 0) >= 0.6 }), candidate.metrics.color >= 0.5 {
                 reasons.append(.lovedColor(color))
             }
-            if candidate.metrics.brand >= 0.6, let brand = product.item.brand { reasons.append(.lovedBrand(brand)) }
-            if candidate.metrics.style >= 0.6 { reasons.append(.fitsStyle) }
+            if (input.searchProfile?.brandAffinity(for: product) ?? candidate.metrics.brand) >= 0.6,
+               let brand = product.item.brand { reasons.append(.lovedBrand(brand)) }
+            if (input.searchProfile?.styleAffinity(for: product) ?? candidate.metrics.style) >= 0.6 { reasons.append(.fitsStyle) }
             if matches.count >= 2 { reasons.append(.opensLooks(matches.count)) }
             if let type = product.itemType, candidate.metrics.type >= 0.5 { reasons.append(.wornType(type)) }
             if product.category != .accessory,
@@ -178,18 +282,61 @@ enum PurchaseScorer {
             if planned == nil { previewAlternatives[product.id] = matches.alternatives }
             // This is a wear-frequency heuristic, never a conversion prediction; future use is unknown.
             let wears = future ? nil : rates[product.category].map { $0 * (0.4 + min(1, max(0, prior))) }
+            let wardrobeMatch = planned.map { ShoppingPartnerPool.score($0.owned + [garment], ctx: $0.context, state: state) } ?? matches.share
             picks.append(Pick(product: product, score: score, wearsPerMonth: wears, looks: matches.count,
-                reasons: reasons, features: features, intent: future ? .nextSeason : (planned == nil ? .everyday : .upcoming), preview: preview))
+                reasons: reasons, features: features, match: Match(taste: min(1, max(0, candidate.metrics.personal + 0.18 * candidate.reaction)),
+                    wardrobe: wardrobeMatch, weather: checkWeather && !future ? TemperatureComfort.garmentScore(garment, context: lookContext) : nil,
+                    signals: input.signalCount), intent: future ? .nextSeason : (planned == nil ? .everyday : .upcoming), preview: preview))
         }
         let ordered = picks.sorted { $0.score == $1.score ? $0.id < $1.id : $0.score > $1.score }
-        var result = diversified(ordered.filter { $0.intent != .nextSeason }, limit: limit)
+        let clothes = ordered.filter { $0.product.category != .accessory }
+        var result = diversified(clothes.filter { $0.intent != .nextSeason }, limit: limit)
         if input.includeNextSeasonDeals {
-            let seasonal = Array(ordered.filter { $0.intent == .nextSeason }.prefix(min(2, max(1, limit / 4))))
-            result = Array(result.prefix(max(0, limit - seasonal.count))) + seasonal
+            result += clothes.filter { $0.intent == .nextSeason }.prefix(4)
         }
+        // Keep eligible held picks and offers available to their own views, even if diversity
+        // kept them outside the default selection. The deep pass still caps this pool at 70.
+        let selected = Set(result.map(\.id))
+        let held = Set(retainedIDs.prefix(20))
+        result += clothes.filter { !selected.contains($0.id) && ($0.product.discountPercent != nil || held.contains($0.id)) }
         diversifyPreviewBottoms(in: &result, alternatives: previewAlternatives, wardrobe: wardrobe)
-        addCompanions(to: &result, wardrobe: wardrobe, ctx: current.context, state: state, checkWeather: current.hasWeather)
+        let accessories = Array(ordered.filter { $0.product.category == .accessory }.prefix(10))
+        addCompanions(to: &result, accessories: accessories, wardrobe: wardrobe, ctx: current.context, state: state, checkWeather: current.hasWeather)
+        result += accessories
         return result
+    }
+
+    static func browseMatches(_ products: [ShopProduct], input: Input) -> [String: Match] {
+        guard input.garments.count >= 5 else { return [:] }
+        return browseMatches(productEvidence(products, input: input), input: input)
+    }
+
+    private static func productEvidence(_ products: [ShopProduct], input: Input) -> [String: ProductEvidence] {
+        let affinity = Affinity(taste: input.taste, preferences: input.preferences)
+        let shares = wornTypeShare(input.garments, wearCounts: input.wearCounts)
+        var result: [String: ProductEvidence] = [:]
+        result.reserveCapacity(products.count)
+        for product in products {
+            guard !Task.isCancelled else { return [:] }
+            result[product.id] = ProductEvidence(metrics: affinity.metrics(product, typeShares: shares),
+                reaction: input.feedbackSignals.score(for: product))
+        }
+        return result
+    }
+
+    private static func browseMatches(_ evidence: [String: ProductEvidence], input: Input) -> [String: Match] {
+        guard input.garments.count >= 5 else { return [:] }
+        return evidence.mapValues {
+            Match(taste: min(1, max(0, $0.metrics.personal + 0.18 * $0.reaction)), signals: input.signalCount)
+        }
+    }
+
+    private static func searchBonus(_ product: ShopProduct, profile: ShopSearchProfile?) -> Double {
+        guard let profile else { return 0 }
+        // These soft bonuses never admit an otherwise ineligible product or exclude a new brand.
+        return 0.05 * profile.brandAffinity(for: product)
+            + 0.035 * profile.styleAffinity(for: product)
+            + 0.015 * profile.typeAffinity(for: product)
     }
 
     // MARK: - Taste and stock
@@ -257,7 +404,7 @@ enum PurchaseScorer {
     static func transientGarment(for product: ShopProduct) -> Garment {
         let garment = Garment(category: product.category, itemType: product.itemType, brand: product.item.brand,
             colorTags: product.colors, materialTags: product.materials, patternTag: product.pattern, fitTag: product.fit)
-        ItemTypeDefaults.apply(to: garment)
+        garment.aiEnrichedFieldsRaw = ItemTypeDefaults.apply(to: garment)
         if !product.styleTags.isEmpty { garment.styleTags = product.styleTags }
         return garment
     }
@@ -298,6 +445,18 @@ enum PurchaseScorer {
         wardrobe.filter { $0.itemType == product.itemType && !Set($0.safeColorTags).isDisjoint(with: product.colors) }.count
     }
 
+    /// A meaningful, verified saving gets priority only in proportion to personal use.
+    /// Deep eligibility is decided without this bonus; redundant purchases earn less of it.
+    private static func usefulDealBoost(_ product: ShopProduct, personal: Double, usefulness: Double,
+        need: Double, redundancy: Double) -> Double {
+        guard let percent = product.discountPercent, percent >= 15, personal >= 0.4 else { return 0 }
+        let saving = min(1, Double(percent) / 50)
+        let fit = min(1, personal / 0.65)
+        let use = min(1, max(usefulness, need))
+        let novelty = max(0, 1 - redundancy / 0.5)
+        return 0.16 * saving * fit * use * novelty
+    }
+
     private static func featureVector(taste: Double, looks: Double, need: Double, discount: Double, redundancy: Double,
         product: ShopProduct, metrics: Affinity.Metrics, planned: Bool, future: Bool, reaction: Double) -> [Double] {
         var x = [taste, looks, need, discount, redundancy]
@@ -316,35 +475,35 @@ enum PurchaseScorer {
         RecoContext(desiredFormality: formality ?? Int(input.taste.formalityMean.rounded()), temperatureC: temperature,
             isRaining: raining, now: date ?? input.now, profileID: input.profile?.id,
             warmthSensitivity: input.profile?.warmthSensitivity ?? 3, rainTolerance: input.profile?.rainTolerance ?? 3,
-            lookTime: isEvening ? .evening : .day, taste: input.taste, thermalSamples: samples)
+            lookTime: isEvening ? .evening : .day, taste: input.taste, thermalSamples: samples, weatherHistory: input.comfort)
     }
 
     private static func currentContext(_ input: Input) -> (context: RecoContext, hasWeather: Bool) {
         let start = Calendar.current.startOfDay(for: input.now)
         let forecasts = input.forecasts.filter { $0.date >= start && $0.date < start.addingTimeInterval(7 * 86_400) && $0.temperatureC.isFinite }
-        let forecast = forecasts.sorted { $0.date < $1.date }.first
+        let forecast = forecasts.sorted { $0.temperatureC < $1.temperatureC }.dropFirst(forecasts.count / 2).first
         // The neutral context is only for palette/proportion scoring; never claim forecast suitability without weather.
         return (context(input: input, temperature: forecast?.temperatureC ?? 20, raining: forecast?.isRaining ?? false,
             samples: forecast?.thermalSamples(for: .day, now: input.now) ?? []), forecast != nil)
     }
 
-    fileprivate static func weatherFit(_ garment: Garment, context: RecoContext) -> Bool {
+    fileprivate static func weatherFit(_ garment: Garment, context: RecoContext, comfort: Double? = nil) -> Bool {
         guard let type = garment.itemType else { return false }
         if garment.category == .accessory, ![ItemType.hat, .cap, .scarf].contains(type) { return true }
         if garment.category == .outer, !TemperatureComfort.outerGarmentAllowed(garment, policy: context.outerLayerPolicy) { return false }
         if context.isRaining, garment.itemType == .sandals || garment.itemType == .slippers { return false }
-        return TemperatureComfort.garmentScore(garment, context: context) >= 0.4
-            && (garment.seasonSuitability == nil || TemperatureComfort.seasonMatch(season: garment.seasonSuitability, temperatureC: context.temperatureC) >= 0.4)
+        // Weather history can override an automatic season label, including shorts on cool days.
+        return (comfort ?? TemperatureComfort.garmentScore(garment, context: context)) >= 0.4
     }
 
-    fileprivate static func lookFitsWeather(_ garments: [Garment], context: RecoContext) -> Bool {
+    fileprivate static func lookFitsWeather(_ garments: [Garment], context: RecoContext, comfort: [UUID: Double] = [:]) -> Bool {
         for garment in garments where garment.category != .top {
-            if garment.itemType != nil && !weatherFit(garment, context: context) { return false }
+            if garment.itemType != nil && !weatherFit(garment, context: context, comfort: comfort[garment.id]) { return false }
         }
         // Tops may be a base under an outer layer; bottoms and shoes still need to suit the day.
         let hasOuter = garments.contains { $0.category == .outer }
         return garments.filter { $0.category == .top }.allSatisfy {
-            $0.itemType == nil || weatherFit($0, context: context) || (hasOuter && context.temperatureC < 20)
+            $0.itemType == nil || weatherFit($0, context: context, comfort: comfort[$0.id]) || (hasOuter && context.temperatureC < 20)
         }
     }
 
@@ -357,33 +516,16 @@ enum PurchaseScorer {
     }
 
     private static func plannedLooks(input: Input, wardrobe: [Garment]) -> [PlannedLook] {
-        let start = Calendar.current.startOfDay(for: input.now)
-        let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? start
         let byID = Dictionary(wardrobe.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var result: [PlannedLook] = []
-        for plan in input.upcomingPlans.sorted(by: { $0.date < $1.date }) where plan.date >= start && plan.date < end
-            && (plan.ownerID == nil || input.profile == nil || plan.ownerID == input.profile?.id) {
-            for evening in [false, true] {
-                if evening && plan.eveningEnabled != true { continue }
-                let status = evening ? plan.eveningLookWearStatus : plan.resolvedDayLookWearStatus
-                if status == .worn || status == .notWorn { continue }
-                let assignments = evening ? plan.eveningSlotAssignments : plan.slotAssignments
-                let ids = assignments.isEmpty && !evening ? plan.selectedGarmentIDs : OutfitSlot.allCases.compactMap { assignments[$0] }
-                var seen = Set<UUID>()
-                let owned = ids.filter { seen.insert($0).inserted }.compactMap { byID[$0] }.filter { !$0.isCurrentlyUnavailable }
-                guard owned.count >= 2 else { continue }
-                let forecast = input.forecasts.first { Calendar.current.isDate($0.date, inSameDayAs: plan.date) }
-                let persistedTemp = evening ? plan.contextEveningTemp : plan.contextAfternoonTemp
-                let savedTemps = [plan.contextTempHigh, plan.contextTempLow].compactMap { $0 }.filter(\.isFinite)
-                let savedMean = savedTemps.isEmpty ? nil : savedTemps.reduce(0, +) / Double(savedTemps.count)
-                let temperature = persistedTemp.flatMap { $0.isFinite ? $0 : nil } ?? savedMean ?? forecast?.temperatureC
-                let hasWeather = temperature?.isFinite == true
-                let formality = Int((owned.map { Double($0.formality) }.reduce(0, +) / Double(owned.count)).rounded())
-                let ctx = context(input: input, temperature: hasWeather ? temperature! : 20,
-                    raining: plan.contextWasRaining ?? forecast?.isRaining ?? false, date: plan.date, isEvening: evening,
-                    formality: formality)
-                result.append(PlannedLook(owned: owned, date: plan.date, isEvening: evening, context: ctx, hasWeather: hasWeather))
-            }
+        for plan in input.upcomingPlans {
+            let owned = plan.ids.compactMap { byID[$0] }.filter { !$0.isCurrentlyUnavailable }
+            guard owned.count >= 2 else { continue }
+            let formality = Int((owned.map { Double($0.formality) }.reduce(0, +) / Double(owned.count)).rounded())
+            let ctx = context(input: input, temperature: plan.temperature ?? 20, raining: plan.raining,
+                date: plan.date, isEvening: plan.isEvening, formality: formality)
+            result.append(PlannedLook(owned: owned, date: plan.date, isEvening: plan.isEvening,
+                context: ctx, hasWeather: plan.temperature != nil))
         }
         return Array(result.prefix(14))
     }
@@ -391,9 +533,11 @@ enum PurchaseScorer {
     private static func bestPlannedLook(for product: Garment, plans: [PlannedLook], state: RecoState, input: Input) -> PlannedLook? {
         var best: (PlannedLook, Double)?
         for plan in plans {
-            if plan.hasWeather && !weatherFit(product, context: plan.context) { continue }
+            guard !Task.isCancelled else { return nil }
+            // Whole-look weather checks below evaluate a top together with its layer.
+            if plan.hasWeather && product.category != .top && !weatherFit(product, context: plan.context) { continue }
             guard abs(Double(product.formality - plan.context.desiredFormality)) <= 2 else { continue }
-            let retained = plan.owned.filter { $0.category != product.category }
+            let retained = ShoppingPartnerPool.retainingCompatible(plan.owned, whenAdding: product)
             let combined = retained + [product]
             guard ShoppingPartnerPool.hasCore(combined) else { continue }
             if plan.hasWeather && !lookFitsWeather(combined, context: plan.context) { continue }
@@ -426,41 +570,42 @@ enum PurchaseScorer {
     /// Rotate equally useful owned bottoms across the visible feed. Planned looks
     /// retain their actual assignments, and every alternative already passed weather/quality gates.
     private static func diversifyPreviewBottoms(in picks: inout [Pick], alternatives: [String: [[Garment]]], wardrobe: [Garment]) {
-        let bottoms = Set(wardrobe.filter { $0.category == .bottom }.map(\.id))
+        let ownedIDs = Set(wardrobe.map(\.id))
         var uses: [UUID: Int] = [:]
         for index in picks.indices {
             guard var preview = picks[index].preview else { continue }
             if picks[index].intent != .upcoming, let options = alternatives[picks[index].id], !options.isEmpty {
                 // Options are ordered by compatibility. Equal use counts keep that ordering.
                 var chosen = options[0]
-                var minimum = chosen.first(where: { $0.category == .bottom }).map { uses[$0.id, default: 0] } ?? 0
+                var minimum = chosen.reduce(0) { $0 + uses[$1.id, default: 0] * ($1.category == .bottom ? 2 : 1) }
                 for option in options.dropFirst() {
-                    let count = option.first(where: { $0.category == .bottom }).map { uses[$0.id, default: 0] } ?? 0
+                    let count = option.reduce(0) { $0 + uses[$1.id, default: 0] * ($1.category == .bottom ? 2 : 1) }
                     if count < minimum { chosen = option; minimum = count }
                 }
                 preview.ownedGarmentIDs = chosen.map(\.id)
                 picks[index].preview = preview
             }
-            for id in preview.ownedGarmentIDs where bottoms.contains(id) { uses[id, default: 0] += 1 }
+            for id in preview.ownedGarmentIDs where ownedIDs.contains(id) { uses[id, default: 0] += 1 }
         }
     }
 
-    private static func addCompanions(to picks: inout [Pick], wardrobe: [Garment], ctx: RecoContext, state: RecoState, checkWeather: Bool) {
-        let pool = Array(picks.filter { $0.intent == .everyday }.prefix(16))
+    private static func addCompanions(to picks: inout [Pick], accessories: [Pick], wardrobe: [Garment], ctx: RecoContext, state: RecoState, checkWeather: Bool) {
+        let pool = accessories.filter { $0.intent == .everyday }
+        var used = Set<String>()
         let byID = Dictionary(wardrobe.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         for index in picks.indices.prefix(12) {
-            guard picks[index].intent == .everyday, var preview = picks[index].preview else { continue }
+            guard index % 3 == 1, picks[index].intent == .everyday, var preview = picks[index].preview else { continue }
             let primary = transientGarment(for: picks[index].product)
             let owned = preview.ownedGarmentIDs.compactMap { byID[$0] }
             let single = ShoppingPartnerPool.score(owned + [primary], ctx: ctx, state: state)
             var best: (Pick, [Garment], Double)?
-            for companion in pool where companion.id != picks[index].id && companion.product.category != primary.category {
+            for companion in pool where !used.contains(companion.id) && companion.id != picks[index].id && companion.product.category != primary.category {
                 let needsPiece = companion.reasons.contains { reason in if case .fillsGap = reason { return true }; return false }
                 let newAccessory = companion.product.category == .accessory && !wardrobe.contains { $0.itemType == companion.product.itemType }
                 guard needsPiece || newAccessory else { continue }
                 let extra = transientGarment(for: companion.product)
                 if checkWeather && !weatherFit(extra, context: ctx) { continue }
-                let retained = owned.filter { $0.category != extra.category }
+                let retained = ShoppingPartnerPool.retainingCompatible(owned, whenAdding: extra)
                 let look = retained + [primary, extra]
                 guard ShoppingPartnerPool.hasCore(look) else { continue }
                 if checkWeather && !lookFitsWeather(look, context: ctx) { continue }
@@ -476,6 +621,7 @@ enum PurchaseScorer {
             }
             if let best {
                 var companion = best.0; companion.preview = nil
+                used.insert(companion.id)
                 preview.ownedGarmentIDs = best.1.map(\.id); preview.companions = [companion]
                 picks[index].preview = preview
             }
@@ -488,7 +634,14 @@ enum PurchaseScorer {
             func adjusted(_ pick: Pick) -> Double {
                 pick.score * pow(0.85, Double(counts[pick.product.itemType?.rawValue ?? pick.product.category.rawValue] ?? 0))
             }
-            guard let index = remaining.indices.max(by: { adjusted(remaining[$0]) < adjusted(remaining[$1]) }) else { break }
+            // Variety chooses among similarly useful options; it cannot bury a much better
+            // match or useful deal merely because its clothing type has appeared before.
+            let bestScore = remaining.map(\.score).max() ?? 0
+            let eligible = remaining.indices.filter { remaining[$0].score >= bestScore - 0.1 }
+            guard let index = eligible.max(by: {
+                let left = adjusted(remaining[$0]), right = adjusted(remaining[$1])
+                return left == right ? remaining[$0].id > remaining[$1].id : left < right
+            }) else { break }
             let pick = remaining.remove(at: index)
             counts[pick.product.itemType?.rawValue ?? pick.product.category.rawValue, default: 0] += 1
             result.append(pick)
@@ -499,66 +652,108 @@ enum PurchaseScorer {
 
 // MARK: - Bounded owned-wardrobe look pool
 
-@MainActor
 private struct ShoppingPartnerPool {
-    private var byCategory: [Category: [Garment]] = [:]
+    private var bySlot: [OutfitSlot: [Garment]] = [:]
     private var baselines: [Category: Double] = [:]
     private var coreLooks: [[Garment]] = []
 
-    init(wardrobe: [Garment], wearCounts: [UUID: Int], ctx: RecoContext, state: RecoState) {
-        for category in [Category.top, .bottom, .shoes, .outer] {
-            byCategory[category] = Array(wardrobe.filter { $0.category == category && !$0.isCurrentlyUnavailable }
+    init(wardrobe: [Garment], wearCounts: [UUID: Int], ctx: RecoContext, state: RecoState, rotationOffset: Int) {
+        for slot in [OutfitSlot.top, .bottom, .shoes, .outer, .onePiece] {
+            let ranked = wardrobe.filter { slot.accepts($0) && !$0.isCurrentlyUnavailable }
                 .sorted {
-                    let left = Double(wearCounts[$0.id] ?? 0) + Double($0.loveScore) / 100
-                    let right = Double(wearCounts[$1.id] ?? 0) + Double($1.loveScore) / 100
+                    let left = log1p(Double(wearCounts[$0.id] ?? 0)) + Double($0.loveScore) / 100
+                    let right = log1p(Double(wearCounts[$1.id] ?? 0)) + Double($1.loveScore) / 100
                     return left == right ? $0.id.uuidString < $1.id.uuidString : left > right
-                }.prefix(4))
+                }
+            let suitable = ranked.filter { slot == .top || slot == .onePiece || PurchaseScorer.weatherFit($0, context: ctx) }
+            let candidates = suitable.isEmpty ? ranked : suitable
+            var chosen = Array(candidates.prefix(3))
+            let others = Array(candidates.dropFirst(3))
+            if !others.isEmpty {
+                let day = Int(ctx.now.timeIntervalSince1970 / 86400)
+                for offset in 0..<min(2, others.count) { chosen.append(others[(abs(day) + rotationOffset + offset) % others.count]) }
+            }
+            bySlot[slot] = chosen
+
         }
-        coreLooks = combinations([.top, .bottom, .shoes].map { byCategory[$0] ?? [] })
-        let values = coreLooks.map { Self.score($0, ctx: ctx, state: state) }.sorted()
+        coreLooks = combinations([.top, .bottom, .shoes].map { bySlot[$0] ?? [] })
+            + combinations([.onePiece, .shoes].map { bySlot[$0] ?? [] })
+        let comfort = Dictionary(bySlot.values.flatMap { $0 }.map {
+            ($0.id, TemperatureComfort.garmentScore($0, context: ctx))
+        }, uniquingKeysWith: { first, _ in first })
+        let values = coreLooks.map { Self.score($0, ctx: ctx, state: state, comfort: comfort) }.sorted()
         if !values.isEmpty { for category in Category.allCases { baselines[category] = values[values.count / 2] } }
     }
 
     func goodLooks(with product: Garment, ctx: RecoContext, state: RecoState, checkWeather: Bool) -> (count: Int, share: Double, best: [Garment]?, alternatives: [[Garment]]) {
-        let slots: [Category] = [.top, .bottom, .shoes]
-        let combos = product.category == .outer || product.category == .accessory
-            ? coreLooks : combinations(slots.filter { $0 != product.category }.map { byCategory[$0] ?? [] })
+        let combos: [[Garment]]
+        switch OutfitSlot.from(garment: product) {
+        case .onePiece:
+            combos = combinations([bySlot[.shoes] ?? []])
+        case .top:
+            combos = combinations([.bottom, .shoes].map { bySlot[$0] ?? [] })
+        case .bottom:
+            combos = combinations([.top, .shoes].map { bySlot[$0] ?? [] })
+        case .shoes:
+            combos = combinations([.top, .bottom].map { bySlot[$0] ?? [] })
+                + (bySlot[.onePiece] ?? []).map { [$0] }
+        default:
+            combos = coreLooks
+        }
         let baseline = baselines[product.category] ?? 0.48
+        let comfort = Dictionary((bySlot.values.flatMap { $0 } + [product]).map {
+            ($0.id, TemperatureComfort.garmentScore($0, context: ctx))
+        }, uniquingKeysWith: { first, _ in first })
         var good = 0; var best: [Garment]?; var bestScore = -Double.infinity
         var qualifying: [(pieces: [Garment], score: Double)] = []
         for core in combos {
+            if Task.isCancelled { break }
             var combo = core
-            if checkWeather && ctx.temperatureC < 16 && product.category != .outer,
-               let layer = byCategory[.outer]?.first(where: { PurchaseScorer.weatherFit($0, context: ctx) }) { combo.append(layer) }
+            let needsLayer = ctx.temperatureC < 16 || (product.category == .top && !PurchaseScorer.weatherFit(product, context: ctx, comfort: comfort[product.id]))
+            if checkWeather && needsLayer && product.category != .outer,
+               let layer = bySlot[.outer]?.first(where: { PurchaseScorer.weatherFit($0, context: ctx) }) { combo.append(layer) }
             let look = combo + [product]
             guard Self.hasCore(look) else { continue }
-            if checkWeather && !PurchaseScorer.lookFitsWeather(look, context: ctx) { continue }
-            let score = Self.score(look, ctx: ctx, state: state)
-            let original = product.category == .outer || product.category == .accessory ? Self.score(combo, ctx: ctx, state: state) : baseline
+            if checkWeather && !PurchaseScorer.lookFitsWeather(look, context: ctx, comfort: comfort) { continue }
+            let score = Self.score(look, ctx: ctx, state: state, comfort: comfort)
+            let original = product.category == .outer || product.category == .accessory ? Self.score(combo, ctx: ctx, state: state, comfort: comfort) : baseline
             guard score >= max(0.48, original - 0.005) else { continue }
             good += 1
             qualifying.append((combo, score))
             if score > bestScore { best = combo; bestScore = score }
         }
-        var seenBottoms = Set<UUID>()
-        var alternatives: [[Garment]] = []
-        for option in qualifying.sorted(by: { $0.score > $1.score }) where option.score >= bestScore - 0.04 {
-            if let bottom = option.pieces.first(where: { $0.category == .bottom }) {
-                guard seenBottoms.insert(bottom.id).inserted else { continue }
-            } else if !alternatives.isEmpty { continue }
-            alternatives.append(option.pieces)
-        }
+        let alternatives = qualifying.sorted(by: { $0.score > $1.score })
+            .filter { $0.score >= bestScore - 0.06 }.map(\.pieces)
         return (good, combos.isEmpty ? 0 : Double(good) / Double(combos.count), best, alternatives)
     }
 
     static func hasCore(_ garments: [Garment]) -> Bool {
-        [Category.top, .bottom, .shoes].allSatisfy { category in garments.contains { $0.category == category } }
+        guard Set(garments.map(\.id)).count == garments.count,
+              garments.filter({ $0.category == .shoes }).count == 1 else { return false }
+        let onePieces = garments.filter { $0.itemType?.isOnePiece == true }
+        let tops = garments.filter { $0.category == .top && $0.itemType?.isOnePiece != true }
+        let bottoms = garments.filter { $0.category == .bottom }
+        return onePieces.count == 1 && tops.isEmpty && bottoms.isEmpty
+            || onePieces.isEmpty && tops.count == 1 && bottoms.count == 1
     }
 
-    static func score(_ garments: [Garment], ctx: RecoContext, state: RecoState) -> Double {
-        // Equal piece scores isolate palette, silhouette and learned whole-look taste.
-        // Weather is a separate gate; lookScore alone does not evaluate it.
-        AIRecommender.shared.lookScore(garments: garments, itemScores: Array(repeating: 0.6, count: garments.count), ctx: ctx, state: state).score
+    /// Shopping previews are transient: replace the relevant silhouette rather
+    /// than combining a dress/jumpsuit with the planned shirt and trousers.
+    static func retainingCompatible(_ garments: [Garment], whenAdding product: Garment) -> [Garment] {
+        let slot = OutfitSlot.from(garment: product)
+        return garments.filter { garment in
+            let existing = OutfitSlot.from(garment: garment)
+            if slot.isAccessory {
+                return !(existing.isAccessory && garment.itemType == product.itemType)
+            }
+            return existing != slot && !slot.conflictingSlots.contains(existing)
+        }
+    }
+
+    static func score(_ garments: [Garment], ctx: RecoContext, state: RecoState, comfort: [UUID: Double] = [:]) -> Double {
+        // Blend compatibility with comfort so marginal-weather favorites do not
+        // keep winning every preview. Eligibility is checked separately.
+        AIRecommender.shared.lookScore(garments: garments, itemScores: garments.map { 0.45 + 0.25 * (comfort[$0.id] ?? TemperatureComfort.garmentScore($0, context: ctx)) }, ctx: ctx, state: state).score
     }
 
     private func combinations(_ lists: [[Garment]]) -> [[Garment]] {

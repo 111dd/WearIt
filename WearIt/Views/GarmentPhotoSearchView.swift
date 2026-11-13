@@ -7,8 +7,6 @@ struct GarmentPhotoSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var suggestions: [GarmentPhotoSuggestion] = []
-    @State private var isSearching = true
-    @State private var searchCatalog = true
     @State private var isImporting = false
     @State private var productLink = ""
     @State private var importID = 0
@@ -37,10 +35,7 @@ struct GarmentPhotoSearchView: View {
             }
             .withLocalAppBackdropPainted()
         }
-        .task(id: searchCatalog) {
-            guard searchCatalog else { return }
-            await findCatalogPhotos()
-        }
+        .task { await loadCurrentPhoto() }
         .task(id: importID) {
             guard importID > 0 else { return }
             await importLink()
@@ -68,41 +63,24 @@ struct GarmentPhotoSearchView: View {
                 TextField(String(localized: "photo_search_link_placeholder"), text: $productLink)
                     .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     .textFieldStyle(.roundedBorder)
-                Button(String(localized: "photo_search_import_link")) {
-                    searchCatalog = false
-                    isSearching = false
-                    importID += 1
-                }
+                Button(String(localized: "photo_search_import_link")) { importID += 1 }
                     .disabled(productLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isImporting)
                 Button {
-                    var components = URLComponents(string: "https://www.google.com/search")!
-                    let words = [garment.brand, garment.itemType?.title ?? garment.category.title,
-                                 garment.safeColorTags.first?.title].compactMap { $0 }.joined(separator: " ")
-                    components.queryItems = [URLQueryItem(name: "tbm", value: "isch"), URLQueryItem(name: "q", value: words)]
-                    if let url = components.url { openURL(url) }
+                    if let url = webSearchURL { openURL(url) }
                 } label: {
                     Label(String(localized: "photo_search_web_action"), systemImage: "safari")
                 }
                 Text(String(localized: "photo_search_web_hint")).font(.caption).foregroundStyle(.secondary)
             }.padding(DS.Spacing.md).contentSurface()
-            if isSearching || isImporting {
+            if isImporting {
                 ProgressView(String(localized: "photo_search_loading")).frame(maxWidth: .infinity)
             }
             if let message { Text(message).font(.subheadline).foregroundStyle(.secondary) }
             if !suggestions.isEmpty {
-                Text(String(localized: "photo_search_review_notice")).font(.caption).foregroundStyle(.secondary)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: DS.Spacing.sm)], spacing: DS.Spacing.sm) {
-                    ForEach(suggestions) { suggestion in
-                        Button { message = nil; selected = suggestion } label: {
-                            VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                                GarmentPhotoCanvas(image: suggestion.preview).aspectRatio(1, contentMode: .fit)
-                                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile))
-                                Text(suggestion.title).font(.caption.weight(.medium)).lineLimit(2)
-                                Text(suggestion.sourceName).font(.caption2).foregroundStyle(.secondary)
-                            }.padding(DS.Spacing.xs).contentSurface(cornerRadius: DS.Radius.tile)
-                        }.buttonStyle(.plain).disabled(isSearching || isImporting)
-                    }
-                }
+                Text(String(localized: "photo_search_review_same"))
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(String(localized: "photo_search_page_photos")).font(.headline)
+                photoGrid(suggestions)
             }
         }
     }
@@ -123,7 +101,8 @@ struct GarmentPhotoSearchView: View {
                 }
             }.padding(DS.Spacing.sm).contentSurface()
             Text(suggestion.title).font(.headline)
-            Text(String(localized: "photo_search_review_notice")).font(.subheadline).foregroundStyle(.secondary)
+            Text(String(localized: "photo_search_review_same"))
+                .font(.subheadline).foregroundStyle(.secondary)
             Link(suggestion.sourceName, destination: suggestion.sourceURL)
             if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
             if fullImage == nil, message == nil { ProgressView() }
@@ -140,40 +119,52 @@ struct GarmentPhotoSearchView: View {
         dismiss()
     }
 
-    @MainActor private func loadCurrentPhoto() async -> UIImage? {
+    private func photoGrid(_ items: [GarmentPhotoSuggestion]) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: DS.Spacing.sm)], spacing: DS.Spacing.sm) {
+            ForEach(items) { suggestion in
+                Button { message = nil; selected = suggestion } label: {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        GarmentPhotoCanvas(image: suggestion.preview).aspectRatio(1, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: DS.Radius.tile))
+                        Text(suggestion.title).font(.caption.weight(.medium)).lineLimit(2)
+                        Text(suggestion.sourceName).font(.caption2).foregroundStyle(.secondary)
+                    }.padding(DS.Spacing.xs).contentSurface(cornerRadius: DS.Radius.tile)
+                }.buttonStyle(.plain).disabled(isImporting)
+            }
+        }
+    }
+
+    /// Name the item for the browser search the user opens. The photo itself stays on the device.
+    private var itemSearchWords: String {
+        let custom = [garment.userTitleOverride, garment.legacyName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        var parts: [String] = []
+        if let custom { parts.append(custom) }
+        if let brand = garment.brand?.trimmingCharacters(in: .whitespacesAndNewlines), !brand.isEmpty,
+           custom?.localizedCaseInsensitiveContains(brand) != true {
+            parts.append(brand)
+        }
+        if custom == nil {
+            if let color = garment.safeColorTags.first?.title { parts.append(color) }
+            parts.append(garment.itemType?.title ?? garment.category.title)
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private var webSearchURL: URL? {
+        var components = URLComponents(string: "https://www.google.com/search")
+        components?.queryItems = [URLQueryItem(name: "tbm", value: "isch"), URLQueryItem(name: "q", value: itemSearchWords)]
+        return components?.url
+    }
+
+    @MainActor private func loadCurrentPhoto() async {
         let path = garment.imagePath, data = garment.imageData
         let image = await Task.detached(priority: .utility) {
             ImageStore.loadGarmentPreview(imagePath: path, legacyData: data, maxPixelSize: 600)
         }.value
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled else { return }
         currentImage = image
-        return image
-    }
-
-    @MainActor private func findCatalogPhotos() async {
-        let image = await loadCurrentPhoto()
-        guard !Task.isCancelled else { return }
-        await ShopCatalogService.shared.refreshIfNeeded()
-        guard !Task.isCancelled else { return }
-        let brand = garment.brand?.lowercased() ?? ""
-        let type = garment.itemType
-        let colors = Set(garment.safeColorTags)
-        let products = ShopCatalogService.shared.products.filter {
-            $0.category == garment.category && $0.imageURL != nil && $0.item.gender != "kids"
-        }.sorted { left, right in
-            func score(_ product: ShopProduct) -> Int {
-                (type != nil && product.itemType == type ? 4 : 0)
-                + (!brand.isEmpty && product.item.brand?.lowercased() == brand ? 8 : 0)
-                + (!colors.isDisjoint(with: product.colors) ? 3 : 0)
-            }
-            let l = score(left), r = score(right)
-            return l == r ? left.id < right.id : l > r
-        }
-        let found = await GarmentPhotoDiscovery.shared.similarPhotos(to: image, products: Array(products.prefix(12)))
-        guard !Task.isCancelled else { return }
-        suggestions = found
-        isSearching = false
-        if found.isEmpty { message = String(localized: "photo_search_empty") }
     }
 
     @MainActor private func importLink() async {
@@ -184,8 +175,7 @@ struct GarmentPhotoSearchView: View {
         message = nil
         defer { isImporting = false }
         do {
-            // Manual import can cancel discovery before its comparison photo is ready.
-            if currentImage == nil { _ = await loadCurrentPhoto() }
+            if currentImage == nil { await loadCurrentPhoto() }
             try Task.checkCancellation()
             let found = try await GarmentPhotoDiscovery.shared.photos(from: url)
             guard !Task.isCancelled else { return }

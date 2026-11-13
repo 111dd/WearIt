@@ -50,8 +50,10 @@ enum OutfitChangeAdvisor {
             let others = assigned.filter { $0.id != currentID }
             var excluded = excludedIDs
             excluded.insert(currentID)
+            excluded.formUnion(others.map(\.id))
 
-            let slotPool = pool.filter { slot.allowedCategories.contains($0.category) }
+            let candidateSlot = slot == .top && current.itemType?.isOnePiece == true ? OutfitSlot.onePiece : slot
+            let slotPool = pool.filter { candidateSlot.accepts($0) }
             let alts = AIRecommender.shared.suggest(
                 from: slotPool,
                 k: 3,

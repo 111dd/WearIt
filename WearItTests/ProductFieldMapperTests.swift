@@ -30,6 +30,25 @@ struct ProductFieldMapperTests {
         #expect(itemType == .shorts)
     }
 
+    @Test func dressAsAdjectiveIsNotADress() {
+        for title in ["Leather Dress Loafers", "Classic Dress Watch", "Wool Dress Coat", "Slim Dress Chinos"] {
+            let category = ProductFieldMapper.mapCategory(path: "", title: title)
+            let itemType = ProductFieldMapper.mapItemType(path: "", title: title, category: category)
+            #expect(itemType != .dress, "\(title)")
+        }
+        #expect(ProductFieldMapper.mapCategory(path: "", title: "Leather Dress Loafers") == .shoes)
+        #expect(ProductFieldMapper.mapCategory(path: "", title: "Wool Dress Coat") == .outer)
+    }
+
+    @Test func realDressesStillMapToDress() {
+        for title in ["Floral Midi Dress", "Cotton Shirt Dress", "Wrap Dress Tie Waist", "שמלת מידי פרחונית"] {
+            let category = ProductFieldMapper.mapCategory(path: "", title: title)
+            let itemType = ProductFieldMapper.mapItemType(path: "", title: title, category: category)
+            #expect(category == .top, "\(title)")
+            #expect(itemType == .dress, "\(title)")
+        }
+    }
+
     @Test func cottonMaterialParses() {
         let materials = ProductFieldMapper.mapMaterials("100% COTTON")
         #expect(materials == [.cotton])

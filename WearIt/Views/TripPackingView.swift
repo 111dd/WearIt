@@ -153,7 +153,7 @@ struct TripPackingView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: DS.Spacing.sm) {
-                        ForEach(OutfitSlot.allCases, id: \.rawValue) { slot in
+                        ForEach(OutfitSlot.displayOrder, id: \.rawValue) { slot in
                             if let id = day.slotGarments[slot.rawValue], let garment = byID[id] {
                                 dayPiece(day: day, slot: slot, garment: garment)
                             }
@@ -306,7 +306,7 @@ struct TripPackingView: View {
 
     private func swapSheet(_ target: PackingSwap) -> some View {
         NavigationStack {
-            List(alternatives(for: target.slot, current: target.currentID)) { garment in
+            List(alternatives(for: target.slot, current: target.currentID, on: target.dayStamp)) { garment in
                 Button {
                     assign(garment.id, to: target.slot, on: target.dayStamp)
                     swap = nil
@@ -329,13 +329,15 @@ struct TripPackingView: View {
         .presentationDetents([.medium, .large])
     }
 
-    private func alternatives(for slot: OutfitSlot, current: UUID?) -> [Garment] {
-        garments
+    private func alternatives(for slot: OutfitSlot, current: UUID?, on stamp: TimeInterval) -> [Garment] {
+        let assignedIDs = Set(list.days.first(where: { $0.dayStamp == stamp })?.slotGarments.values.map { $0 } ?? [])
+        return garments
             .filter {
-                slot.allowedCategories.contains($0.category)
+                slot.accepts($0)
                     && !$0.isBlocked
                     && !$0.isCurrentlyUnavailable
                     && $0.id != current
+                    && !assignedIDs.contains($0.id)
             }
             .sorted { $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending }
     }
@@ -366,7 +368,16 @@ struct TripPackingView: View {
     }
 
     private func assign(_ id: UUID, to slot: OutfitSlot, on stamp: TimeInterval) {
-        guard let index = list.days.firstIndex(where: { $0.dayStamp == stamp }) else { return }
+        guard let index = list.days.firstIndex(where: { $0.dayStamp == stamp }),
+              let garment = byID[id], slot.accepts(garment) else { return }
+        var conflicts = slot.conflictingSlots
+        if slot == .bottom, let topID = list.days[index].slotGarments[OutfitSlot.top.rawValue],
+           byID[topID]?.itemType?.isOnePiece == true {
+            conflicts.insert(.top)
+        }
+        for conflict in conflicts {
+            list.days[index].slotGarments.removeValue(forKey: conflict.rawValue)
+        }
         list.days[index].slotGarments[slot.rawValue] = id
         TripPackingStore.save(list)
     }
@@ -407,17 +418,19 @@ struct TripPackingView: View {
         for day in trip.days() {
             let forecast = EventLocationForecastService.match(forecasts, to: day)
             let outfit = suggest(on: day, forecast: forecast, pool: pool, profileID: profileID, excluding: usedRotation)
-            var slots: [String: UUID] = [:]
+            var slots: [OutfitSlot: UUID] = [:]
             for garment in outfit {
-                let slot = OutfitSlot.from(category: garment.category)
-                if slots[slot.rawValue] == nil {
-                    slots[slot.rawValue] = garment.id
+                guard let slot = OutfitSlot.allocationSlot(for: garment, assignments: slots),
+                      !slot.conflictingSlots.contains(where: { slots[$0] != nil }) else { continue }
+                if slots[slot] == nil {
+                    slots[slot] = garment.id
                 }
-                if slot == .top || slot == .bottom || slot == .shoes {
+                if slot == .onePiece || slot == .top || slot == .bottom || slot == .shoes {
                     usedRotation.insert(garment.id)
                 }
             }
-            days.append(PackingDay(dayStamp: day.timeIntervalSince1970, slotGarments: slots))
+            days.append(PackingDay(dayStamp: day.timeIntervalSince1970,
+                slotGarments: Dictionary(uniqueKeysWithValues: slots.map { ($0.key.rawValue, $0.value) })))
             await Task.yield()
         }
         let climate = TripPackingBuilder.climate(forecasts: matchedForecasts)

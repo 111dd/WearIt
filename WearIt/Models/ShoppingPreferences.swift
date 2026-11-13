@@ -29,7 +29,7 @@ enum ShopAudience: String, Sendable {
     case men, women, unisex, unknown, children
 }
 
-struct ShoppingPreferences: Codable, Equatable {
+struct ShoppingPreferences: Codable, Hashable, Sendable {
     var department: ShopDepartment = .automatic
     var preferredColors: [ColorTag] = []
     var preferredBrands: [String] = []
@@ -88,7 +88,7 @@ struct ShoppingPreferences: Codable, Equatable {
         // Names, profile photos, colors, sizes and generic style tags never choose it.
         let sources = garments.filter { !$0.isBlocked && $0.category != .accessory
             && ($0.ownerID == nil || $0.ownerID == profile?.id) }
-            .map { Set($0.photoMetadata.values.compactMap(\.sourceURL)) }.filter { !$0.isEmpty }
+            .map { Set($0.photoMetadata.values.compactMap(\.sourceURL) + [$0.shopProductURL].compactMap { $0 }) }.filter { !$0.isEmpty }
         // Most closets have no retailer source links. Avoid indexing thousands of products then.
         let productByURL = sources.isEmpty ? [:] : Dictionary(products.map { (sourceKey($0.url), $0) }, uniquingKeysWith: { first, _ in first })
         for urls in sources {

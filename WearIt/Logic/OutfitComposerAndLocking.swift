@@ -29,16 +29,31 @@ enum OutfitComposer {
             !$0.isCurrentlyUnavailable
         }
 
-        var tops    = base.filter { $0.category == .top }
+        var tops    = base.filter { OutfitSlot.top.accepts($0) }
+        var onePieces = base.filter { OutfitSlot.onePiece.accepts($0) }
         var bottoms = base.filter { $0.category == .bottom }
         var shoes   = base.filter { $0.category == .shoes }
         var outers  = base.filter { $0.category == .outer }
 
         // נסה להימנע מפריטים שנלבשו ממש לאחרונה אם יש חלופות
         if tops.count > 3 { tops.removeAll(where: isRecent) }
+        if onePieces.count > 3 { onePieces.removeAll(where: isRecent) }
         if bottoms.count > 3 { bottoms.removeAll(where: isRecent) }
         if shoes.count > 2 { shoes.removeAll(where: isRecent) }
         if outers.count > 2 { outers.removeAll(where: isRecent) }
+
+        // The shared ranker supports one-piece looks and every locked category;
+        // the legacy separate-piece scorer must never add pants to a dress.
+        if !onePieces.isEmpty || locked != nil {
+            let source = tops + onePieces + bottoms + shoes + outers + base.filter { $0.category == .accessory }
+            return AIRecommender.shared.rankLooks(
+                from: source,
+                ctx: ctx,
+                modelContext: modelContext,
+                locked: locked,
+                limit: 8
+            ).first(where: { !dismissedKeys.contains(outfitKey(for: $0.garments)) })?.garments ?? []
+        }
 
         // אם חסר חלק חובה (מכנס/נעליים) – אל נחזיר סט לא תקין
         guard !tops.isEmpty, !bottoms.isEmpty, !shoes.isEmpty else {

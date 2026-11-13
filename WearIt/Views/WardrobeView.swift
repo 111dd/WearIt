@@ -328,6 +328,11 @@ struct WardrobeView: View {
                                     } label: {
                                         Label(String(localized: "photo_tool_find_photo"), systemImage: "photo.badge.magnifyingglass")
                                     }
+                                    NavigationLink {
+                                        EditGarmentView(garment: garment, initialPhotoTool: .polish)
+                                    } label: {
+                                        Label(String(localized: "photo_tool_polish"), systemImage: "face.dashed")
+                                    }
                                     Divider()
                                     wardrobeContextMenu(for: garment)
                                 } label: {
@@ -748,15 +753,29 @@ struct WardrobeView: View {
     }
 
     private func replaceInPlanner(with garment: Garment) {
-        let slot = OutfitSlot.from(category: garment.category)
         let today = Calendar.current.startOfDay(for: Date())
         let dates = (0..<3).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
         let plans = dates.map { DayPlanService.shared.planFor(date: $0, context: context) }
 
-        // Abort if locked in another day
+        guard let target = plans.first else { return }
+        var targetAssignments = existingAssignments(for: target)
+        let before = targetAssignments
+        let targetLocks = existingLockedSlots(for: target, assignments: targetAssignments)
+        guard let slot = OutfitSlot.allocationSlot(for: garment, assignments: targetAssignments) else { return }
+        var conflicts = slot.conflictingSlots
+        if slot == .bottom, let topID = targetAssignments[.top],
+           allGarments.first(where: { $0.id == topID })?.itemType?.isOnePiece == true {
+            conflicts.insert(.top)
+        }
+        guard !targetLocks.contains(slot) || targetAssignments[slot] == garment.id,
+              !conflicts.contains(where: { targetAssignments[$0] != nil && targetLocks.contains($0) })
+        else { return }
+
+        // Check all locks before mutating any day, including legacy garment locks.
         for plan in plans {
-            if plan.lockedSlots.contains(slot),
-               plan.slotAssignments[slot] == garment.id {
+            let assignments = existingAssignments(for: plan)
+            let locked = existingLockedSlots(for: plan, assignments: assignments)
+            if assignments.contains(where: { $0.value == garment.id && locked.contains($0.key) }) {
                 return
             }
         }
@@ -764,38 +783,43 @@ struct WardrobeView: View {
         // Remove from other days (if present and not locked)
         for plan in plans.dropFirst() {
             var assignments = existingAssignments(for: plan)
-            let locked = plan.lockedSlots
-            if assignments[slot] == garment.id {
-                if locked.contains(slot) { return }
-                assignments[slot] = nil
-                plan.setSlotAssignments(assignments, lockedSlots: locked)
+            let locked = existingLockedSlots(for: plan, assignments: assignments)
+            let matchingSlots = assignments.filter { $0.value == garment.id }.map(\.key)
+            if !matchingSlots.isEmpty {
+                for matching in matchingSlots { assignments[matching] = nil }
+                plan.setSlotAssignments(assignments.mapValues { Optional($0) }, lockedSlots: locked)
             }
         }
 
         // Set on today
-        let target = plans[0]
-        if target.lockedSlots.contains(slot) { return }
-        var targetAssignments = existingAssignments(for: target)
+        for conflict in conflicts { targetAssignments[conflict] = nil }
         targetAssignments[slot] = garment.id
-        target.setSlotAssignments(targetAssignments, lockedSlots: target.lockedSlots)
+        target.setSlotAssignments(targetAssignments.mapValues { Optional($0) }, lockedSlots: targetLocks)
+        if targetAssignments != before { target.applyDayLookWearStatus(nil) }
         try? context.save()
     }
 
-    private func existingAssignments(for plan: DayPlan) -> [OutfitSlot: UUID?] {
+    private func existingAssignments(for plan: DayPlan) -> [OutfitSlot: UUID] {
         if !plan.slotAssignments.isEmpty {
-            return plan.slotAssignments.mapValues { Optional($0) }
+            return plan.slotAssignments
         }
-        var assignments: [OutfitSlot: UUID?] = [:]
+        var assignments: [OutfitSlot: UUID] = [:]
         let ids = plan.selectedGarmentIDs
         for id in ids {
             if let garment = allGarments.first(where: { $0.id == id }) {
-                let slot = OutfitSlot.from(category: garment.category)
+                guard let slot = OutfitSlot.allocationSlot(for: garment, assignments: assignments) else { continue }
                 if assignments[slot] == nil {
                     assignments[slot] = garment.id
                 }
             }
         }
         return assignments
+    }
+
+    private func existingLockedSlots(for plan: DayPlan, assignments: [OutfitSlot: UUID]) -> Set<OutfitSlot> {
+        plan.lockedSlots.union(assignments.compactMap { slot, id in
+            plan.lockedGarmentIDs.contains(id) ? slot : nil
+        })
     }
 
     private func wardrobeTile(_ garment: Garment) -> some View {

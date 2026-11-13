@@ -21,7 +21,8 @@ struct OutfitRecommender {
         coldThreshold: Double = RecoContext.outerLayerTempThresholdC
     ) -> [Garment] {
 
-        let tops     = garments.filter { $0.category == .top && !$0.isBlocked }
+        let tops     = garments.filter { OutfitSlot.top.accepts($0) && !$0.isBlocked }
+        let onePieces = garments.filter { OutfitSlot.onePiece.accepts($0) && !$0.isBlocked }
         let bottoms  = garments.filter { $0.category == .bottom && !$0.isBlocked }
         let shoes    = garments.filter { $0.category == .shoes && !$0.isBlocked }
         let outers   = garments.filter { $0.category == .outer && !$0.isBlocked }
@@ -75,8 +76,16 @@ struct OutfitRecommender {
         }
 
         var chosen: [Garment] = []
-        if let t = pickBest(tops)     { chosen.append(t) }
-        if let b = pickBest(bottoms)  { chosen.append(b) }
+        let top = pickBest(tops)
+        let bottom = pickBest(bottoms)
+        let onePiece = pickBest(onePieces)
+        let separateScore = top.flatMap { top in bottom.map { (score(top) + score($0)) / 2 } }
+        if let onePiece, score(onePiece) > (separateScore ?? -Double.infinity) {
+            chosen.append(onePiece)
+        } else {
+            if let top { chosen.append(top) }
+            if let bottom { chosen.append(bottom) }
+        }
         if let s = pickBest(shoes)    { chosen.append(s) }
 
         // Add outer layer in cold weather

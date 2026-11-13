@@ -18,6 +18,7 @@ enum WearItPerformance {
         static let widget = "Widget"
         static let bootstrap = "Bootstrap"
         static let planner = "Planner"
+        static let shopping = "Shopping"
     }
 
     static let bootstrapSignposter = OSSignposter(
@@ -27,6 +28,10 @@ enum WearItPerformance {
     static let plannerSignposter = OSSignposter(
         subsystem: subsystem,
         category: SignpostCategory.planner
+    )
+    static let shoppingSignposter = OSSignposter(
+        subsystem: subsystem,
+        category: SignpostCategory.shopping
     )
 }
 

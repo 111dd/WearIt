@@ -13,7 +13,10 @@ import CoreImage
 // MARK: - Global ambient backdrop (simple + reliable)
 
 public struct LiquidGlassBackdrop: View {
-    @AppStorage(AppBackdropKeys.preset) private var presetRaw: String = AppBackdropPreset.softSky.rawValue
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @AppStorage(AppBackdropKeys.preset) private var presetRaw: String = AppBackdropPreset.system.rawValue
     @AppStorage(AppBackdropKeys.customImagePath) private var customImagePath: String = ""
     @AppStorage(AppBackdropKeys.blurAmount) private var blurAmount: Double = AppBackdropBlur.defaultAmount
 
@@ -22,7 +25,7 @@ public struct LiquidGlassBackdrop: View {
     public init() {}
 
     private var preset: AppBackdropPreset {
-        AppBackdropPreset(rawValue: presetRaw) ?? .softSky
+        AppBackdropPreset(rawValue: presetRaw) ?? .system
     }
 
     private var blurRadius: CGFloat {
@@ -31,10 +34,18 @@ public struct LiquidGlassBackdrop: View {
     }
 
     private var fillColors: [Color] {
-        if preset == .photo {
-            return AppBackdropPreset.softSky.previewColors
-        }
-        return preset.previewColors
+        if !allowsWallpaper { return AppBackdropPreset.system.colors(for: colorScheme) }
+        return preset.colors(for: colorScheme)
+    }
+
+    private var allowsWallpaper: Bool {
+        !reduceTransparency && contrast != .increased
+    }
+
+    private var veilOpacity: Double {
+        guard preset == .photo else { return AppBackdropBlur.veilOpacity(for: blurAmount) }
+        let base: Double = colorScheme == .dark ? 0.72 : 0.78
+        return min(0.90, base + AppBackdropBlur.veilOpacity(for: blurAmount))
     }
 
     public var body: some View {
@@ -48,7 +59,7 @@ public struct LiquidGlassBackdrop: View {
             // `photo` is already downsampled (and softly blurred offline) —
             // never apply live SwiftUI `.blur` here; that tanks scroll FPS.
             // Constrain fill so scaledToFill cannot expand parent layout.
-            if preset == .photo, let photo {
+            if allowsWallpaper, preset == .photo, let photo {
                 Image(uiImage: photo)
                     .resizable()
                     .scaledToFill()
@@ -57,22 +68,24 @@ public struct LiquidGlassBackdrop: View {
             }
 
             Color(.systemBackground)
-                .opacity(AppBackdropBlur.veilOpacity(for: blurAmount))
+                .opacity(veilOpacity)
         }
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         .clipped()
         .allowsHitTesting(false)
-        .task(id: "\(presetRaw)|\(customImagePath)|\(Int((blurAmount * 100).rounded()))") {
-            guard preset == .photo, !customImagePath.isEmpty else {
+        .task(id: "\(presetRaw)|\(customImagePath)|\(Int((blurAmount * 100).rounded()))|\(allowsWallpaper)") {
+            guard allowsWallpaper, preset == .photo, !customImagePath.isEmpty else {
                 photo = nil
                 return
             }
             let path = customImagePath
             let radius = blurRadius
             let maxPixel = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height) * UIScreen.main.scale
-            photo = await Task.detached(priority: .utility) {
+            let prepared = await Task.detached(priority: .utility) {
                 Self.prepareWallpaper(path: path, blurRadius: radius, maxPixel: maxPixel)
             }.value
+            guard !Task.isCancelled else { return }
+            photo = prepared
         }
     }
 

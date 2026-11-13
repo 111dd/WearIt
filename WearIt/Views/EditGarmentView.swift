@@ -20,6 +20,7 @@ struct EditGarmentView: View {
     @State private var showAdvancedOptions = false
     @State private var showDetails = false
     @State private var showDeleteAlert = false
+    @State private var showPurchaseDetails = false
     @State private var errorMessage: String?
     @State private var hasUnsavedChanges = false
     /// Looks this item was worn in, per situation (from calendar-tagged wear history).
@@ -92,6 +93,18 @@ struct EditGarmentView: View {
             VStack(spacing: DS.Spacing.md) {
                 heroCard
                 essentialsCard
+                Button { showPurchaseDetails = true } label: {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                        Label(String(localized: "purchase_details_receipt"), systemImage: "receipt")
+                            .font(.subheadline.weight(.semibold))
+                        if let store = garment.purchaseStore { Text(store).font(.caption).foregroundStyle(.secondary) }
+                        if let date = garment.purchasedAt {
+                            Text(date, format: .dateTime.day().month().year()).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(DS.Spacing.md).contentSurface()
+                }
+                .buttonStyle(.plain)
                 ThermalProfileEditor(
                     profile: garment.thermalProfile,
                     warmthOverride: Binding(
@@ -167,6 +180,7 @@ struct EditGarmentView: View {
         } message: {
             Text(errorMessage ?? String(localized: "error_generic"))
         }
+        .sheet(isPresented: $showPurchaseDetails) { GarmentPurchaseView(garment: garment) }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoLibraryPickerWrapper { image in
                 beginCrop(with: image)
@@ -222,6 +236,10 @@ struct EditGarmentView: View {
             case .findPhoto:
                 GarmentPhotoSearchView(garment: garment) { image, source, asPrimary in
                     persistNewPhoto(image, original: image, makePrimary: asPrimary, sourceURL: source)
+                }
+            case .polish:
+                GarmentPhotoPolishView(garment: garment) { polished, original in
+                    persistNewPhoto(polished, original: original, makePrimary: true)
                 }
             }
         }
@@ -390,6 +408,12 @@ struct EditGarmentView: View {
             Label(String(localized: "photo_tool_find_photo"), systemImage: "photo.badge.magnifyingglass")
                 .font(.caption.weight(.semibold))
         }.buttonStyle(.bordered)
+        Button { photoTool = .polish } label: {
+            Label(String(localized: "photo_tool_polish"), systemImage: "face.dashed")
+                .font(.caption.weight(.semibold))
+        }
+        .buttonStyle(.bordered)
+        .disabled(garment.imagePath == nil && garment.imageData == nil)
     }
 
     private var titleEditor: some View {
@@ -550,7 +574,7 @@ struct EditGarmentView: View {
                     allTags: sizeOptions,
                     selectedTag: Binding(
                         get: { garment.sizeOption },
-                        set: { garment.sizeOption = $0; hasUnsavedChanges = true }
+                        set: { garment.sizeOption = $0; garment.aiEnrichedFieldsRaw?.removeAll { $0 == "sizeOption" }; hasUnsavedChanges = true }
                     ),
                     titleForTag: { $0.title }
                 )
@@ -777,7 +801,7 @@ struct EditGarmentView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 34)
             .padding(.horizontal, 6)
-            .foregroundStyle(fits ? Color.white : Color.primary)
+            .foregroundStyle(fits ? DS.Accent.onFill : Color.primary)
             .background(
                 Capsule().fill(fits ? Color.accentColor : Color.secondary.opacity(0.12))
             )

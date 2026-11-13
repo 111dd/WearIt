@@ -4,6 +4,7 @@ import SwiftData
 
 struct SignInView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
     @AppStorage("didCompleteOnboarding") private var didCompleteOnboarding = false
@@ -12,6 +13,7 @@ struct SignInView: View {
 
     var body: some View {
         content
+            .withLocalAppBackdropPainted()
             .sheet(isPresented: $showPrivacyPolicy) {
                 NavigationStack {
                     PrivacyPolicyView()
@@ -27,35 +29,20 @@ struct SignInView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "tshirt.fill")
                         .font(.system(size: 56, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.8)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: Color.black.opacity(0.2), radius: 12, x: 0, y: 6)
+                        .foregroundStyle(Color.accentColor)
                     
                     Text("WearIt")
                         .font(.system(size: 48, weight: .black, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.9)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                        .foregroundStyle(.primary)
 
                     Text(String(localized: "signin_subtitle"))
                         .multilineTextAlignment(.center)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.secondary)
                         .font(.headline)
-                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
                 }
                 .padding(.horizontal)
 
-                // כרטיס זכוכית משופר
+                // Shared adaptive content surface keeps account controls legible.
                 VStack(spacing: 20) {
                     HStack(spacing: 8) {
                         Image(systemName: "lock.shield.fill")
@@ -78,10 +65,9 @@ struct SignInView: View {
                             print("Sign in with Apple failed:", error.localizedDescription)
                         }
                     }
-                    .signInWithAppleButtonStyle(.whiteOutline)
+                    .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                     .frame(height: 56)
                     .clipShape(Capsule())
-                    .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 6)
 
                     Button {
                         didSkipSignIn = true
@@ -89,13 +75,13 @@ struct SignInView: View {
                     } label: {
                         Text(String(localized: "signin_continue_offline"))
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.9))
+                            .foregroundStyle(Color.accentColor)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background(Color.white.opacity(0.12), in: Capsule())
+                            .background(Color.accentColor.opacity(0.10), in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(Color.white.opacity(0.2), lineWidth: 0.6)
+                                    .strokeBorder(Color.accentColor.opacity(0.18), lineWidth: 0.6)
                             )
                     }
                     .buttonStyle(.plain)
@@ -103,11 +89,11 @@ struct SignInView: View {
                     if cloudKit.status == .notAvailable {
                         Text(String(localized: "signin_icloud_guidance"))
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                 }
-                .glassCard(corner: 28, intensity: .thin)
+                .dsCard(cornerRadius: 28)
 
                 Spacer()
 
@@ -117,7 +103,7 @@ struct SignInView: View {
                     Text(String(localized: "signin_privacy_footer"))
                         .font(.footnote)
                         .underline()
-                        .foregroundStyle(.white.opacity(0.85))
+                        .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 .buttonStyle(.plain)

@@ -21,15 +21,42 @@ struct DayLookEditorSheet: View {
     @State private var activeSlot: OutfitSlot = .top
     @State private var query: String = ""
 
-    private static let slotOrder: [OutfitSlot] = [.top, .bottom, .shoes, .outer, .accessory]
+    /// Older saved looks can hold a dress in `.top`. Keep that assignment
+    /// unchanged until an explicit edit while presenting its real silhouette.
+    private var onePieceSlot: OutfitSlot? {
+        OutfitSlot.displayOrder.first { slot in
+            guard let id = assignments[slot] else { return false }
+            return slot == .onePiece || garmentsByID[id]?.itemType?.isOnePiece == true
+        }
+    }
+
+    private func presentedSlot(_ slot: OutfitSlot) -> OutfitSlot {
+        slot == onePieceSlot ? .onePiece : slot
+    }
+
+    private var slotOrder: [OutfitSlot] {
+        let hasOnePiece = onePieceSlot != nil
+        let assignedIDs = Set(assignments.values)
+        let canAddAccessory = garments.contains { $0.category == .accessory && !assignedIDs.contains($0.id) }
+        let nextAccessory = canAddAccessory ? OutfitSlot.accessorySlots.first { assignments[$0] == nil } : nil
+        return OutfitSlot.displayOrder.filter { slot in
+            if slot.isAccessory { return assignments[slot] != nil || slot == nextAccessory }
+            if slot == .onePiece {
+                return assignments[slot] != nil
+                    || (!hasOnePiece && garments.contains { $0.itemType?.isOnePiece == true })
+            }
+            if slot == .top || slot == .bottom { return !hasOnePiece || assignments[slot] != nil }
+            return true
+        }
+    }
 
     private var garmentsByID: [UUID: Garment] {
         Dictionary(uniqueKeysWithValues: garments.map { ($0.id, $0) })
     }
 
     private var candidates: [Garment] {
-        let allowed = activeSlot.allowedCategories
-        var items = garments.filter { allowed.contains($0.category) }
+        let targetSlot = presentedSlot(activeSlot)
+        var items = garments.filter { targetSlot.accepts($0) }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         if !trimmed.isEmpty {
             items = items.filter {
@@ -101,7 +128,7 @@ struct DayLookEditorSheet: View {
         .onAppear {
             assignments = initialAssignments
             lockedSlots = initialLockedSlots
-            activeSlot = Self.slotOrder.first(where: { initialAssignments[$0] == nil }) ?? .top
+            activeSlot = slotOrder.first(where: { initialAssignments[$0] == nil }) ?? slotOrder.first ?? .top
         }
         .presentationDetents([.large])
     }
@@ -109,9 +136,11 @@ struct DayLookEditorSheet: View {
     // MARK: Slot strip
 
     private var slotStrip: some View {
-        HStack(spacing: DS.Spacing.xs) {
-            ForEach(Self.slotOrder, id: \.self) { slot in
-                slotChip(slot)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: DS.Spacing.sm) {
+                ForEach(slotOrder, id: \.self) { slot in
+                    slotChip(slot)
+                }
             }
         }
     }
@@ -119,6 +148,7 @@ struct DayLookEditorSheet: View {
     private func slotChip(_ slot: OutfitSlot) -> some View {
         let isActive = slot == activeSlot
         let assigned = assignments[slot].flatMap { garmentsByID[$0] }
+        let presentation = presentedSlot(slot)
 
         return Button {
             DS.haptic(0.3)
@@ -134,7 +164,7 @@ struct DayLookEditorSheet: View {
                             .foregroundStyle(.secondary.opacity(0.5))
                             .frame(width: 50, height: 50)
                             .overlay {
-                                Image(systemName: slot.allowedCategories.first?.icon ?? "questionmark")
+                                Image(systemName: presentation.allowedCategories.first?.icon ?? "questionmark")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -153,16 +183,17 @@ struct DayLookEditorSheet: View {
                         .strokeBorder(isActive ? Color.accentColor : .clear, lineWidth: 2)
                 )
 
-                Text(slot.title)
+                Text(presentation.title)
                     .font(.caption2.weight(isActive ? .bold : .medium))
                     .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity)
+            .frame(width: 68)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(slot.title)
+        .accessibilityLabel(presentation.title)
         .accessibilityValue(assigned?.displayTitle ?? String(localized: "calendar_slot_empty"))
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
@@ -170,17 +201,30 @@ struct DayLookEditorSheet: View {
     // MARK: Candidates
 
     private func candidateCell(_ garment: Garment) -> some View {
+        let targetSlot = presentedSlot(activeSlot)
+        let conflicts = structuralConflicts(for: targetSlot)
         let isSelected = assignments[activeSlot] == garment.id
         let usedElsewhere = assignments.contains { $0.key != activeSlot && $0.value == garment.id }
+        let isLocked = lockedSlots.contains(activeSlot)
+        let hasLockedConflict = conflicts.contains {
+            assignments[$0] != nil && lockedSlots.contains($0)
+        }
+        let isDisabled = usedElsewhere || isLocked || hasLockedConflict
 
         return Button {
+            guard !isDisabled else { return }
             DS.haptic(0.4)
             withAnimation(DS.Animation.fast) {
                 if isSelected {
                     assignments[activeSlot] = nil
                     lockedSlots.remove(activeSlot)
+                    keepActiveSlotVisible()
                 } else {
-                    assignments[activeSlot] = garment.id
+                    for conflict in conflicts {
+                        assignments[conflict] = nil
+                    }
+                    assignments[targetSlot] = garment.id
+                    activeSlot = targetSlot
                     advanceToNextEmptySlot()
                 }
             }
@@ -191,7 +235,7 @@ struct DayLookEditorSheet: View {
                         RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
                             .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 3)
                     )
-                    .opacity(usedElsewhere ? 0.45 : 1)
+                    .opacity(isDisabled && !isSelected ? 0.45 : 1)
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
@@ -202,17 +246,32 @@ struct DayLookEditorSheet: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(usedElsewhere)
+        .disabled(isDisabled)
         .accessibilityLabel(garment.displayTitle)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
+    private func structuralConflicts(for slot: OutfitSlot) -> Set<OutfitSlot> {
+        var conflicts = slot.conflictingSlots
+        if slot == .bottom, let id = assignments[.top],
+           garmentsByID[id]?.itemType?.isOnePiece == true {
+            conflicts.insert(.top)
+        }
+        return conflicts
+    }
+
     private func advanceToNextEmptySlot() {
-        guard let index = Self.slotOrder.firstIndex(of: activeSlot) else { return }
-        let remaining = Self.slotOrder[(index + 1)...]
+        let order = slotOrder
+        guard let index = order.firstIndex(of: activeSlot) else { return }
+        let remaining = order[(index + 1)...]
         if let next = remaining.first(where: { assignments[$0] == nil }) {
             activeSlot = next
         }
+    }
+
+    private func keepActiveSlotVisible() {
+        let order = slotOrder
+        if !order.contains(activeSlot) { activeSlot = order.first ?? .top }
     }
 
     // MARK: Slot actions
@@ -238,16 +297,19 @@ struct DayLookEditorSheet: View {
             .dsSecondaryButton()
 
             Button(role: .destructive) {
+                guard !lockedSlots.contains(activeSlot) else { return }
                 DS.haptic(0.4)
                 withAnimation(DS.Animation.fast) {
                     assignments[activeSlot] = nil
                     lockedSlots.remove(activeSlot)
+                    keepActiveSlotVisible()
                 }
             } label: {
                 Label(String(localized: "action_remove"), systemImage: "minus.circle")
                     .frame(maxWidth: .infinity)
             }
             .dsSecondaryButton()
+            .disabled(lockedSlots.contains(activeSlot))
         }
     }
 }

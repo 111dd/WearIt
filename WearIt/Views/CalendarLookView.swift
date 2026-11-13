@@ -43,7 +43,7 @@ struct CalendarLookView: View {
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
 
-    private static let slotOrder: [OutfitSlot] = [.top, .bottom, .shoes, .outer, .accessory]
+    private static let slotOrder = OutfitSlot.displayOrder
     private static let plannerWindowDays = 3
 
     // MARK: - Derived
@@ -481,7 +481,7 @@ struct CalendarLookView: View {
         var result: [OutfitSlot: UUID] = [:]
         for id in plan.selectedGarmentIDs {
             guard let garment = lookup[id] else { continue }
-            let slot = OutfitSlot.from(category: garment.category)
+            guard let slot = OutfitSlot.allocationSlot(for: garment, assignments: result) else { continue }
             if result[slot] == nil { result[slot] = id }
         }
         return result
@@ -489,9 +489,8 @@ struct CalendarLookView: View {
 
     private static func effectiveLockedSlots(for plan: DayPlan?, lookup: [UUID: Garment]) -> Set<OutfitSlot> {
         guard let plan else { return [] }
-        if !plan.lockedSlots.isEmpty { return plan.lockedSlots }
         let assignments = effectiveDayAssignments(for: plan, lookup: lookup)
-        return Set(assignments.filter { plan.lockedGarmentIDs.contains($0.value) }.keys)
+        return plan.lockedSlots.union(assignments.filter { plan.lockedGarmentIDs.contains($0.value) }.keys)
     }
 
     private static func slotRank(_ slot: OutfitSlot) -> Int {

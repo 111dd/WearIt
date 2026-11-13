@@ -465,6 +465,11 @@
 "slot_shoes" = "נעליים";
 "slot_outer" = "מעיל";
 "slot_accessory" = "אביזר";
+"slot_one_piece" = "שמלה / אוברול";
+"slot_additional_accessory" = "אביזר נוסף";
+"item_type_dress" = "שמלה";
+"item_type_jumpsuit" = "אוברול";
+"assign_error_structure_locked" = "צריך לבטל את נעילת הפריט לפני מעבר בין שמלה או אוברול לחולצה ומכנסיים.";
 
 // MARK: - Planner Board
 "planner_board_title" = "הלוקים שלך";
@@ -827,8 +832,9 @@
 "planner_empty_day_subtitle" = "הקישו כדי ליצור לוק ליום הזה";
 
 // MARK: - App Backdrop
-"backdrop_section_title" = "רקע האפליקציה";
-"backdrop_section_subtitle" = "מוצג מאחורי כל המסכים — הזכוכית צפה מעליו";
+"backdrop_section_title" = "מראה האפליקציה";
+"backdrop_section_subtitle" = "המראה הבהיר והכהה מתחלפים לפי הגדרות המכשיר. אפשר לבחור גוון רקע או תמונה.";
+"backdrop_system" = "מערכת";
 "backdrop_soft_sky" = "שמיים רכים";
 "backdrop_warm_sand" = "חול חם";
 "backdrop_mist_forest" = "יער בערפל";
@@ -837,7 +843,7 @@
 "backdrop_photo" = "התמונה שלי";
 "backdrop_remove_photo" = "הסרת תמונה";
 "backdrop_blur_label" = "טשטוש";
-"backdrop_blur_hint" = "טשטוש נמוך משאיר יותר פרטים; גבוה מרגיש רך יותר מתחת לזכוכית";
+"backdrop_blur_hint" = "התאמת רכות התמונה. שכבה עדינה שומרת על קריאות הטקסט במראה בהיר וכהה.";
 "backdrop_blur_percent_format" = "%d%%";
 
 // MARK: - Calendar date strip
@@ -1252,7 +1258,7 @@
 
 /* Shop picks */
 "shop_title" = "בחירות בשבילך";
-"shop_subtitle" = "התאמות אישיות לפי ההעדפות שלך, הארון והבחירות שלך בקניות, עם מבצעים שימושיים ורעיונות ללוקים.";
+"shop_subtitle" = "עד 20 התאמות לפי הארון והטעם שלך, עם עדיפות למבצעים שווים ומתאימים. ההצעות נשארות כאן; ״לא בשבילי״ יציע פריט אחר. שינוי העדפות הקנייה ייצור בחירה חדשה.";
 "shop_section_subtitle" = "התאמות אישיות, מבצעים שימושיים והשלמות ללוקים שלך.";
 "shop_footer" = "המחירים והמלאי בקטלוג עשויים להשתנות או להיות שונים לפי מידה וצבע. לפני קנייה, בדוק בחנות את המבצע, המידה והזמינות העדכניים.";
 "shop_filter_all" = "בשבילך";
@@ -1328,6 +1334,7 @@
 "wardrobe_search_empty_message" = "אפשר לנסות שם אחר או לנקות את הסינון.";
 "photo_tool_select_subject" = "בחירת הבגד בתמונה";
 "photo_tool_find_photo" = "מציאת תמונה טובה יותר";
+"photo_tool_polish" = "טשטוש פנים ורקע";
 "photo_tool_item_actions" = "פעולות לפריט";
 "photo_tool_photo_count_format" = "%d תמונות";
 "photo_subject_instructions" = "יש להקיש או ללחוץ לחיצה ארוכה על הבגד. בתמונה של בגד על הגוף אפשר לבחור גם מחלקי הלבוש למטה.";
@@ -1337,19 +1344,26 @@
 "photo_subject_no_selection" = "עדיין לא נבחר בגד. אפשר לנסות אובייקט אחר או חלק לבוש למטה. אם לא ניתן להפריד את הבגד, אפשר לחתוך אותו בעורך התמונה.";
 "photo_advice_low_resolution" = "התמונה קטנה. אפשר לחפש תמונה חדה יותר או לייבא תמונה מחנות.";
 "photo_advice_isolate" = "לכרטיס נקי יותר, אפשר לבחור את הבגד ולהפריד אותו מהרקע.";
-"photo_search_explanation" = "תמונות דומות מקטלוג החנויות מדורגות במכשיר לפי הצילום ופרטי הפריט. התמונה שלך אינה מועלת לרשת.";
+"photo_search_explanation" = "מדביקים קישור לעמוד המוצר בחנות כדי לייבא את התמונות שלו. התמונה מהארון לא מועלית. כדאי לבדוק צבע וגרסה לפני השימוש.";
 "photo_search_product_link" = "יש לך קישור למוצר?";
 "photo_search_link_placeholder" = "הדבקת קישור למוצר בחנות";
 "photo_search_import_link" = "הצגת תמונות המוצר";
 "photo_search_web_action" = "חיפוש תמונות ברשת";
-"photo_search_web_hint" = "החיפוש ייפתח בדפדפן לפי המותג, הסוג והצבע. כדי לייבא תמונות, יש להעתיק לכאן קישור לעמוד המוצר.";
-"photo_search_loading" = "מחפש תמונות…";
-"photo_search_review_notice" = "תמונה דומה עשויה להציג מוצר אחר. כדאי להשוות את הצבע, הגזרה והפרטים לפני הוספה.";
+"photo_search_web_hint" = "פותח בדפדפן חיפוש תמונות של הפריט. כדי לייבא תמונות, יש להעתיק לכאן קישור לעמוד המוצר.";
+"photo_search_loading" = "טוען תמונות…";
+"photo_search_same_item" = "תמונות של הפריט";
+"photo_search_similar" = "פריטים דומים";
+"photo_search_review_same" = "התמונות האלה מגיעות ממוצר שתואם לפריט. כדאי לוודא צבע וגרסה לפני הוספה.";
 "photo_search_back_results" = "חזרה לתמונות";
 "photo_search_current" = "התמונה הקיימת";
 "photo_search_suggested" = "התמונה החדשה";
 "photo_search_add_gallery" = "הוספה לגלריה";
-"photo_search_empty" = "לא נמצאו תמונות בקטלוג הזמין. אפשר לנסות קישור למוצר או חיפוש ברשת.";
+"photo_search_empty" = "לא נמצאו תמונות בעמוד הזה. אפשר לנסות קישור אחר למוצר.";
+"photo_search_page_photos" = "תמונות מהעמוד";
+"photo_polish_explanation" = "מרכך פנים ואת החדר שמאחורי האדם, במכשיר, כמו בצילום לוק יומי. הבגד נשאר חד.";
+"photo_polish_no_person" = "לא זיהינו אדם בתמונה, אז אי אפשר לטשטש פנים או רקע.";
+"photo_polish_no_photo" = "לפריט הזה עוד אין תמונה לעריכה.";
+"photo_polish_save" = "שימוש בתמונה הזו";
 "photo_search_invalid_link" = "יש להזין קישור לעמוד מוצר.";
 "photo_search_load_failed" = "לא ניתן לטעון את התמונה. אפשר לנסות תמונה אחרת או קישור למוצר.";
 "photo_search_source" = "מקור התמונה";
@@ -1380,7 +1394,7 @@
 /* Shopping preferences and manual exploration */
 "shop_mode_personalized" = "בשבילך";
 "shop_mode_browse" = "חיפוש חופשי";
-"shop_browse_intro" = "אפשר לעיין בחנויות ולבחור סינון בעצמך. הבחירות כאן לא משנות את ההעדפות האישיות ששמרת.";
+"shop_browse_intro" = "חיפוש לפי קטגוריות לבוש, עם סינונים נפרדים ותפריט העדפות משלו.";
 "shop_browse_search" = "חיפוש פריטים, מותגים או חנויות";
 "shop_browse_filters" = "סינון";
 "shop_browse_all" = "כל הפריטים";
@@ -1408,7 +1422,7 @@
 "shop_preferences_automatic" = "ללא הגבלה";
 "shop_preferences_selected_format" = "%d נבחרו";
 "shop_preferences_product_photos" = "להעדיף תמונות של הפריט בלבד";
-"shop_preferences_product_photos_detail" = "יוצגו תמונות של הפריט בלבד כשיש כאלה. אם בחנות יש רק תמונות על דוגמנים, יוצג סמל ניטרלי במקומן.";
+"shop_preferences_product_photos_detail" = "מציג מיד את תמונת החנות הזמינה הראשונה, ואז מעדיף תמונה של הפריט בלבד אם נמצאה. אחרת תמונת החנות נשארת, גם כשהפריט על דוגמן.";
 "shop_preferences_sizes_detail" = "גם המידות ששמרת עוזרות להתאים את ההצעות האישיות.";
 "shop_preferences_save_failed" = "לא ניתן לשמור את העדפות הקנייה. נסה שוב.";
 "shop_style_casual" = "יומיומי";
@@ -1422,3 +1436,80 @@
 "shop_style_vintage" = "וינטג׳";
 "shop_department_needed" = "בחר מחלקת קנייה כדי לכלול בגדים שמתאימים לך בהצעות האישיות.";
 "shop_preferences_from_wardrobe" = "לפי הארון שלי";
+
+// Personal shopping and purchase records
+"purchase_store" = "נרכש מ־";
+"purchase_date_known" = "תאריך הרכישה ידוע לי";
+"purchase_date" = "תאריך ושעת הרכישה";
+"purchase_product_page" = "לעמוד המוצר המקורי";
+"purchase_date_recorded_detail" = "התאריך הראשוני הוא הזמן שבו לחצת על ״רכשתי״. אפשר לתקן אותו כאן.";
+"purchase_details_optional" = "אפשר להוסיף את פרטי הרכישה הידועים לך. תאריך לא ידוע נשאר ריק.";
+"purchase_receipt_preparing" = "מכין את הקבלה…";
+"purchase_receipt_add" = "בחירת תמונת קבלה";
+"purchase_receipt_camera" = "צילום קבלה";
+"purchase_receipt_remove" = "הסרת הקבלה";
+"purchase_receipt" = "קבלה · לא חובה";
+"purchase_receipt_detail" = "נשמרת באופן פרטי עם הפריט ומסתנכרנת דרך ה־iCloud שלך. פרטי הקבלה עדיין לא מתמלאים אוטומטית.";
+"purchase_details" = "פרטי הרכישה";
+"purchase_details_receipt" = "פרטי רכישה וקבלה";
+"purchase_save_failed" = "לא הצלחנו לשמור את הפרטים או לטעון את הקבלה. הפרטים הקודמים נשמרו. אפשר לנסות שוב.";
+"shop_purchase_failed" = "לא הצלחנו להשלים את השינוי. אפשר לנסות שוב.";
+"shop_purchase_added" = "נוסף לארון שלך";
+"shop_matching" = "מחפש בגדים שמתאימים לך…";
+"shop_deals_no_match" = "יש מבצעים בקטלוג, אך כרגע אף אחד מהם לא עבר את בדיקת ההתאמה האישית והמידה שלך.";
+"shop_deals_unavailable" = "בקטלוג שנטען עדיין אין מחירים קודמים ועדכניים שמאפשרים לאמת מבצע. אפשר לרענן או להציג גם פריטים ללא מבצע.";
+"shop_deals_explore" = "לכל מבצעי הבגדים";
+"shop_refresh_catalog" = "רענון הקטלוג";
+"shop_photo_retry" = "טעינת התמונה מחדש";
+"shop_filter_clothes_for_you" = "בגדים בשבילך";
+"shop_filter_clothing" = "בגדים";
+"shop_match_percent_format" = "%d%% התאמה משוערת";
+"shop_match_title" = "על מה מבוססת ההתאמה?";
+"shop_match_style" = "הטעם שלך";
+"shop_match_wardrobe" = "אפשרויות שילוב עם הארון שלך";
+"shop_match_weather" = "נוחות במזג האוויר";
+"shop_match_style_only" = "ההערכה בקטלוג מבוססת על הארון, הצבעים, המותגים והסגנונות המועדפים ועל המשוב שלך בקניות. שילובים עם הארון ומזג האוויר עדיין לא נבדקו לפריט הזה.";
+"shop_match_explanation" = "הטעם האישי תורם 50%, אפשרויות השילוב בארון 35% ומזג האוויר 15%. מידע חסר אינו נכלל בחישוב. הנחה במחיר אינה מעלה את אחוז ההתאמה.";
+"shop_match_learning" = "עדיין לומד להכיר אותך. לבישות, שמירת פריטים ומשוב יעזרו לדייק את ההערכה.";
+"shop_match_learned" = "מבוסס על הארון, היסטוריית הלבישה והמשוב שלך בקניות. הבחירות הבאות שלך ימשיכו לדייק אותו.";
+"shop_match_estimate" = "זהו מדד התאמה משוער, לא מדידה של דיוק המודל ולא הסתברות שתאהב או תרכוש את הפריט.";
+"shop_match_not_enough" = "עדיין לומד את הסגנון שלך";
+"action_undo" = "ביטול";
+
+/* Shopping product details */
+"shop_details_title" = "תמונות ופרטים";
+"shop_details_all_photos_format" = "כל %d התמונות והפרטים";
+"shop_details_photos_format" = "%d מתוך %d";
+"shop_details_view_photo" = "הצגת תמונה מלאה";
+"shop_details_price_unknown" = "המחיר אינו זמין";
+"shop_details_savings_format" = "חיסכון של %@";
+"shop_details_about" = "על הפריט";
+"shop_details_color" = "צבע";
+"shop_details_material" = "חומר";
+"shop_details_fit" = "גזרה";
+"shop_details_type" = "סוג הפריט";
+"shop_details_sizes_in_stock" = "מידות שסומנו במלאי";
+"shop_details_sizes_listed" = "מידות שהחנות מציגה";
+"shop_details_sizes_unknown" = "הזמינות לפי מידה עדיין לא אומתה.";
+"shop_details_sizes_empty" = "בבדיקה האחרונה לא נמצאו מידות במלאי.";
+"shop_details_stock_unavailable" = "הפריט לא היה זמין בבדיקה האחרונה.";
+"shop_details_checked_format" = "נבדק לאחרונה ב־%@";
+"shop_details_shop_check" = "לפני הקנייה, בדוק בחנות את המידה, המחיר הסופי, עלות המשלוח ותנאי ההחזרה.";
+"shop_details_description" = "תיאור החנות";
+"shop_browse_all_categories" = "כל הבגדים";
+"shop_browse_all_types" = "כל סוגי הפריטים";
+"shop_browse_preferences" = "העדפות וסינון לחיפוש חופשי";
+"shop_personal_filters_title" = "העדפות וסינון ל־For You";
+"shop_clear_personal_filters" = "ניקוי הסינון ב־For You";
+"shop_clear_browse_filters" = "ניקוי הסינון בחיפוש החופשי";
+"shop_reset_active_filters" = "ניקוי הסינון במסך הזה";
+"shop_show_without_deals" = "הצגת פריטים גם ללא מבצע";
+"shop_deals_filtered_empty" = "לא נמצאו מבצעים שמתאימים לסינונים שנבחרו. אפשר לשנות את הסינון או להציג גם פריטים ללא מבצע.";
+"shop_filter_category" = "קטגוריית לבוש";
+"shop_filter_item_type" = "סוג פריט";
+
+/* Worn planner look */
+"planner_worn_day_summary" = "הלוק של היום · נלבש";
+"planner_show_worn_look" = "הצגת הלוק";
+"planner_collapse_worn_look" = "צמצום הלוק";
+"planner_add_evening_look" = "הוספת לוק ערב";
