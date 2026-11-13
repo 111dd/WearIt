@@ -43,7 +43,7 @@ enum Category: String, Codable, CaseIterable, Identifiable {
     var itemTypes: [ItemType] {
         switch self {
         case .top:
-            return [.tshirt, .shirt, .polo, .blouse, .tank, .sweater, .hoodie, .cardigan, .vest]
+            return [.tshirt, .shirt, .polo, .blouse, .tank, .sweater, .hoodie, .cardigan, .vest, .dress, .jumpsuit]
         case .bottom:
             return [.jeans, .chinos, .trousers, .shorts, .skirt, .leggings, .joggers, .sweatpants]
         case .shoes:
@@ -71,8 +71,12 @@ enum ItemType: String, Codable, CaseIterable, Identifiable {
     case hat, cap, scarf, belt, watch, bag, sunglasses, jewelry, tie
     // Generic fallback
     case other
+    // One-piece garments keep the existing top category for stored compatibility.
+    case dress, jumpsuit
     
     var id: String { rawValue }
+
+    var isOnePiece: Bool { self == .dress || self == .jumpsuit }
     
     var title: String {
         switch self {
@@ -119,6 +123,8 @@ enum ItemType: String, Codable, CaseIterable, Identifiable {
         case .jewelry: return String(localized: "item_type_jewelry")
         case .tie: return String(localized: "item_type_tie")
         case .other: return String(localized: "item_type_other")
+        case .dress: return String(localized: "item_type_dress")
+        case .jumpsuit: return String(localized: "item_type_jumpsuit")
         }
     }
 }

@@ -64,6 +64,7 @@ final class ShopFeedbackStore: ObservableObject {
     }
 
     @Published private(set) var state: State
+    @Published private(set) var revision = 0
 
     private static let key = "shop.feedback.v1"
     /// "Not for me" hides a product for this long.
@@ -95,6 +96,13 @@ final class ShopFeedbackStore: ObservableObject {
     }
 
     func keptItem(_ id: String) -> ShopCatalogItem? { state.keptItems[id] }
+
+    /// Clear the in-memory signals too when the account's defaults are deleted.
+    func reset() {
+        state = State()
+        revision += 1
+        UserDefaults.standard.removeObject(forKey: Self.key)
+    }
 
     /// Attribute evidence supplements the numeric model: reacting to one brand/color/type
     /// can change similar products, rather than just learning a global preference for shopping.
@@ -194,6 +202,38 @@ final class ShopFeedbackStore: ObservableObject {
         persist()
     }
 
+    struct PurchaseUndo {
+        let id: String
+        let actions: [ShopFeedbackKind: Date]?
+        let kept: ShopCatalogItem?
+        let observed: ShopCatalogItem?
+        let weightDelta: [Double]
+        let biasDelta: Double
+        let interactionDelta: Int
+    }
+
+    func recordPurchase(_ pick: PurchaseScorer.Pick) -> PurchaseUndo {
+        let id = pick.id
+        let previous = state
+        record(.bought, pick: pick)
+        let delta = state.model.weights.enumerated().map { index, weight in
+            weight - (index < previous.model.weights.count ? previous.model.weights[index] : 0)
+        }
+        return PurchaseUndo(id: id, actions: previous.actions[id], kept: previous.keptItems[id], observed: previous.observedItems?[id],
+            weightDelta: delta, biasDelta: state.model.bias - previous.model.bias,
+            interactionDelta: state.model.interactions - previous.model.interactions)
+    }
+
+    func undoPurchase(_ undo: PurchaseUndo) {
+        state.actions[undo.id] = undo.actions
+        state.keptItems[undo.id] = undo.kept
+        state.observedItems?[undo.id] = undo.observed
+        for index in 0..<min(state.model.weights.count, undo.weightDelta.count) { state.model.weights[index] -= undo.weightDelta[index] }
+        state.model.bias -= undo.biasDelta
+        state.model.interactions = max(0, state.model.interactions - undo.interactionDelta)
+        persist()
+    }
+
     func unsave(_ productID: String) {
         state.actions[productID]?[.saved] = nil
         if state.actions[productID]?[.bought] == nil { state.keptItems[productID] = nil }
@@ -201,6 +241,7 @@ final class ShopFeedbackStore: ObservableObject {
     }
 
     private func persist() {
+        revision += 1
         if let data = try? JSONEncoder().encode(state) {
             UserDefaults.standard.set(data, forKey: Self.key)
         }

@@ -10,6 +10,7 @@ import UIKit
 import CoreImage
 
 enum AppBackdropPreset: String, CaseIterable, Identifiable {
+    case system
     case softSky
     case warmSand
     case mistForest
@@ -21,6 +22,7 @@ enum AppBackdropPreset: String, CaseIterable, Identifiable {
 
     var titleKey: LocalizedStringResource {
         switch self {
+        case .system: return "backdrop_system"
         case .softSky: return "backdrop_soft_sky"
         case .warmSand: return "backdrop_warm_sand"
         case .mistForest: return "backdrop_mist_forest"
@@ -30,60 +32,44 @@ enum AppBackdropPreset: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Whether this backdrop is dark enough to require light (dark-mode) text.
-    var prefersDarkScheme: Bool {
+    /// A neutral system canvas or a restrained tint, with separate dark palettes.
+    /// Wallpaper selection never overrides the device's appearance preference.
+    func colors(for colorScheme: ColorScheme) -> [Color] {
+        let dark = colorScheme == .dark
         switch self {
-        case .softSky, .warmSand, .mistForest, .duskRose, .slate:
-            return false
-        case .photo:
-            // Decided per-image; see AppBackdropStore/customImageIsDark.
-            return false
-        }
-    }
-
-    /// Preview / fill colors for built-in presets (top → bottom).
-    var previewColors: [Color] {
-        switch self {
+        case .system, .photo:
+            return [DS.Surface.canvas, DS.Surface.canvas]
         case .softSky:
-            return [
-                Color(red: 0.72, green: 0.84, blue: 0.95),
-                Color(red: 0.88, green: 0.92, blue: 0.97),
-                Color(red: 0.96, green: 0.94, blue: 0.90)
-            ]
+            if dark {
+                return [Color(red: 0.05, green: 0.07, blue: 0.10), Color(red: 0.08, green: 0.10, blue: 0.13)]
+            }
+            return [Color(red: 0.92, green: 0.95, blue: 0.98), Color(red: 0.97, green: 0.97, blue: 0.98)]
         case .warmSand:
-            return [
-                Color(red: 0.93, green: 0.86, blue: 0.76),
-                Color(red: 0.96, green: 0.91, blue: 0.84),
-                Color(red: 0.90, green: 0.82, blue: 0.72)
-            ]
+            if dark {
+                return [Color(red: 0.09, green: 0.08, blue: 0.07), Color(red: 0.12, green: 0.10, blue: 0.08)]
+            }
+            return [Color(red: 0.98, green: 0.96, blue: 0.93), Color(red: 0.96, green: 0.94, blue: 0.90)]
         case .mistForest:
-            return [
-                Color(red: 0.55, green: 0.68, blue: 0.58),
-                Color(red: 0.72, green: 0.80, blue: 0.72),
-                Color(red: 0.86, green: 0.88, blue: 0.82)
-            ]
+            if dark {
+                return [Color(red: 0.05, green: 0.08, blue: 0.07), Color(red: 0.08, green: 0.11, blue: 0.09)]
+            }
+            return [Color(red: 0.92, green: 0.96, blue: 0.93), Color(red: 0.96, green: 0.97, blue: 0.94)]
         case .duskRose:
-            return [
-                Color(red: 0.78, green: 0.62, blue: 0.68),
-                Color(red: 0.90, green: 0.78, blue: 0.76),
-                Color(red: 0.94, green: 0.88, blue: 0.84)
-            ]
+            if dark {
+                return [Color(red: 0.09, green: 0.06, blue: 0.08), Color(red: 0.12, green: 0.08, blue: 0.10)]
+            }
+            return [Color(red: 0.98, green: 0.94, blue: 0.95), Color(red: 0.97, green: 0.95, blue: 0.94)]
         case .slate:
-            return [
-                Color(red: 0.42, green: 0.48, blue: 0.56),
-                Color(red: 0.58, green: 0.62, blue: 0.68),
-                Color(red: 0.78, green: 0.80, blue: 0.84)
-            ]
-        case .photo:
-            return [
-                Color(.systemGray3),
-                Color(.systemGray5)
-            ]
+            if dark {
+                return [Color(red: 0.06, green: 0.07, blue: 0.08), Color(red: 0.10, green: 0.11, blue: 0.13)]
+            }
+            return [Color(red: 0.92, green: 0.94, blue: 0.96), Color(red: 0.96, green: 0.97, blue: 0.98)]
         }
     }
 
     var ambientHues: [CGFloat] {
         switch self {
+        case .system: return [210 / 360, 215 / 360, 220 / 360, 210 / 360]
         case .softSky: return [208 / 360, 200 / 360, 45 / 360, 220 / 360]
         case .warmSand: return [35 / 360, 28 / 360, 18 / 360, 42 / 360]
         case .mistForest: return [130 / 360, 145 / 360, 95 / 360, 160 / 360]
@@ -99,7 +85,7 @@ enum AppBackdropKeys {
     static let customImagePath = "appBackdropCustomImagePath"
     /// 0...1 — mapped to blur radius in `LiquidGlassBackdrop`.
     static let blurAmount = "appBackdropBlurAmount"
-    /// "true" when the user's custom wallpaper photo is dark (computed at save time).
+    /// Legacy wallpaper metadata; it no longer selects the app's appearance.
     static let customImageIsDark = "appBackdropCustomImageIsDark"
 }
 

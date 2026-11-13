@@ -142,6 +142,7 @@ struct RecoContext {
     let layerChoice: DayLayerChoice?
     /// Learned temperature from which the user wears short sleeves.
     let shortSleeveFromC: Double?
+    let weatherHistory: GarmentWeatherHistory
 
     init(
         desiredFormality: Int,
@@ -161,7 +162,8 @@ struct RecoContext {
         occasionStyle: OccasionStyleProfile = .empty,
         habitOccasion: CalendarOccasionKind? = nil,
         layerChoice: DayLayerChoice? = nil,
-        shortSleeveFromC: Double? = nil
+        shortSleeveFromC: Double? = nil,
+        weatherHistory: GarmentWeatherHistory = GarmentWeatherHistory()
     ) {
         self.desiredFormality = min(max(desiredFormality, 1), 5)
         self.temperatureC = temperatureC
@@ -181,6 +183,7 @@ struct RecoContext {
         self.habitOccasion = habitOccasion ?? occasionKind
         self.layerChoice = layerChoice
         self.shortSleeveFromC = shortSleeveFromC
+        self.weatherHistory = weatherHistory
     }
     
     // Temperature bucket helpers
@@ -654,7 +657,12 @@ final class AIRecommender {
         let heuristicWeight = 1.0 - learnedWeight
         
         let blended = (learned * learnedWeight) + (heuristic * heuristicWeight)
-        return max(0, min(1, blended + occasionFit(g, ctx: ctx) + sleeveFit(g, ctx: ctx)))
+        var result = max(0, min(1, blended + occasionFit(g, ctx: ctx) + sleeveFit(g, ctx: ctx)))
+        // Lifetime love cannot overwhelm the user's comfort at this temperature.
+        if g.thermalProfile.coverage <= 0.35, g.category == .bottom || g.category == .shoes {
+            result *= 0.25 + 0.75 * TemperatureComfort.garmentScore(g, context: ctx)
+        }
+        return result
     }
 
     /// Calendar occasion fit that doesn't fade as the model learns: the learned
@@ -898,8 +906,8 @@ final class AIRecommender {
     }
 
     /// Ranks whole looks instead of picking piece by piece: takes the best
-    /// `perSlot` candidates for top / bottom / shoes, scores every combination
-    /// as a look, then adds outer / accessory where they improve the look.
+    /// `perSlot` candidates for each core slot, scores separates or a one-piece
+    /// with shoes, then adds bounded outer / accessory choices.
     func rankLooks(
         from garments: [Garment],
         ctx: RecoContext,
@@ -920,7 +928,7 @@ final class AIRecommender {
             base.append((garment: locked, score: lockedScore))
             excludeSet.insert(locked.id)
         }
-        let lockedCategory = locked?.category
+        let lockedSlot = locked.map { OutfitSlot.from(garment: $0) }
 
         func pool(for category: Category) -> [Garment] {
             garments.filter { g in
@@ -935,11 +943,12 @@ final class AIRecommender {
             }
         }
 
-        // Candidate lists for the core slots.
-        var slotCandidates: [[(garment: Garment, score: Double)]] = []
-        for category in [Category.top, .bottom, .shoes] where category != lockedCategory {
-            let candidates = rankedSuggestions(
-                from: pool(for: category),
+        typealias Candidate = (garment: Garment, score: Double)
+        var candidatesBySlot: [OutfitSlot: [Candidate]] = [:]
+        for slot in [OutfitSlot.top, .bottom, .onePiece, .shoes] {
+            if slot == lockedSlot || lockedSlot?.conflictingSlots.contains(slot) == true { continue }
+            candidatesBySlot[slot] = rankedSuggestions(
+                from: pool(for: slot.allowedCategories[0]).filter { slot.accepts($0) },
                 k: perSlot,
                 ctx: ctx,
                 modelContext: modelContext,
@@ -947,22 +956,43 @@ final class AIRecommender {
                 penalizedIDs: penalizedIDs,
                 pairedWith: base.map { $0.garment }
             )
-            if !candidates.isEmpty {
-                slotCandidates.append(candidates)
-            }
         }
 
-        // Every combination of the core candidates.
-        var combos: [[(garment: Garment, score: Double)]] = [base]
-        for candidates in slotCandidates {
-            var next: [[(garment: Garment, score: Double)]] = []
-            next.reserveCapacity(combos.count * candidates.count)
-            for combo in combos {
-                for candidate in candidates {
-                    next.append(combo + [candidate])
+        func combinations(for slots: [OutfitSlot]) -> [[Candidate]] {
+            var result = [base]
+            for slot in slots {
+                guard let candidates = candidatesBySlot[slot], !candidates.isEmpty else { continue }
+                var next: [[Candidate]] = []
+                next.reserveCapacity(result.count * candidates.count)
+                for combo in result {
+                    for candidate in candidates { next.append(combo + [candidate]) }
                 }
+                result = next
             }
-            combos = next
+            return result
+        }
+
+        // At most perSlot³ separates plus perSlot² one-piece looks. Shoes are
+        // shared between branches; a dress is never combined with a bottom.
+        let hasSeparates = lockedSlot == .top || lockedSlot == .bottom ||
+            !(candidatesBySlot[.top] ?? []).isEmpty || !(candidatesBySlot[.bottom] ?? []).isEmpty
+        let hasOnePieces = lockedSlot == .onePiece || !(candidatesBySlot[.onePiece] ?? []).isEmpty
+        var combos: [[Candidate]] = []
+        if lockedSlot != .onePiece, hasSeparates || !hasOnePieces {
+            combos += combinations(for: [.top, .bottom, .shoes])
+        }
+        if hasOnePieces {
+            combos += combinations(for: [.onePiece, .shoes])
+        }
+
+        func hasOnePiece(_ look: ScoredLook) -> Bool {
+            look.garments.contains { OutfitSlot.onePiece.accepts($0) }
+        }
+
+        // Each structure keeps the one-variable-slot exception for small wardrobes.
+        func requiredNewPieces(for look: ScoredLook) -> Int {
+            let slots: [OutfitSlot] = hasOnePiece(look) ? [.onePiece, .shoes] : [.top, .bottom, .shoes]
+            return min(2, slots.filter { (candidatesBySlot[$0]?.count ?? 0) > 1 }.count)
         }
 
         var looks: [ScoredLook] = combos.compactMap { (combo) -> ScoredLook? in
@@ -983,29 +1013,31 @@ final class AIRecommender {
         }
         looks.sort { $0.score > $1.score }
 
-        // Keep at least two different pieces, and rotate bottoms among comparably
-        // good alternatives rather than changing only the top and shoes every time.
+        // Change two pieces whenever the eligible wardrobe allows it, and rotate
+        // bottoms among comparably good alternatives. One variable slot needs one change.
         var picked: [ScoredLook] = []
-        var bottomUses: [UUID: Int] = [:]
+        var pieceUses: [UUID: Int] = [:]
         while picked.count < limit {
             let eligible = looks.filter { look in
                 let ids = Set(look.garments.map(\.id))
-                return picked.allSatisfy { other in
-                    ids.subtracting(other.garments.map(\.id)).count >= min(2, ids.count)
+                return picked.isEmpty || picked.allSatisfy { other in
+                    let changedStructure = hasOnePiece(look) != hasOnePiece(other)
+                    let required = changedStructure ? 1 : requiredNewPieces(for: look)
+                    return required > 0 && ids.subtracting(other.garments.map(\.id)).count >= required
                 }
             }
             guard let bestScore = eligible.first?.score else { break }
             var choice = eligible[0]
             func uses(_ look: ScoredLook) -> Int {
-                guard lockedCategory != .bottom,
-                      let bottom = look.garments.first(where: { $0.category == .bottom }) else { return 0 }
-                return bottomUses[bottom.id, default: 0]
+                look.garments.filter { $0.id != locked?.id }.reduce(0) {
+                    $0 + pieceUses[$1.id, default: 0] * ($1.category == .bottom || $1.itemType?.isOnePiece == true ? 2 : 1)
+                }
             }
             for look in eligible.dropFirst() where look.score >= bestScore - 0.06 {
                 if uses(look) < uses(choice) { choice = look }
             }
             picked.append(choice)
-            if let bottom = choice.garments.first(where: { $0.category == .bottom }) { bottomUses[bottom.id, default: 0] += 1 }
+            for piece in choice.garments { pieceUses[piece.id, default: 0] += 1 }
         }
 
         guard includeOptionalLayers else { return picked }
@@ -1019,7 +1051,9 @@ final class AIRecommender {
         return picked.map { (look) -> ScoredLook in
             var pieces = look.garments
             var current = look
-            for category in [Category.outer, .accessory] where category != lockedCategory {
+            for category in [Category.outer, .accessory] {
+                if category == .outer, lockedSlot == .outer { continue }
+                if category == .accessory, pieces.contains(where: { $0.category == .accessory }) { continue }
                 // A warm, dry day has no weather layer; a light jacket over short
                 // sleeves is still offered on some days as a styling option.
                 var styleLayer = false

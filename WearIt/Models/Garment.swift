@@ -85,6 +85,15 @@ final class Garment {
     var unavailableUntil: Date?
     var createdAt: Date?
     var notes: String?
+
+    // Purchase facts are separate from creation time and photo-source metadata.
+    var shopProductID: String?
+    var shopProductURL: String?
+    var purchasedAt: Date?
+    var purchaseStore: String?
+    /// appConfirmation / manual; reserved for a future user-reviewed receipt import.
+    var purchaseSourceRaw: String?
+    @Attribute(.externalStorage) var purchaseReceiptData: Data?
     
     // MARK: - Migration Flag
     var migrationVersion: Int?

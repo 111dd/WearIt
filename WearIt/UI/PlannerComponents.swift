@@ -82,42 +82,118 @@ struct PlannerSuggestionActionStyle: ButtonStyle {
     }
 }
 
-/// The same live tiles grow to fill the row and wrap only when targets get too
-/// small. Balanced rows avoid an isolated final tile. No geometry state/cache.
-struct PlannerOutfitLayout: Layout {
-    private let spacing = DS.Spacing.xs
-    private let minimumWidth: CGFloat = 52
+/// A worn day look stays recognizable without keeping its editing controls open.
+struct PlannerWornLookSummary: View {
+    let garments: [Garment]
+    let onExpand: () -> Void
 
-    private func metrics(width: CGFloat, count: Int) -> (columns: Int, width: CGFloat, height: CGFloat, rows: Int) {
-        guard count > 0 else { return (1, 0, 0, 0) }
+    var body: some View {
+        Button(action: onExpand) {
+            HStack(spacing: DS.Spacing.sm) {
+                HStack(spacing: -DS.Spacing.md) {
+                    ForEach(Array(garments.prefix(3)), id: \.id) { garment in
+                        DSGarmentThumbnail(garment, size: .small)
+                    }
+                }
+                .fixedSize()
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                    HStack(spacing: DS.Spacing.xxs) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("planner_swipe_status_worn")
+                            .foregroundStyle(.primary)
+                    }
+                    .font(.subheadline.weight(.semibold))
+
+                    Text("planner_show_worn_look")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, DS.Spacing.sm)
+            .padding(.vertical, DS.Spacing.xs)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                    .fill(DS.Surface.raised.opacity(0.7))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.sm))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(String(localized: "planner_worn_day_summary"))
+        .accessibilityValue(String(localized: "planner_details_collapsed"))
+        .accessibilityHint(String(localized: "planner_show_worn_look"))
+    }
+}
+
+/// Whole-garment photos adapt to the actual item count without shrinking a
+/// complete look into a strip of tiny thumbnails. No geometry state/cache.
+struct PlannerOutfitLayout: Layout {
+    var minimumTileWidth: CGFloat = 88
+
+    private let spacing = DS.Spacing.xs
+    private let maximumTileWidth: CGFloat = 180
+    private let maximumColumns = 3
+
+    private struct Metrics {
+        let count: Int
+        let rows: Int
+        let tileWidth: CGFloat
+
+        func items(in row: Int) -> Int {
+            count / rows + (row < count % rows ? 1 : 0)
+        }
+    }
+
+    private func metrics(width: CGFloat, count: Int) -> Metrics {
+        guard count > 0 else { return Metrics(count: 0, rows: 0, tileWidth: 0) }
+        let minimumWidth = max(44, minimumTileWidth)
         let fittingColumns = max(1, Int((width + spacing) / (minimumWidth + spacing)))
-        let initialColumns = min(count, fittingColumns)
+        let initialColumns = min(count, maximumColumns, fittingColumns)
         let rows = (count + initialColumns - 1) / initialColumns
+        // Distribute a remainder across rows instead of leaving one final item.
         let columns = (count + rows - 1) / rows
-        let tileWidth = max(0, (width - CGFloat(columns - 1) * spacing) / CGFloat(columns))
-        return (columns, tileWidth, tileWidth / DS.AspectRatio.garmentTile, rows)
+        let tileWidth = min(maximumTileWidth, max(0, (width - CGFloat(columns - 1) * spacing) / CGFloat(columns)))
+        return Metrics(count: count, rows: rows, tileWidth: tileWidth)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let proposedWidth = proposal.width ?? 320
         let width = proposedWidth.isFinite ? max(0, proposedWidth) : 320
         let grid = metrics(width: width, count: subviews.count)
-        return CGSize(width: width, height: CGFloat(grid.rows) * grid.height + CGFloat(max(0, grid.rows - 1)) * spacing)
+        let tileHeight = grid.tileWidth / DS.AspectRatio.garmentTile
+        return CGSize(width: width, height: CGFloat(grid.rows) * tileHeight + CGFloat(max(0, grid.rows - 1)) * spacing)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let grid = metrics(width: bounds.width, count: subviews.count)
-        for (index, subview) in subviews.enumerated() {
-            let column = index % grid.columns
-            subview.place(
-                at: CGPoint(
-                    x: bounds.minX + CGFloat(column) * (grid.width + spacing),
-                    y: bounds.minY + CGFloat(index / grid.columns) * (grid.height + spacing)
-                ),
-                // SwiftUI mirrors layout coordinates for RTL; do not reverse them again.
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: grid.width, height: grid.height)
-            )
+        let tileHeight = grid.tileWidth / DS.AspectRatio.garmentTile
+        var index = 0
+        for row in 0..<grid.rows {
+            let rowCount = grid.items(in: row)
+            let rowWidth = CGFloat(rowCount) * grid.tileWidth + CGFloat(rowCount - 1) * spacing
+            let inset = max(0, (bounds.width - rowWidth) / 2)
+            for column in 0..<rowCount {
+                subviews[index].place(
+                    at: CGPoint(
+                        x: bounds.minX + inset + CGFloat(column) * (grid.tileWidth + spacing),
+                        y: bounds.minY + CGFloat(row) * (tileHeight + spacing)
+                    ),
+                    // SwiftUI mirrors coordinates for RTL; do not reverse them again.
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: grid.tileWidth, height: tileHeight)
+                )
+                index += 1
+            }
         }
     }
 }

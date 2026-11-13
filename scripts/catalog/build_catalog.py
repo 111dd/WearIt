@@ -6,8 +6,8 @@ Product / ProductGroup and Open Graph data every shop publishes for search engin
 are read from /products.json instead. Only raw fields are stored; the app maps them to its taxonomy
 through ProductPageMetadataService.makeProduct / ProductFieldMapper, so mapping lives in one place.
 
-Runs are incremental: pass the previous catalog and each run fetches new URLs first, then the
-oldest ones, up to the store's page budget. Products whose URL left the sitemap are dropped.
+Runs are incremental: each run reserves a refresh budget for existing items before discovering
+new products. Products whose URL left the sitemap are dropped.
 
 Usage: python3 scripts/catalog/build_catalog.py --country IL --out out/il [--previous prev.json]
 No third-party packages."""
@@ -32,7 +32,7 @@ USER_AGENT = "WearItCatalogBot/0.1 (+https://111dd.github.io/WearIt/)"
 TIMEOUT = 25
 MAX_SITEMAPS = 60
 DESCRIPTION_LIMIT = 400
-IMAGE_LIMIT = 4
+PRICE_EVIDENCE_VERSION = 3
 PRODUCT_SITEMAP_HINT = re.compile(r"product|prod|item|catalog", re.I)
 
 
@@ -47,7 +47,10 @@ def now_iso():
 
 
 def fetch(url, accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"):
-    request = urllib.request.Request(url, headers={
+    # Castro's sitemaps contain literal Hebrew paths. urllib otherwise fails before
+    # making a request; keep existing escapes and URL separators intact.
+    request_url = urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%")
+    request = urllib.request.Request(request_url, headers={
         "User-Agent": USER_AGENT,
         "Accept": accept,
         "Accept-Language": "he-IL,he;q=0.9,en;q=0.6",
@@ -108,6 +111,10 @@ def discover_product_urls(store, robots, log):
         time.sleep(store.get("delaySeconds", 1.0) / 2)
     if pattern:
         pages = [u for u in pages if pattern.search(u)]
+    elif urllib.parse.urlparse(base).hostname in ("www.terminalx.com", "terminalx.com"):
+        # Their sitemap includes 90k+ navigation/category routes. Product routes
+        # are a letter followed by a 5-digit group or 9-digit color SKU.
+        pages = [u for u in pages if re.fullmatch(r"/[a-z]\d{5}(?:\d{4})?/?", urllib.parse.urlparse(u).path, re.I)]
     return list(dict.fromkeys(pages))
 
 
@@ -152,7 +159,7 @@ def text(value):
         return ", ".join(p for p in parts if p) or None
     value = html.unescape(re.sub(r"<[^>]+>", " ", str(value)))
     value = re.sub(r"\s+", " ", value).strip()
-    return value or None
+    return value if value and value.lower() not in ("null", "undefined") else None
 
 
 def images_of(value, page_url):
@@ -166,6 +173,20 @@ def images_of(value, page_url):
         if isinstance(item, str) and item.strip():
             urls.append(urllib.parse.urljoin(page_url, item.strip()))
     return urls
+
+
+def distinct_images(urls):
+    # Magento repeats one photo through thumbnail/gallery cache URLs. Keep one
+    # angle per source asset, while retaining every distinct same-color photo.
+    images, seen = [], set()
+    for url in urls:
+        parsed = urllib.parse.urlparse(url)
+        path = re.sub(r"/catalog/product/cache/[^/]+/", "/catalog/product/", parsed.path)
+        key = (parsed.netloc.lower(), path)
+        if key not in seen:
+            seen.add(key)
+            images.append(url)
+    return images
 
 
 def as_list(value):
@@ -343,6 +364,168 @@ def has_ambiguous_offers(offers):
     return any("AggregateOffer" in types_of(offer) or offer.get("offers") for offer in nodes)
 
 
+def retailer_product_details(page, page_url, price, currency):
+    """Read purchase facts from the exact product/selected color, never related items.
+
+    These are public server-rendered product fields, not coupon/member/basket prices.
+    Keep the JSON-LD current price authoritative and require an exact same-currency match.
+    """
+    parsed = urllib.parse.urlparse(page_url)
+    host = (parsed.hostname or "").lower()
+    decoder = json.JSONDecoder()
+    details = {}
+
+    def gallery_images(entries):
+        entries = [entry for entry in as_list(entries) if isinstance(entry, dict)]
+        entries.sort(key=lambda entry: positive_price(entry.get("position")) or 0)
+        return [image for entry in entries if not entry.get("disabled") and entry.get("type", "image") == "image"
+                for image in images_of(entry.get("full") or entry.get("img") or entry.get("url"), page_url)]
+
+    def regular_price(bounds):
+        pairs = []
+        for key in ("minimum_price", "maximum_price"):
+            bound = bounds.get(key) or {}
+            final, regular = bound.get("final_price") or {}, bound.get("regular_price") or {}
+            if final.get("currency") != currency or regular.get("currency") != currency:
+                return None
+            pairs.append((positive_price(final.get("value")), positive_price(regular.get("value"))))
+        if price is not None and len(set(pairs)) == 1 and pairs[0][0] == price and pairs[0][1] is not None and pairs[0][1] > price:
+            return pairs[0][1]
+        return None
+
+    if host in ("www.terminalx.com", "terminalx.com"):
+        marker = re.search(r'window\.__INITIAL_STATE__\s*=\s*', page)
+        if not marker:
+            return details
+        # The SSR serializer splits script tags with literal concatenation.
+        # Normalize those two known sequences; never evaluate JavaScript.
+        raw = page[marker.end():].replace('<"+"script', '<script').replace('<"+"/script', '</script')
+        try:
+            state, _ = decoder.raw_decode(raw)
+            product = state["productPageStoreData"]["data"]["mainProduct"]
+        except (ValueError, TypeError, KeyError):
+            return details
+        if not isinstance(product, dict):
+            return details
+        sku = str(product.get("sku") or "").casefold()
+        route = urllib.parse.unquote(parsed.path).strip("/").split("/")[0].casefold()
+        if not sku or sku != route:
+            return details
+        details["images"] = gallery_images(product.get("media_gallery"))
+        category_names = [text(category.get("name")) for category in as_list(product.get("categories")) if isinstance(category, dict)]
+        category_names = list(dict.fromkeys(name for name in category_names if name))
+        details["categoryPath"] = " > ".join(category_names) or None
+        details["gender"] = guess_gender(" ".join(category_names))
+        material = text(product.get("fabric"))
+        details["material"] = material if material and material.lower() not in ("null", "none", "undefined") else None
+
+        # Configurations include other colors. Parent SKU ties each child back to
+        # the page's color before using its gallery, size scale or stock.
+        scoped_variants = []
+        for variant in as_list(product.get("variants")):
+            child = variant.get("product") if isinstance(variant, dict) else None
+            if not isinstance(child, dict):
+                continue
+            parent = (child.get("parent_product") or {}).get("product") or {}
+            if str(parent.get("sku") or "").casefold() == sku:
+                scoped_variants.append((variant, child))
+                details["images"] += gallery_images(child.get("media_gallery"))
+        sizes, in_stock, known = [], [], []
+        for variant, child in scoped_variants:
+            size = text(child.get("size_scale")) or next((text(a.get("label")) for a in as_list(variant.get("attributes"))
+                                                         if isinstance(a, dict) and a.get("code") == "size"), None)
+            if not size:
+                continue
+            sizes.append(size)
+            available = availability_of(str(child.get("stock_status2") or "").replace("_", ""))
+            known.append(available is not None)
+            if available is True:
+                in_stock.append(size)
+        if sizes:
+            details.update(sizes=list(dict.fromkeys(sizes)), inStockSizes=list(dict.fromkeys(in_stock)),
+                           sizeAvailabilityKnown=bool(known) and all(known))
+        # Both bounds must describe the same offer; a cheapest size cannot borrow
+        # the regular price from a more expensive size or another color.
+        details["originalPrice"] = regular_price(product.get("price_range") or {})
+        if details["originalPrice"] is None and scoped_variants:
+            live = [child for _, child in scoped_variants if availability_of(str(child.get("stock_status2") or "").replace("_", "")) is True]
+            regulars = [regular_price(child.get("price_range") or {}) for child in live]
+            if regulars and None not in regulars and len(set(regulars)) == 1:
+                details["originalPrice"] = regulars[0]
+
+    if host in ("www.castro.com", "castro.com"):
+        # Product identity comes from the current product's hidden input and URL key.
+        from html.parser import HTMLParser
+        class ProductInputs(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.ids = set()
+                self.images = []
+            def handle_starttag(self, tag, attrs):
+                attributes = dict(attrs)
+                if tag == "input" and attributes.get("name") == "product":
+                    route = urllib.parse.unquote(parsed.path).strip("/").split("/")[-1]
+                    if attributes.get("url_key") == route and attributes.get("value"):
+                        self.ids.add(attributes["value"])
+                if attributes.get("data-gallery-role") == "gallery-placeholder":
+                    try:
+                        config = json.loads(attributes.get("data-mage-init") or "{}")
+                    except ValueError:
+                        return
+                    for key in ("Idus_Product/js/gallery", "mage/gallery/gallery"):
+                        self.images += gallery_images((config.get(key) or {}).get("data"))
+        inputs = ProductInputs()
+        inputs.feed(page)
+        if len(inputs.ids) != 1:
+            return details
+        details["images"] = inputs.images
+        for marker in re.finditer(r'"jsonConfig"\s*:\s*', page):
+            try:
+                config, _ = decoder.raw_decode(page[marker.end():])
+            except ValueError:
+                continue
+            if not isinstance(config, dict) or str(config.get("productId")) not in inputs.ids:
+                continue
+            color = next((a for a in (config.get("attributes") or {}).values() if isinstance(a, dict) and a.get("code") == "color"), None)
+            if not color or not color.get("default"):
+                continue
+            option = next((o for o in color.get("options", []) if str(o.get("id")) == str(color["default"])), None)
+            stock = (option or {}).get("products") or {}
+            if not isinstance(stock, dict):
+                continue
+            ids = stock.get("stock") or []
+            index = config.get("index") or {}
+            all_ids = [str(item_id) for item_id, attributes in index.items()
+                       if isinstance(attributes, dict) and str(attributes.get(str(color["id"]))) == str(color["default"])]
+            details["color"] = text((option or {}).get("label"))
+            for item_id in (all_ids or ids):
+                details["images"] += gallery_images((config.get("images") or {}).get(str(item_id)))
+            size = next((a for a in (config.get("attributes") or {}).values() if isinstance(a, dict) and a.get("code") == "size"), None)
+            if size and all_ids:
+                size_labels = {str(o.get("id")): text(o.get("label")) for o in size.get("options", []) if isinstance(o, dict)}
+                sizes, in_stock = [], []
+                live_ids = {str(item_id) for item_id in ids}
+                for item_id in all_ids:
+                    label = size_labels.get(str(index[item_id].get(str(size["id"]))))
+                    if label:
+                        sizes.append(label)
+                        if item_id in live_ids:
+                            in_stock.append(label)
+                if sizes:
+                    details.update(sizes=list(dict.fromkeys(sizes)), inStockSizes=list(dict.fromkeys(in_stock)),
+                                   sizeAvailabilityKnown="stock" in stock)
+            prices = config.get("optionPrices") or {}
+            pairs = []
+            for item_id in ids:
+                offer = prices.get(str(item_id)) or {}
+                pairs.append((positive_price((offer.get("finalPrice") or {}).get("amount")),
+                              positive_price((offer.get("oldPrice") or {}).get("amount"))))
+            if currency == "ILS" and pairs and len(set(pairs)) == 1 and pairs[0][0] == price and pairs[0][1] is not None and pairs[0][1] > price:
+                details["originalPrice"] = pairs[0][1]
+            break
+    return details
+
+
 def parse_product_page(page, page_url):
     """Raw product fields from one page, or None if the page isn't a product."""
     nodes = list(json_ld_blocks(page))
@@ -383,13 +566,27 @@ def parse_product_page(page, page_url):
     same_currency = not currency or not meta_currency or currency == meta_currency
     if original is None and unambiguous_page and same_currency and meta_price == price and explicit_original is not None and price is not None and explicit_original > price:
         original = explicit_original
+    try:
+        retail = retailer_product_details(page, page_url, price, currency) if not variants else {}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        # A retailer changing its optional configuration must not discard an
+        # otherwise usable JSON-LD product or invent purchase facts.
+        retail = {}
+    if original is None:
+        original = retail.get("originalPrice")
+    if retail.get("sizes"):
+        sizes = retail["sizes"]
+        in_stock_sizes = retail.get("inStockSizes", [])
+        size_availability_known = retail.get("sizeAvailabilityKnown", False)
+        if size_availability_known:
+            available = bool(in_stock_sizes)
     title = text(concrete.get("name")) or text(product.get("name")) or meta_content(page, "og:title")
     if not title:
         return None
     images = images_of(concrete.get("image"), page_url)
     for variant in color_variants:
-        if len(images) < IMAGE_LIMIT:
-            images += [i for i in images_of(variant.get("image"), page_url) if i not in images]
+        images += [i for i in images_of(variant.get("image"), page_url) if i not in images]
+    images = retail.get("images", []) + images
     parent_color = text(product.get("color"))
     concrete_color = text(concrete.get("color")) or parent_color
     if not images and color_scope_known and parent_color and concrete_color and parent_color.lower() == concrete_color.lower():
@@ -407,14 +604,14 @@ def parse_product_page(page, page_url):
         "title": title,
         "brand": text(concrete.get("brand")) or text(product.get("brand")) or meta_content(page, "product:brand"),
         "description": description[:DESCRIPTION_LIMIT] if description else None,
-        "color": text(concrete.get("color")) or (text(product.get("color")) if not isinstance(product.get("color"), list) else None) or (meta_content(page, "product:color") if not variants else None),
-        "material": text(concrete.get("material")) or text(product.get("material")),
-        "categoryPath": category_path or text(product.get("category")),
-        "gender": guess_gender(text(audience.get("suggestedGender")), text(product.get("gender")), title, category_path, canonical),
+        "color": text(concrete.get("color")) or (text(product.get("color")) if not isinstance(product.get("color"), list) else None) or retail.get("color") or (meta_content(page, "product:color") if not variants else None),
+        "material": retail.get("material") or text(concrete.get("material")) or text(product.get("material")),
+        "categoryPath": category_path or retail.get("categoryPath") or text(product.get("category")),
+        "gender": guess_gender(text(audience.get("suggestedGender")), text(product.get("gender")), title, retail.get("gender"), category_path, canonical),
         "sizes": sizes,
         "inStockSizes": in_stock_sizes,
         "sizeAvailabilityKnown": size_availability_known,
-        "images": list(dict.fromkeys(images))[:IMAGE_LIMIT],
+        "images": distinct_images(images),
         "price": price,
         "originalPrice": original,
         "originalPriceVerified": original is not None,
@@ -475,7 +672,7 @@ def shopify_products(store, log):
                 "sizes": sizes,
                 "inStockSizes": in_stock,
                 "sizeAvailabilityKnown": bool(size_index is not None and color_variants) and all(isinstance(v.get("available"), bool) for v in color_variants),
-                "images": [i.get("src") for i in images[:IMAGE_LIMIT] if i.get("src")],
+                "images": distinct_images([i.get("src") for i in images if i.get("src")]),
                 "price": price,
                 "originalPrice": original,
                 "originalPriceVerified": original is not None,
@@ -522,21 +719,33 @@ def crawl_store(store, previous_items, country):
     known = {item["sourcePage"]: item for item in previous_items.values() if item.get("sourcePage")}
     live = set(urls)
     fresh = [u for u in urls if u not in known]
-    stale = sorted((u for u in urls if u in known), key=lambda u: known[u].get("fetchedAt", ""))
-    budget = store.get("maxPagesPerRun", 1000)
-    to_fetch = (fresh + stale)[:budget]
+    stale = sorted((u for u in urls if u in known),
+                   key=lambda u: (known[u].get("priceEvidenceVersion", 0) >= PRICE_EVIDENCE_VERSION, known[u].get("fetchedAt", "")))
+    budget = max(0, store.get("maxPagesPerRun", 1000))
+    # Reserve most of each run for refreshing prices. New sitemap URLs previously
+    # starved existing items, leaving old prices and unverified discounts indefinitely.
+    refresh_count = min(len(stale), max(1, budget * 3 // 5)) if budget else 0
+    refresh = stale[:refresh_count]
+    to_fetch = (refresh + fresh[:max(0, budget - len(refresh))])[:budget]
+    if len(to_fetch) < budget:
+        to_fetch += stale[refresh_count:refresh_count + budget - len(to_fetch)]
 
     results = {u: item for u, item in known.items() if u in live}
-    failures = not_products = 0
+    failures = not_products = attempted = refreshed = consecutive_failures = 0
     for page_url in to_fetch:
+        attempted += 1
         try:
             product = parse_product_page(fetch(page_url), page_url)
+            consecutive_failures = 0
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             failures += 1
+            consecutive_failures += 1
+            if isinstance(error, urllib.error.HTTPError) and error.code in (404, 410):
+                results.pop(page_url, None)
             if failures <= 5:
                 log.append(f"page failed {page_url}: {error}")
-            if failures >= 25 and failures > len(to_fetch) // 2:
-                log.append("too many failures, stopping this store")
+            if consecutive_failures >= 25 or (failures >= 25 and failures > len(to_fetch) // 2):
+                log.append("too many failures, stopping this store; unrefreshed products kept with their original fetch dates")
                 break
             continue
         finally:
@@ -546,13 +755,18 @@ def crawl_store(store, previous_items, country):
             results.pop(page_url, None)
             continue
         product.update(id=item_id(store["id"], product["url"]), store=store["id"], country=country,
-                       sourcePage=page_url, fetchedAt=now_iso(), currency=product["currency"] or store.get("currency"))
+                       sourcePage=page_url, fetchedAt=now_iso(), priceEvidenceVersion=PRICE_EVIDENCE_VERSION, currency=product["currency"] or store.get("currency"))
         results[page_url] = product
+        refreshed += 1
 
     items = list({item["id"]: item for item in results.values()}.values())
     report = {
         "status": "ok", "source": "sitemap", "items": len(items), "productUrls": len(urls),
-        "fetched": len(to_fetch), "failed": failures, "notProducts": not_products,
+        "scheduled": len(to_fetch), "attempted": attempted, "fetched": attempted - failures,
+        "refreshed": refreshed, "failed": failures, "notProducts": not_products,
+        "verifiedDiscounts": sum(bool(item.get("originalPriceVerified") and item.get("originalPrice")
+                                      and item.get("price") and item["originalPrice"] > item["price"]) for item in items),
+        "missingImages": sum(not item.get("images") for item in items),
         "seconds": round(time.time() - started), "log": log[-20:],
     }
     return items, report

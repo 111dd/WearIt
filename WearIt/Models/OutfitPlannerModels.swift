@@ -104,8 +104,25 @@ enum OutfitSlot: String, Codable, CaseIterable, Identifiable, Hashable {
     case shoes
     case outer
     case accessory
+    case onePiece
+    case accessory2, accessory3, accessory4, accessory5, accessory6
     
     var id: String { rawValue }
+
+    static let accessorySlots: [OutfitSlot] = [.accessory, .accessory2, .accessory3, .accessory4, .accessory5, .accessory6]
+    static let displayOrder: [OutfitSlot] = [.onePiece, .top, .bottom, .shoes, .outer] + accessorySlots
+
+    var isAccessory: Bool { Self.accessorySlots.contains(self) }
+
+    /// Structural alternatives are exclusive only when making an explicit edit.
+    /// Reading a stored plan must never discard its assignments or wear history.
+    var conflictingSlots: Set<OutfitSlot> {
+        switch self {
+        case .onePiece: return [.top, .bottom]
+        case .top, .bottom: return [.onePiece]
+        default: return []
+        }
+    }
     
     var title: String {
         switch self {
@@ -114,6 +131,9 @@ enum OutfitSlot: String, Codable, CaseIterable, Identifiable, Hashable {
         case .shoes: return String(localized: "slot_shoes")
         case .outer: return String(localized: "slot_outer")
         case .accessory: return String(localized: "slot_accessory")
+        case .onePiece: return String(localized: "slot_one_piece")
+        case .accessory2, .accessory3, .accessory4, .accessory5, .accessory6:
+            return String(localized: "slot_additional_accessory")
         }
     }
     
@@ -124,7 +144,31 @@ enum OutfitSlot: String, Codable, CaseIterable, Identifiable, Hashable {
         case .shoes: return [.shoes]
         case .outer: return [.outer]
         case .accessory: return [.accessory]
+        case .onePiece: return [.top]
+        case .accessory2, .accessory3, .accessory4, .accessory5, .accessory6:
+            return [.accessory]
         }
+    }
+
+    func accepts(_ garment: Garment) -> Bool {
+        guard allowedCategories.contains(garment.category) else { return false }
+        if self == .onePiece { return garment.itemType?.isOnePiece == true }
+        if self == .top { return garment.itemType?.isOnePiece != true }
+        return true
+    }
+
+    static func from(garment: Garment) -> OutfitSlot {
+        if garment.category == .top, garment.itemType?.isOnePiece == true { return .onePiece }
+        return from(category: garment.category)
+    }
+
+    /// Retains an existing accessory's identity before taking the next free place.
+    static func allocationSlot(for garment: Garment, assignments: [OutfitSlot: UUID]) -> OutfitSlot? {
+        if let existing = displayOrder.first(where: { assignments[$0] == garment.id && $0.accepts(garment) }) { return existing }
+        if garment.category == .accessory {
+            return accessorySlots.first(where: { assignments[$0] == nil })
+        }
+        return from(garment: garment)
     }
     
     static func from(category: Category) -> OutfitSlot {
@@ -272,6 +316,8 @@ struct PlannerDayState: Identifiable, Equatable {
         lhs.useEveningLook == rhs.useEveningLook &&
         lhs.eveningUsesDayBottom == rhs.eveningUsesDayBottom &&
         lhs.eveningLinkedSlots == rhs.eveningLinkedSlots &&
+        lhs.feedback == rhs.feedback &&
+        lhs.temperatureFeedback == rhs.temperatureFeedback &&
         lhs.slots == rhs.slots &&
         lhs.eveningSlots == rhs.eveningSlots &&
         lhs.dayLookWearStatus == rhs.dayLookWearStatus &&
@@ -345,7 +391,7 @@ final class PlannerBoardState {
         toDay: Int,
         toSlot: OutfitSlot
     ) -> Bool {
-        guard fromDay < days.count, toDay < days.count else { return false }
+        guard days.indices.contains(fromDay), days.indices.contains(toDay) else { return false }
         guard fromSlot == toSlot else {
             // Only allow same-slot swaps
             alertMessage = String(localized: "swap_error_different_slots")
@@ -363,6 +409,13 @@ final class PlannerBoardState {
         // Get current garment IDs
         let fromGarmentID = days[fromDay].garmentID(for: fromSlot)
         let toGarmentID = days[toDay].garmentID(for: toSlot)
+
+        if (toGarmentID != nil && fromSlot.conflictingSlots.contains(where: { days[fromDay].isLocked($0) && days[fromDay].garmentID(for: $0) != nil })) ||
+            (fromGarmentID != nil && toSlot.conflictingSlots.contains(where: { days[toDay].isLocked($0) && days[toDay].garmentID(for: $0) != nil })) {
+            alertMessage = String(localized: "assign_error_structure_locked")
+            showUnavailableAlert = true
+            return false
+        }
         
         // Block duplicates across other days
         if let fromGarmentID, isGarmentUsedOutside(fromGarmentID, excludingDays: [fromDay, toDay]) {
@@ -377,6 +430,12 @@ final class PlannerBoardState {
         }
         
         // Perform the swap
+        if toGarmentID != nil {
+            for conflict in fromSlot.conflictingSlots { days[fromDay].setGarment(nil, for: conflict) }
+        }
+        if fromGarmentID != nil {
+            for conflict in toSlot.conflictingSlots { days[toDay].setGarment(nil, for: conflict) }
+        }
         days[fromDay].setGarment(toGarmentID, for: fromSlot)
         days[toDay].setGarment(fromGarmentID, for: toSlot)
         
@@ -392,12 +451,12 @@ final class PlannerBoardState {
         allowUnavailable: Bool = false,
         allowRepeats: Bool = false
     ) -> Bool {
-        guard dayIndex < days.count else { return false }
+        guard days.indices.contains(dayIndex),
+              let garment = garments.first(where: { $0.id == garmentID }),
+              slot.accepts(garment) else { return false }
         
         // Check if garment is available
-        if !allowUnavailable,
-           let garment = garments.first(where: { $0.id == garmentID }),
-           garment.isCurrentlyUnavailable {
+        if !allowUnavailable, garment.isCurrentlyUnavailable {
             alertMessage = String(localized: "assign_error_unavailable")
             showUnavailableAlert = true
             return false
@@ -409,18 +468,40 @@ final class PlannerBoardState {
             showUnavailableAlert = true
             return false
         }
+
+        // A saved dress may still live under the legacy top key. Interpret its
+        // garment type for an explicit edit without rewriting the stored plan.
+        let conflictingSlots = slot.conflictingSlots.union(OutfitSlot.displayOrder.filter { existingSlot in
+            guard let existingID = days[dayIndex].garmentID(for: existingSlot),
+                  let existing = garments.first(where: { $0.id == existingID }) else { return false }
+            return slot.conflictingSlots.contains(OutfitSlot.from(garment: existing))
+        })
+        if conflictingSlots.contains(where: { days[dayIndex].isLocked($0) && days[dayIndex].garmentID(for: $0) != nil }) {
+            alertMessage = String(localized: "assign_error_structure_locked")
+            showUnavailableAlert = true
+            return false
+        }
+
+        let previousSlots = OutfitSlot.displayOrder.filter { $0 != slot && days[dayIndex].garmentID(for: $0) == garmentID }
+        if previousSlots.contains(where: { days[dayIndex].isLocked($0) }) {
+            alertMessage = String(localized: "swap_error_locked")
+            showUnavailableAlert = true
+            return false
+        }
         
         // Check if garment would create duplicate
         if !allowRepeats, isGarmentUsedElsewhere(garmentID, excludingDay: dayIndex) {
-            // Remove from other day first (if not locked)
+            // Validate every source before making any change.
+            if days.enumerated().contains(where: { index, day in
+                index != dayIndex && OutfitSlot.allCases.contains(where: { day.garmentID(for: $0) == garmentID && day.isLocked($0) })
+            }) {
+                alertMessage = String(localized: "swap_error_duplicate")
+                showUnavailableAlert = true
+                return false
+            }
             for (index, day) in days.enumerated() where index != dayIndex {
                 for slot in OutfitSlot.allCases {
                     if day.garmentID(for: slot) == garmentID {
-                        if day.isLocked(slot) {
-                            alertMessage = String(localized: "swap_error_duplicate")
-                            showUnavailableAlert = true
-                            return false
-                        }
                         days[index].setGarment(nil, for: slot)
                     }
                 }
@@ -428,13 +509,15 @@ final class PlannerBoardState {
         }
         
         // Assign to slot
+        for conflict in conflictingSlots { days[dayIndex].setGarment(nil, for: conflict) }
+        for previous in previousSlots { days[dayIndex].setGarment(nil, for: previous) }
         days[dayIndex].setGarment(garmentID, for: slot)
         return true
     }
     
     /// Clear all assignments for a day
     func clearDay(_ dayIndex: Int) {
-        guard dayIndex < days.count else { return }
+        guard days.indices.contains(dayIndex) else { return }
         for slot in OutfitSlot.allCases {
             days[dayIndex].setGarment(nil, for: slot)
         }
@@ -447,27 +530,65 @@ final class PlannerBoardState {
     
     /// Set outfit from garment array (legacy compatibility)
     func setOutfit(forDay dayIndex: Int, garments: [Garment], overwriteExisting: Bool = true) {
-        guard dayIndex < days.count else { return }
-        
+        guard days.indices.contains(dayIndex) else { return }
+        let original = days[dayIndex]
+        var updated = original
+
+        // Reject a structural replacement before clearing any existing pieces.
+        if overwriteExisting, garments.contains(where: { garment in
+            let slot = OutfitSlot.from(garment: garment)
+            return slot.conflictingSlots.contains(where: {
+                original.isLocked($0) && original.garmentID(for: $0) != nil
+            })
+        }) {
+            alertMessage = String(localized: "assign_error_structure_locked")
+            showUnavailableAlert = true
+            return
+        }
+
         if overwriteExisting {
             // Clear non-locked slots first
             for slot in OutfitSlot.allCases {
-                if !days[dayIndex].isLocked(slot) {
-                    days[dayIndex].setGarment(nil, for: slot)
+                if !updated.isLocked(slot) {
+                    updated.setGarment(nil, for: slot)
                 }
             }
         }
-        
-        // Assign garments to appropriate slots
-        for garment in garments {
-            let slot = OutfitSlot.from(category: garment.category)
-            if !days[dayIndex].isLocked(slot) && days[dayIndex].garmentID(for: slot) == nil {
-                days[dayIndex].setGarment(garment.id, for: slot)
-            }
+
+        // Place retained IDs first so adding or removing another accessory does
+        // not move their stable slot keys (locks and evening links use those keys).
+        let existingAssignments = original.slots.compactMapValues(\.garmentID)
+        let orderedGarments = garments.filter { garment in
+            OutfitSlot.displayOrder.contains { existingAssignments[$0] == garment.id && $0.accepts(garment) }
+        } + garments.filter { garment in
+            !OutfitSlot.displayOrder.contains { existingAssignments[$0] == garment.id && $0.accepts(garment) }
         }
-        
+
+        // Keep a single core structure and preserve each locked accessory.
+        var assignedCore: Set<OutfitSlot> = []
+        for garment in orderedGarments {
+            let assignments = updated.slots.compactMapValues(\.garmentID)
+            guard !assignments.values.contains(garment.id) else { continue }
+            let previousSlot = OutfitSlot.displayOrder.first {
+                existingAssignments[$0] == garment.id && $0.accepts(garment)
+                    && (assignments[$0] == nil || assignments[$0] == garment.id)
+            }
+            guard let slot = previousSlot ?? OutfitSlot.allocationSlot(for: garment, assignments: assignments),
+                  slot.accepts(garment),
+                  !updated.isLocked(slot),
+                  updated.garmentID(for: slot) == nil,
+                  slot.conflictingSlots.isDisjoint(with: assignedCore),
+                  overwriteExisting || !slot.conflictingSlots.contains(where: { updated.garmentID(for: $0) != nil }),
+                  !slot.conflictingSlots.contains(where: { updated.isLocked($0) && updated.garmentID(for: $0) != nil }) else { continue }
+            for conflict in slot.conflictingSlots { updated.setGarment(nil, for: conflict) }
+            updated.setGarment(garment.id, for: slot)
+            assignedCore.insert(slot)
+        }
+
         // Store for legacy compatibility
-        days[dayIndex].suggestedOutfit = garments
+        let assignedIDs = Set(updated.assignedGarmentIDs)
+        updated.suggestedOutfit = garments.filter { assignedIDs.contains($0.id) }
+        days[dayIndex] = updated
     }
 }
 

@@ -20,6 +20,8 @@ enum AccountDataService {
     /// Call it and reset the gate in the same main-actor turn, so no screen renders a deleted model.
     /// Returns the deleted garments' IDs for `deleteCloudPhotos`.
     static func deleteStoredData(context: ModelContext) -> [UUID] {
+        ShopRankingCoordinator.shared.reset()
+        ShopFeedbackStore.shared.reset()
         let garmentIDs = ((try? context.fetch(FetchDescriptor<Garment>())) ?? []).map(\.id)
 
         deleteAll(Garment.self, in: context)
@@ -81,7 +83,7 @@ enum AccountDataService {
     // MARK: - Export
 
     /// Builds "WearIt Export <date>.zip": `wearit-data.json` (profile, wardrobe, plans, wear history,
-    /// look posts) plus the item and look photos. Returns the zip's URL in the temporary folder, ready to share.
+    /// look posts and recommendation feedback) plus photos. Returns a temporary zip ready to share.
     static func makeExportArchive(context: ModelContext) throws -> URL {
         let fileManager = FileManager.default
         let stamp = exportStamp()
@@ -91,9 +93,18 @@ enum AccountDataService {
         try fileManager.createDirectory(at: photos, withIntermediateDirectories: true)
 
         let garments = (try? context.fetch(FetchDescriptor<Garment>())) ?? []
+        let recommendationEvents = try context.fetch(FetchDescriptor<RecommendationEvent>(
+            sortBy: [SortDescriptor(\RecommendationEvent.createdAt)]
+        ))
+        var receiptNames: [UUID: String] = [:]
         var photoNames: [UUID: [String]] = [:]
         var photoFilesByPath: [UUID: [String: String]] = [:]
         for garment in garments {
+            if let data = garment.purchaseReceiptData {
+                let name = "\(garment.id.uuidString)-receipt.jpg"
+                try data.write(to: photos.appendingPathComponent(name), options: .atomic)
+                receiptNames[garment.id] = name
+            }
             let paths = garment.galleryPhotoPaths
             for (index, path) in paths.enumerated() {
                 guard let source = ImageStore.fileURL(path: path) else { continue }
@@ -117,14 +128,17 @@ enum AccountDataService {
         }
 
         let payload: [String: Any] = [
+            "schemaVersion": 2,
             "exportedAt": iso(Date()),
+            "timeZoneIdentifier": TimeZone.current.identifier,
             "app": "WearIt",
             "profile": profileJSON(CurrentUser.activeProfile(in: context, createIfNeeded: false)),
             "garments": garments.map {
-                garmentJSON($0, photos: photoNames[$0.id] ?? [], photoFiles: photoFilesByPath[$0.id] ?? [:])
+                garmentJSON($0, photos: photoNames[$0.id] ?? [], photoFiles: photoFilesByPath[$0.id] ?? [:], receipt: receiptNames[$0.id])
             },
             "dayPlans": ((try? context.fetch(FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(dayPlanJSON),
             "wearHistory": ((try? context.fetch(FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(wearEventJSON),
+            "recommendationEvents": recommendationEvents.map(recommendationEventJSON),
             "lookPosts": posts.map { lookPostJSON($0, photo: postPhotoNames[$0.id]) }
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
@@ -154,6 +168,7 @@ enum AccountDataService {
     private static func profileJSON(_ profile: UserProfile?) -> [String: Any] {
         guard let profile else { return [:] }
         var json: [String: Any] = [
+            "id": profile.id.uuidString,
             "name": profile.displayName,
             "createdAt": iso(profile.createdAt),
             "preferredFormality": profile.preferredFormality,
@@ -181,7 +196,7 @@ enum AccountDataService {
     }
 
     private static func garmentJSON(
-        _ garment: Garment, photos: [String], photoFiles: [String: String]
+        _ garment: Garment, photos: [String], photoFiles: [String: String], receipt: String?
     ) -> [String: Any] {
         var json: [String: Any] = [
             "id": garment.id.uuidString,
@@ -195,6 +210,7 @@ enum AccountDataService {
             "photos": photos
         ]
         json["primaryPhoto"] = garment.imagePath.flatMap { photoFiles[$0] }
+        json["ownerID"] = garment.ownerID?.uuidString
         json["photoDetails"] = garment.galleryPhotoPaths.compactMap { path -> [String: Any]? in
             guard let file = photoFiles[path] else { return nil }
             var detail: [String: Any] = [
@@ -213,15 +229,23 @@ enum AccountDataService {
         json["lastWorn"] = garment.lastWorn.map(iso)
         json["createdAt"] = garment.createdAt.map(iso)
         json["notes"] = garment.notes
+        json["shopProductID"] = garment.shopProductID
+        json["shopProductURL"] = garment.shopProductURL
+        json["purchasedAt"] = garment.purchasedAt.map(iso)
+        json["purchaseStore"] = garment.purchaseStore
+        json["purchaseSource"] = garment.purchaseSourceRaw
+        if let receipt { json["purchaseReceipt"] = "photos/\(receipt)" }
         return json
     }
 
     private static func dayPlanJSON(_ plan: DayPlan) -> [String: Any] {
         var json: [String: Any] = [
+            "id": plan.id.uuidString,
             "date": iso(plan.date),
             "garmentIDs": plan.selectedGarmentIDs.map(\.uuidString)
         ]
         json["slots"] = plan.slotAssignmentIDs?.mapValues(\.uuidString)
+        json["ownerID"] = plan.ownerID?.uuidString
         json["eveningSlots"] = plan.eveningSlotAssignmentIDs?.mapValues(\.uuidString)
         json["dayLookStatus"] = plan.dayLookWearStatusRaw
         json["eveningLookStatus"] = plan.eveningLookWearStatusRaw
@@ -237,6 +261,27 @@ enum AccountDataService {
         ]
         json["occasion"] = event.occasionRaw
         json["notes"] = event.notes
+        return json
+    }
+
+    private static func recommendationEventJSON(_ event: RecommendationEvent) -> [String: Any] {
+        var json: [String: Any] = [
+            "id": event.id.uuidString,
+            "deduplicationKey": event.deduplicationKey,
+            "createdAt": iso(event.createdAt),
+            "kind": event.kindRaw,
+            "selectedGarmentIDs": event.selectedGarmentIDs.map(\.uuidString),
+            "shownGarmentIDs": event.shownGarmentIDs.map(\.uuidString),
+            "lookTime": event.lookTimeRaw,
+            "wasRaining": event.wasRaining,
+            "desiredFormality": event.desiredFormality,
+            "warmthSensitivity": event.warmthSensitivity,
+            "rainTolerance": event.rainTolerance,
+            "modelVersion": event.modelVersion
+        ]
+        json["profileID"] = event.profileID?.uuidString
+        json["dayPlanID"] = event.dayPlanID?.uuidString
+        if event.temperatureC.isFinite { json["temperatureC"] = event.temperatureC }
         return json
     }
 

@@ -20,6 +20,7 @@ enum OnboardingState {
 /// (`didCompleteOnboarding` is already set by sign-in or "continue offline").
 struct OnboardingView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
     @Query private var profiles: [UserProfile]
@@ -308,7 +309,7 @@ struct OnboardingView: View {
                     print("Sign in with Apple failed:", error.localizedDescription)
                 }
             }
-            .signInWithAppleButtonStyle(.black)
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
             .frame(height: 52)
             .clipShape(Capsule())
 

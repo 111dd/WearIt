@@ -60,6 +60,8 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 ## Tech facts
 
+- Appearance follows the device light/dark setting, including live changes. Never derive preferredColorScheme from a wallpaper. AppBackdropPreset.system is the unset default; colors(for:) supplies paired palettes, DS.Surface.canvas/content supply semantic grouped surfaces, and custom photos receive an adaptive veil. Legacy customImageIsDark metadata is not an appearance preference.
+
 - Deployment target iOS 18.5, Swift 5 mode. FoundationModels (on-device LLM) code
   is gated with `#if canImport(FoundationModels)` + `@available(iOS 26, *)`.
 - Bundle id `com.dordavid.WearIt`; CloudKit container `iCloud.com.dordavid.WearIt`;
@@ -110,6 +112,7 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 - Outfit identity lives on `DayPlan` **slots** (`slotAssignments` / `eveningSlotAssignments`),
   not only flat garment ID arrays. Calendar and planner must write the same way.
 - Wear status is unified via `DayPlan.applyDayLookWearStatus` / `resolvedDayLookWearStatus`.
+- One-piece clothing: `ItemType.dress`/`.jumpsuit` retain stored `Category.top`; use `OutfitSlot.onePiece` (not top + bottom) for new assignments. Category order is unchanged for FeatureSpace. `OutfitSlot.accepts`, `from(garment:)` and `allocationSlot` enforce compatibility and six stable accessory keys (`accessory`, `accessory2`…`accessory6`). Read historical maps without normalization; apply structural clearing only on explicit edits and guard locks first. Ranking keeps partial candidate pools because planner-owned locks are merged outside the engine.
 - Do not decode full-res images on the main thread or apply live SwiftUI `.blur` to wallpapers.
 - Startup: `BootstrapView` + `DataMigrationService`. Do not mount `AppGateView` until
   `loadState == .ready`. Critical work is gated by UserDefaults versions; deferred backfills
@@ -191,10 +194,37 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 ## Progress log
 
+- 2026-10-25 · Codex · Implemented Dor-selected system light/dark appearance: removed wallpaper-driven overrides, added neutral System default and paired tinted palettes, semantic grouped canvas/content cards, adaptive photo veils/accessibility, sign-in/onboarding controls, gallery appearance and selected accent-label contrast. EN/HE settings updated. Source review only; no build/tests/simulator/app launch/rendered preview/commit/publication. Handoff: WearIt/Docs/System-Appearance-2026-10-25.md.
+
+- 2026-10-24 · Codex · Addressed Dor-reported ShopSearchProfile compiler type-check timeouts by splitting support arithmetic, typed evidence/confidence aggregation, style accumulation and source-priority construction into small typed steps/helpers. Preserved weights, gates, deduplication and stable ordering. Source review only; owner rebuild confirmation pending, no build/tests/simulator/app launch/commit/publication.
+
+- 2026-10-24 · Codex · Implemented the approved local shopping foundation: category-specific evidence/confidence for brand/style/type, bounded ordering bonus, shared pre-preparation cache/coalescing, background taste/gap derivation from value snapshots, canonical Shopping/Stats history, shared cheap catalog metrics, background cache I/O, cancellation/expiry guards and account feedback/cache reset. Source review only; no build/tests/simulator/app launch/crawl/server/signup/deployment/commit/publication or measured speed/quality claim. Handoff: WearIt/Docs/Shopping-Engine-Foundation-2026-10-24.md.
+
+- 2026-10-24 · Codex · Source-reviewed smarter shopping discovery and costs: evidence-aware local brand/style profile, source routing, shared preparation cache, indexed-catalog service and optional bounded web discovery. Documented existing two-store coverage, current history/cache differences, privacy/provider-storage constraints and official pricing. Proposal only; Dor wants cost/differences before choosing. No app changes/build/tests/simulator/app launch/crawl/signup/deployment/commit/publication. Decision note: WearIt/Docs/Shopping-Engine-2026-10-24.md.
+
+- 2026-10-24 · Codex · Continued the selected Today-first direction with actual-item photo grids, dress/jumpsuit core slots and six stable manual accessory slots. Integrated guarded assignment/replacement/swaps, ranking, calendar/wardrobe/trips/shopping and widget ordering/stale-choice checks; preserve read-time legacy maps and planned/worn looks. EN/HE and source review only; no build/tests/simulator/app launch/commit/publication. Handoff: WearIt/Docs/Adaptive-Looks-2026-10-24.md.
+
+- 2026-10-22 · Codex · First planner UX/recommendation-quality packet: adaptive 44pt wear/reaction/work controls, Dynamic Type/VoiceOver/Reduce Motion; directional thermal evidence, selected-look-only general learning, new-feedback cache refresh and one-variable-slot alternatives for small wardrobes. Additive feedback export + local read-only before/after report; two Hebrew interactive design proposals await Dor's choice. Source review only; no build/tests/simulator/app launch/tool execution/publication. Handoff: WearIt/Docs/Planner-UX-Recommendations-2026-10-22.md.
+
+- 2026-10-22 · Codex · Today's worn look collapses into a reopenable thumbnail summary and hides work/own-clothes controls; an evening Add footer remains available and evening content stays independent. Fixed feedback/photo-prompt card invalidation and removed AI ranking from missing-slot hints. EN/HE, source review only; no build/tests/simulator/app launch/publication.
+
+- 2026-10-21 · Codex · Shopping filters: independent For You/Explore state, intersecting category/type/deals/saved filters, compact separate preference menus, scoped reset/empty-state recovery, saved-item search and forced ETag refresh on Deals. Published crawler run now completed: 3,643 raw products, 954 verified offers (192 labeled men before app gates). Local app changes only; no build/tests/simulator or new publication.
+
+- 2026-10-21 · Codex · Explore now inherits the saved/resolved shopping department, exposes actual Men/Women/All controls, routes its toolbar to temporary browse filters, keeps department on Clear filters and hides stale results during filter changes. Category headings, per-category item types and localized category/type search added; saved browse items honor department. EN/HE and focused source review; no build/tests/simulator/publication.
+
+- 2026-10-21 · Codex · Shopping follow-up: persistent For You selection up to 20 with dismissal-only slot replacement, stronger useful-deal priority and complete source-photo/purchase-details sheets. Live catalog has 2,918 items and zero price pairs; crawler now handles Hebrew URLs and exact-product details. Local source changes only; no build/tests/simulator, crawl publication or app launch. Handoff: WearIt/Docs/Shopping-2026-10-21.md.
+
+- 2026-10-21 · Codex · Code-first concurrency/performance audit with Apple references: WearIt/Docs/Concurrency-Performance-Audit-2026-10-21.md. Prioritized off-main planner/advice/widget scoring, cancellable shared previews, derived-input reuse and bounded workload scheduling; explicit parity and device-measurement gates. Documentation only; no app changes/build/tests/simulator or measured speedup.
+
+- 2026-10-21 · Codex · Planner launch crash: inspected Dor's already-paused device session read-only. Recursive Swift generic metadata decoding reached inaccessible stack memory while eagerly building dayColumn. Split the card into six concrete deferred section boundaries and defer DayCardContainer content; kept signature equality, row order/actions/transitions. No build/tests/simulator, resume or publication; owner rebuild/device confirmation pending.
+
+- 2026-10-21 · Codex · Shopping: progressive concurrent photos with modeled fallback, snapshot-based background ranking, clothing-first feeds, explained fit estimates, purchase-to-wardrobe/date/store/optional receipt and Undo, contextual weather learning and broader preview variety. Catalog paired-price extraction/refresh scheduling corrected. Source review only; no build/tests/simulator or publication. Handoff: WearIt/Docs/Shopping-2026-10-21.md.
+
 - 2026-10-18 · Codex · Dor authorized publishing all latest local changes together: personal shopping, planner advice/layout and wardrobe/photo tools; preparing one PR for main. No build/tests/simulator; device review remains pending.
 
 Newest first. One line per meaningful change: date, tool, what.
 
+- 2026-10-18 · Cursor · Better-photo search uses the public web (item name, brand, type, color) instead of the shop catalog. Wardrobe photos can also blur face and background on device, like a daily look, without the look's 4:5 crop. The wardrobe photo is not uploaded. No build/tests/simulator.
 - 2026-10-18 · Codex · Shopping fixes: visible purchased actions on product/companion cards, complete-preview removal after purchase/dismiss; fixed nonexistent dsField to dsFieldStyle. Shopping previews rotate suitable owned bottoms within a narrow quality window; rankLooks also diversifies unlocked bottoms across alternatives while preserving saved upcoming looks. No build/tests/simulator/publication; owner checks pending.
 - 2026-10-18 · Codex · Shopping follow-up: dedicated fifth tab, personal default and independent manual catalog search/filters; optional synced profile shopping preferences with department eligibility, source-based automatic fallback and unresolved-choice prompt. Visible catalog tiles select bounded off-main item-only previews or a neutral symbol; no image gender inference. Export/merge and EN/HE included. No build/tests/simulator/publication; owner review pending.
 - 2026-10-18 · Codex · Planner Apply/change advice now has a separate close button, with date/look-scoped local dismissal; worn looks skip advice before score-cache lookup. Visible suggestion participates in DayCardSignature, so close/worn updates the memoized card immediately. Stale Apply is guarded against a worn/changed look. Focused planner/helper changes only; no localization/shop edits, build/tests/simulator or publication.
@@ -329,6 +359,33 @@ Newest first. One line per meaningful change: date, tool, what.
 - 2025-09-05 · Initial commit.
 
 ## Next steps (backlog)
+
+- System appearance owner review: after an owner build, toggle device light/dark while each tab/sheet is open; check System/colored/photo backdrops, native card separation, sign-in/onboarding Apple buttons, edit occasion chips, gallery, Hebrew RTL/large text and Increase Contrast/Reduce Transparency. Saved custom choices are retained; choose Settings → Appearance → System for the neutral background. No visual/runtime acceptance or contrast measurement yet. WearIt/Docs/System-Appearance-2026-10-25.md.
+
+- Shopping compiler follow-up: rebuild after the ShopSearchProfile expression split and confirm both reported type-check timeout diagnostics clear before device review. No scoring rules or eligibility changes were intended; agent did not build/test/run the app. See WearIt/Docs/Shopping-Engine-Foundation-2026-10-24.md.
+
+- Shopping engine foundation owner review: after an owner build, check Shopping/Stats shared work, held selections and dismiss/buy/Undo, sparse/category-specific brand evidence, default styles, edits without count changes, stale/cancelled requests and account deletion. Measure snapshot/preparation/ranking and first useful content with the new shopping signposts. Current sources remain Terminal X/Castro; source coverage scoring is a deferred helper, and server/paid web discovery/new remote request data remain unconfigured. See WearIt/Docs/Shopping-Engine-Foundation-2026-10-24.md and the A/B/C cost proposal.
+
+
+- Adaptive-look owner review: Dor selected 'היום במרכז'. Check actual-item grids at 1/2/3/4/many items, dress/jumpsuit without pants, up to six distinct accessories, locked/conflicting garments, explicit legacy top-dress edits, day/evening links, calendar/trip saves and stale widget alternatives. Hebrew/English, narrow phones, large text and VoiceOver remain device checks. Local source is unbuilt; see WearIt/Docs/Adaptive-Looks-2026-10-24.md.
+
+- Recommendation-quality owner review: retain the thermal-direction, real-swap and small-wardrobe cases in WearIt/Docs/Planner-UX-Recommendations-2026-10-22.md. After actual first device use and complete observation windows, export fresh data and use WearIt/Tools/recommendation_quality_report.py (guide in WearIt/Docs/Recommendation-Quality-Guide-2026-10-22.md); no accuracy or measured performance improvement is claimed. The app and report tool remain unrun by the agent.
+
+- Planner worn-card owner review: confirm today's look from the planner/calendar/widget, reopen/collapse it and undo worn; check hidden work/own-clothes controls, the evening Add footer (including repeat taps and uniform-only days), independent evening status, feedback/photo prompt refresh, calendar opening, large text and Hebrew RTL. Local source changes only; device appearance, responsiveness and the earlier crash fix remain unconfirmed.
+
+- Shopping filter review: owner refreshes the now-published catalog, then checks Deals in For You → Explore → back, independent category/type/saved combinations, scoped reset and separate draft Apply/Cancel preferences. No visible department picker; Explore seeds its department once and then stays independent. PR #37 crawler run completed with 954 verified raw offers; older pending-publication notes are superseded. App changes remain local and unbuilt. See WearIt/Docs/Shopping-2026-10-21.md.
+
+- Explore owner review: saved Men defaults, visible department switching during pending searches, toolbar/clear-filter behavior, saved-item department isolation, clothing category/type selection, Show more and Hebrew RTL. These changes remain local; no build/tests/simulator or publication performed. Details: WearIt/Docs/Shopping-2026-10-21.md.
+
+- Shopping follow-up: publish the corrected crawler only when Dor requests, then inspect a fresh report for verified discounts, successful refreshes and full galleries. On device, review the persistent 20-item For You selection across save/open/refresh/relaunch, dislike replacement, purchase/Undo, high-value deal ordering, all-photo paging and RTL purchase details. The 2026-10-21 live catalog has 2,918 items with zero verified price pairs; local changes have not run.
+
+- Concurrency audit: review WearIt/Docs/Concurrency-Performance-Audit-2026-10-21.md. First establish device baseline after the day-card crash fix, then extract value-based planner scoring with revision guards; keep day selection/persistence ordered. Preview sharing/cancellation and derived-cache work follow; parallel worker counts require measurement.
+
+- Planner crash follow-up: Dor rebuilds/runs on the device, then checks today/upcoming cards, evening look, details, advice dismissal and worn/empty states. Deferred section boundaries fix the oversized eager card type; the original crash was inspected in the paused session, but the changed code has not run.
+
+- Latest shopping review: pull/build only when Dor chooses; check photos on a slow network, fit explanations, purchase/Undo/receipt sync/export, and shorts with positive/negative weather feedback. Publish the crawler only when requested, then inspect refreshed verified offers. The downloaded 2026-10-19 catalog had 3,213 products with image URLs but no verified discounts. WearIt/Docs/Shopping-2026-10-21.md supersedes older strict-photo/MainActor/feedback-only-purchase notes.
+
+- Photo tools owner review: web results for a named/branded item, an empty result falling back to the browser or a product link, and blur face/background on a mirror photo versus a flat product cutout. The wardrobe photo must not be uploaded. No build/tests/simulator.
 
 - Publication authorized for the complete 2026-10-18 local change set; after merge, pull main in Xcode and review shopping, planner and photo flows on device. Inspect the next live catalog report; runtime/performance acceptance remains pending.
 

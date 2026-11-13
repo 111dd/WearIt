@@ -68,7 +68,21 @@ enum TemperatureComfort {
             )
         }
         let mean = scores.reduce(0, +) / Double(scores.count)
-        return mean * 0.75 + (scores.min() ?? mean) * 0.25
+        var physical = mean * 0.75 + (scores.min() ?? mean) * 0.25
+        // Exposed legs/feet need a stronger cool-weather prior than insulation alone.
+        // This is continuous and learned per item/weather; it never blacklists shorts.
+        if profile.coverage <= 0.35, garment.category == .bottom || garment.category == .shoes {
+            let ordered = temperatures.sorted()
+            let cool = ordered[max(0, (ordered.count - 1) / 4)]
+            let manualMinimum = (garment.aiEnrichedFieldsRaw ?? []).contains("minTempC") ? nil : garment.minTempC
+            let threshold = manualMinimum ?? (21 + Double(context.warmthSensitivity - 3) * 1.25)
+            let exposure = 1 / (1 + exp(-(cool - threshold) / 2.5))
+            physical *= 0.25 + 0.75 * exposure
+        }
+        if let learned = context.weatherHistory.estimate(for: garment, temperature: context.temperatureC, raining: context.isRaining) {
+            physical = physical * (1 - learned.confidence) + learned.score * learned.confidence
+        }
+        return min(1, max(0, physical))
     }
 
     /// Continuous target warmth (1…5) for a given air temperature.

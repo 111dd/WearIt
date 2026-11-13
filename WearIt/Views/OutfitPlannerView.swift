@@ -15,6 +15,7 @@ struct OutfitPlannerView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var weather: WeatherCenter
     @EnvironmentObject private var auth: AuthManager
 
@@ -42,6 +43,8 @@ struct OutfitPlannerView: View {
     /// Ready alternatives for the widget's ↻, keyed by day + current look + forecast.
     @State private var widgetAlternativesMemo: [String: [[OutfitSlot: UUID]]] = [:]
     @State private var expandedDayDetails: Set<Int> = []
+    /// Presentation only, keyed by date so tomorrow never inherits today's expansion.
+    @State private var expandedWornDayDates: Set<Date> = []
     @State private var selectedDayIndex: Int = 0
     @State private var preferredSuggestion: PlannerSuggestionKind?
     @State private var rediscoveryDismissed = false
@@ -52,6 +55,7 @@ struct OutfitPlannerView: View {
     @State private var dirtyDayIndices: Set<Int> = []
     @State private var plannerSaveDebouncer = Debouncer(interval: 15.0)
     @State private var appIntentRouter = WearItAppIntentRouter.shared
+    @State private var cachedWeatherHistory = GarmentWeatherHistory()
     @State private var cachedTaste = TasteAffinityBuilder.Profile.empty
     @State private var cachedCombination = CombinationAffinity.empty
     @State private var cachedOccasionStyle = OccasionStyleProfile.empty
@@ -282,6 +286,10 @@ struct OutfitPlannerView: View {
         .onChange(of: dismissedOutfits.count) { _, _ in
             refreshAffinityCaches()
         }
+        .onChange(of: recommendationEvents.count) { _, _ in
+            // Contextual comfort and taste must include newly recorded feedback.
+            refreshAffinityCaches()
+        }
         .onChange(of: allowRepeatedItems) { _, _ in
             updateAvailableGarments()
             advisorMemo.changeSuggestions.removeAll()
@@ -317,6 +325,7 @@ struct OutfitPlannerView: View {
                       let index = boardState.days.firstIndex(where: { Calendar.current.isDate($0.date, inSameDayAs: date) })
                 else { return }
                 selectedDayIndex = index
+                expandedWornDayDates.insert(boardState.days[index].date)
                 expandedDayDetails.insert(index)
             }
             .sheet(item: $activeSheet) { sheet in
@@ -830,7 +839,7 @@ struct OutfitPlannerView: View {
 
     private func addNewItemSheet(dayIndex: Int, slot: OutfitSlot, lookTime: LookTime) -> some View {
         AddGarmentView(initialCategory: slot.allowedCategories.first) { garment in
-            guard slot.allowedCategories.contains(garment.category) else {
+            guard placementSlot(for: garment, requestedSlot: slot).accepts(garment) else {
                 boardState.alertMessage = String(localized: "planner_add_item_category_mismatch")
                 boardState.showUnavailableAlert = true
                 return
@@ -846,12 +855,21 @@ struct OutfitPlannerView: View {
     
     private func dayColumn(for dayIndex: Int) -> some View {
         let state = boardState.days[dayIndex]
-        let reasons = lookReasons(for: dayIndex)
-        let tip = layerTip(for: dayIndex)
-        let changes = changeSuggestions(for: dayIndex, lookTime: .day)
+        let dayStatus = lookWearStatus(dayIndex: dayIndex, lookTime: .day)
+        let isWornToday = dayTiming(for: dayIndex) == .today && dayStatus == .worn
+        let isCollapsed = isWornDayLookCollapsed(dayIndex)
+        // Hidden content must not keep scoring or preparing explanations during redraws.
+        let reasons = isCollapsed ? [] : lookReasons(for: dayIndex)
+        let tip = isCollapsed ? nil : layerTip(for: dayIndex)
+        let changes = isCollapsed ? [] : changeSuggestions(for: dayIndex, lookTime: .day)
+        let reminder = isCollapsed ? nil : calendarReminder(for: dayIndex)
+        let question = isCollapsed ? nil : plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0 : nil }
         let signature = DayCardSignature(
             dayIndex: dayIndex,
             state: state,
+            dayWearStatus: dayStatus,
+            isDayLookCollapsed: isCollapsed,
+            dynamicTypeSize: dynamicTypeSize,
             isExpanded: isDetailsExpanded(dayIndex),
             isSelected: selectedDayIndex == dayIndex,
             welcomeLine: dayIndex == 0 ? plannerWelcomeLine : nil,
@@ -859,12 +877,12 @@ struct OutfitPlannerView: View {
             forecastKey: forecastKey(for: state.forecast),
             assignedSignature: assignedGarmentSignature(for: dayIndex),
             availableSignature: availableGarmentsSignature,
-            aiExplanation: aiExplanationText(for: dayIndex),
+            aiExplanation: isDetailsExpanded(dayIndex) ? aiExplanationText(for: dayIndex) : nil,
             reasons: reasons,
             showsGestureHint: showsGestureHint(for: dayIndex),
             eventLine: dayEventLine(for: dayIndex).map { "\($0.text)|\($0.icon)" },
             reminderLine: [
-                calendarReminder(for: dayIndex).map { reminder in
+                reminder.map { reminder in
                     ([reminder.text] + reminder.items.map(\.id.uuidString)).joined(separator: "|")
                 },
                 workDaySignature(for: dayIndex)
@@ -872,7 +890,10 @@ struct OutfitPlannerView: View {
             placeWeather: placeWeatherSignature(for: dayIndex),
             layerTip: tip.map { "\($0.when.rawValue)|\(Int($0.temperatureC.rounded()))|\($0.jacketID?.uuidString ?? "-")" },
             changeSuggestion: changes.first,
-            question: plannerQuestion.flatMap { $0.dayIndex == dayIndex ? $0.key : nil },
+            question: question?.key,
+            capturePrompts: LookTime.allCases.map { lookTime in
+                lookCapturePrompt(dayIndex: dayIndex, lookTime: lookTime, timing: dayTiming(for: dayIndex)) == nil ? "0" : "1"
+            }.joined(),
             quickSwap: quickSwapTarget.flatMap { target in
                 target.dayIndex == dayIndex ? "\(target.slot.rawValue)-\(target.lookTime.rawValue)" : nil
             },
@@ -882,64 +903,109 @@ struct OutfitPlannerView: View {
         )
 
         return DayCardContainer(signature: signature) {
-            VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                dayTopBar(for: state, dayIndex: dayIndex)
+            VStack(alignment: .leading, spacing: isCollapsed ? DS.Spacing.sm : DS.Spacing.md) {
+                DayCardSection {
+                    AnyView(Group {
+                        dayTopBar(for: state, dayIndex: dayIndex, isCompact: isCollapsed)
 
-                if let schedule = uniformWorkSchedule(for: dayIndex) {
-                    workDayRow(dayIndex: dayIndex, schedule: schedule)
+                        if !isWornToday, let schedule = uniformWorkSchedule(for: dayIndex) {
+                            workDayRow(dayIndex: dayIndex, schedule: schedule)
+                        }
+                    })
                 }
 
-                if state.assignedGarmentIDs.isEmpty {
-                    // A work-clothes-only day has no look of its own to plan.
-                    if !isUniformOnlyDay(dayIndex) {
-                        emptyDayOutfitPrompt(dayIndex: dayIndex)
-                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                    }
-                } else {
-                    swipeableOutfitRow(dayIndex: dayIndex, lookTime: .day)
-                        .transition(.opacity)
-                    if showsGestureHint(for: dayIndex) {
-                        gestureHint
-                            .transition(.opacity)
-                    }
-                    availabilityHintsView(for: dayIndex, lookTime: .day)
-                    if let tip {
-                        layerTipRow(tip, dayIndex: dayIndex)
-                            .transition(.opacity)
-                    }
+                DayCardSection {
+                    AnyView(Group {
+                        if state.assignedGarmentIDs.isEmpty {
+                            // A work-clothes-only day has no look of its own to plan.
+                            if !isUniformOnlyDay(dayIndex) {
+                                emptyDayOutfitPrompt(dayIndex: dayIndex)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                            }
+                        } else {
+                            swipeableOutfitRow(dayIndex: dayIndex, lookTime: .day, isCompact: isCollapsed)
+                                .transition(.opacity)
+                            if !isCollapsed {
+                                if isWornToday {
+                                    collapseWornLookButton(dayIndex: dayIndex)
+                                }
+                                if !isWornToday {
+                                    if showsGestureHint(for: dayIndex) {
+                                        gestureHint
+                                            .transition(.opacity)
+                                    }
+                                    availabilityHintsView(for: dayIndex, lookTime: .day)
+                                }
+                                if let tip {
+                                    layerTipRow(tip, dayIndex: dayIndex)
+                                        .transition(.opacity)
+                                }
+                            }
+                        }
+                    })
                 }
 
-                if let reminder = calendarReminder(for: dayIndex) {
-                    calendarReminderRow(reminder)
+                DayCardSection {
+                    AnyView(Group {
+                        if let reminder {
+                            calendarReminderRow(reminder)
+                        }
+
+                        if let question {
+                            plannerQuestionCard(question)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    })
                 }
 
-                if let question = plannerQuestion, question.dayIndex == dayIndex {
-                    plannerQuestionCard(question)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                DayCardSection {
+                    AnyView(Group {
+                        if state.useEveningLook {
+                            eveningSection(for: dayIndex)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    })
                 }
 
-                if state.useEveningLook {
-                    eveningSection(for: dayIndex)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                DayCardSection {
+                    AnyView(Group {
+                        if !changes.isEmpty {
+                            changeSuggestionsView(changes, dayIndex: dayIndex)
+                        }
+                    })
                 }
 
-                if !changes.isEmpty {
-                    changeSuggestionsView(changes, dayIndex: dayIndex)
+                DayCardSection {
+                    AnyView(Group {
+                        if !isCollapsed, !state.assignedGarmentIDs.isEmpty {
+                            lookInsightRow(for: dayIndex, reasons: reasons)
+                            if isDetailsExpanded(dayIndex) {
+                                dayDetailsSection(for: dayIndex, reasons: reasons)
+                                    .transition(.opacity)
+                            }
+                        }
+                    })
                 }
 
-                if !state.assignedGarmentIDs.isEmpty {
-                    lookInsightRow(for: dayIndex, reasons: reasons)
-                    if isDetailsExpanded(dayIndex) {
-                        dayDetailsSection(for: dayIndex, reasons: reasons)
-                            .transition(.opacity)
-                    }
+                DayCardSection {
+                    AnyView(Group {
+                        if !state.useEveningLook {
+                            addEveningLookButton(dayIndex: dayIndex)
+                        }
+                    })
                 }
-
             }
             .padding(DS.Spacing.md)
             .modifier(PlannerCardSurface(isToday: dayIndex == 0))
         }
         .equatable()
+        .animation(reduceMotion ? nil : DS.Animation.standard, value: isCollapsed)
+        .onChange(of: dayStatus) { _, status in
+            expandedWornDayDates.remove(state.date)
+            if status == .worn, quickSwapTarget?.dayIndex == dayIndex, quickSwapTarget?.lookTime == .day {
+                quickSwapTarget = nil
+            }
+        }
         // Generate explanations only when their details are requested, not for
         // every hidden/collapsed card during launch. Reuse cached results.
         .task(id: lookExplanationTaskID(for: dayIndex)) {
@@ -1133,7 +1199,7 @@ struct OutfitPlannerView: View {
                 continue
             }
             let candidates = allGarments
-                .filter { slot.allowedCategories.contains($0.category) && isStaleAndRelevant($0) && !used.contains($0.id) }
+                .filter { slot.accepts($0) && isStaleAndRelevant($0) && !used.contains($0.id) }
                 .sorted { lhs, rhs in
                     let l = latestWearByGarmentID[lhs.id] ?? lhs.lastWorn ?? .distantPast
                     let r = latestWearByGarmentID[rhs.id] ?? rhs.lastWorn ?? .distantPast
@@ -1163,16 +1229,19 @@ struct OutfitPlannerView: View {
         return "\(greetingLine) · \(location)"
     }
 
-    private func dayTopBar(for state: PlannerDayState, dayIndex: Int) -> some View {
+    private func dayTopBar(for state: PlannerDayState, dayIndex: Int, isCompact: Bool = false) -> some View {
         HStack(alignment: .top, spacing: DS.Spacing.xs) {
             VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                if dayIndex == 0 {
+                if dayIndex == 0, !isCompact {
                     Text(plannerWelcomeLine)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+                let titleLayout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: DS.Spacing.xxs))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: DS.Spacing.xs))
+                titleLayout {
                     Text(dayName(for: state.id))
                         .font(dayIndex == 0 ? .title2.weight(.bold) : .headline)
                         .foregroundStyle(.primary)
@@ -1320,7 +1389,45 @@ struct OutfitPlannerView: View {
     }
 
     private func isDetailsExpanded(_ dayIndex: Int) -> Bool {
-        expandedDayDetails.contains(dayIndex)
+        expandedDayDetails.contains(dayIndex) && !isWornDayLookCollapsed(dayIndex)
+    }
+
+    private func isWornDayLookCollapsed(_ dayIndex: Int) -> Bool {
+        guard dayIndex < boardState.days.count,
+              dayTiming(for: dayIndex) == .today,
+              lookWearStatus(dayIndex: dayIndex, lookTime: .day) == .worn else { return false }
+        return !expandedWornDayDates.contains(boardState.days[dayIndex].date)
+    }
+
+    private func setWornDayLookExpanded(_ expanded: Bool, dayIndex: Int) {
+        guard dayIndex < boardState.days.count else { return }
+        DS.haptic(0.25)
+        withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            let date = boardState.days[dayIndex].date
+            if expanded {
+                expandedWornDayDates.insert(date)
+            } else {
+                expandedWornDayDates.remove(date)
+                expandedDayDetails.remove(dayIndex)
+                if quickSwapTarget?.dayIndex == dayIndex, quickSwapTarget?.lookTime == .day {
+                    quickSwapTarget = nil
+                }
+            }
+        }
+    }
+
+    private func collapseWornLookButton(dayIndex: Int) -> some View {
+        Button {
+            setWornDayLookExpanded(false, dayIndex: dayIndex)
+        } label: {
+            Label(String(localized: "planner_collapse_worn_look"), systemImage: "chevron.up")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(String(localized: "planner_details_expanded"))
     }
 
     private func toggleDayDetails(_ dayIndex: Int) {
@@ -1695,7 +1802,10 @@ struct OutfitPlannerView: View {
                 }
             }
 
-            HStack(spacing: DS.Spacing.xs) {
+            let attireLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: DS.Spacing.xs))
+                : AnyLayout(HStackLayout(spacing: DS.Spacing.xs))
+            attireLayout {
                 ForEach(WorkDayAttire.allCases) { option in
                     let selected = attire == option
                     Button {
@@ -1704,9 +1814,9 @@ struct OutfitPlannerView: View {
                     } label: {
                         Label(option.title, systemImage: option.icon)
                             .font(.footnote.weight(.medium))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
-                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                             .padding(.horizontal, DS.Spacing.xs)
                             .foregroundStyle(selected ? DS.Accent.onFill : Color.primary)
                             .background(
@@ -1727,24 +1837,6 @@ struct OutfitPlannerView: View {
                     )
                 } else {
                     workDayNote(String(localized: "work_day_not_counted"), icon: "chart.bar.xaxis")
-                }
-                if !boardState.days[dayIndex].useEveningLook {
-                    Button {
-                        DS.haptic(0.4)
-                        enableAfterWorkLook(dayIndex: dayIndex)
-                    } label: {
-                        Label(
-                            afterWorkPlan(schedule).map {
-                                String(format: NSLocalizedString("work_day_add_after_format", comment: ""), $0.label)
-                            } ?? String(localized: "work_day_add_after"),
-                            systemImage: "plus.circle"
-                        )
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1787,7 +1879,7 @@ struct OutfitPlannerView: View {
     }
 
     private func enableAfterWorkLook(dayIndex: Int) {
-        guard dayIndex < boardState.days.count else { return }
+        guard dayIndex < boardState.days.count, !boardState.days[dayIndex].useEveningLook else { return }
         boardState.days[dayIndex].useEveningLook = true
         CalendarContextPreferences.setEveningOptedOut(false, on: boardState.days[dayIndex].date)
         generateEveningOutfit(for: dayIndex)
@@ -2276,7 +2368,7 @@ struct OutfitPlannerView: View {
                      : String(localized: "planner_layer_tip_add_wardrobe"))
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, DS.Spacing.sm)
-                    .frame(minHeight: 30)
+                    .frame(minWidth: 44, minHeight: 44)
             }
             .buttonStyle(SoftPressButtonStyle())
             Button {
@@ -2285,7 +2377,7 @@ struct OutfitPlannerView: View {
                 Image(systemName: "xmark")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(String(localized: "planner_layer_tip_dismiss"))
@@ -2459,10 +2551,15 @@ struct OutfitPlannerView: View {
             ? boardState.days[dayIndex].eveningGarmentID(for: suggestion.slot)
             : boardState.days[dayIndex].garmentID(for: suggestion.slot)
         guard currentID == suggestion.currentGarmentID else { return }
+        guard let replacement = garment(for: suggestion.betterGarmentID) else { return }
+        let destination = placementSlot(for: replacement, requestedSlot: suggestion.slot)
+        guard canPlace(replacement, in: destination, dayIndex: dayIndex, lookTime: suggestion.lookTime) else { return }
+        clearStructuralConflicts(for: destination, dayIndex: dayIndex, lookTime: suggestion.lookTime)
         if suggestion.lookTime == .evening {
-            boardState.days[dayIndex].setEveningGarment(suggestion.betterGarmentID, for: suggestion.slot)
+            boardState.days[dayIndex].setEveningGarment(suggestion.betterGarmentID, for: destination)
         } else {
-            boardState.days[dayIndex].setGarment(suggestion.betterGarmentID, for: suggestion.slot)
+            boardState.days[dayIndex].setGarment(suggestion.betterGarmentID, for: destination)
+            synchronizeEveningLinks(forDay: dayIndex)
         }
         persistDayPlan(dayIndex)
         DS.haptic(0.4)
@@ -2575,7 +2672,7 @@ struct OutfitPlannerView: View {
         "\(dayIndex)-\(lookTime.rawValue)"
     }
 
-    private func swipeableOutfitRow(dayIndex: Int, lookTime: LookTime) -> some View {
+    private func swipeableOutfitRow(dayIndex: Int, lookTime: LookTime, isCompact: Bool = false) -> some View {
         let busyKey = swipeBusyKey(dayIndex: dayIndex, lookTime: lookTime)
         let timing = dayTiming(for: dayIndex)
         let status = lookWearStatus(dayIndex: dayIndex, lookTime: lookTime)
@@ -2639,6 +2736,8 @@ struct OutfitPlannerView: View {
             statusBadge: badge,
             accessibilitySlotLabel: slotLabel,
             isFuture: timing == .future,
+            showsStatusMark: !isCompact,
+            allowsReplacement: !isCompact,
             feedback: lookTime == .day ? lookFeedbackActions(for: dayIndex) : nil,
             capturePrompt: lookCapturePrompt(dayIndex: dayIndex, lookTime: lookTime, timing: timing),
             onConfirm: {
@@ -2655,10 +2754,19 @@ struct OutfitPlannerView: View {
             }
         ) {
             VStack(alignment: .leading, spacing: DS.Spacing.xs) {
-                outfitRow(for: dayIndex, lookTime: lookTime)
-                if let target = quickSwapTarget, target.dayIndex == dayIndex, target.lookTime == lookTime {
-                    quickSwapStrip(for: target)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                if isCompact {
+                    PlannerWornLookSummary(
+                        garments: visibleAssignedSlots(dayIndex: dayIndex, lookTime: .day).compactMap { slot in
+                            boardState.days[dayIndex].garmentID(for: slot).flatMap { garment(for: $0) }
+                        },
+                        onExpand: { setWornDayLookExpanded(true, dayIndex: dayIndex) }
+                    )
+                } else {
+                    outfitRow(for: dayIndex, lookTime: lookTime)
+                    if let target = quickSwapTarget, target.dayIndex == dayIndex, target.lookTime == lookTime {
+                        quickSwapStrip(for: target)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
             }
         }
@@ -2711,7 +2819,7 @@ struct OutfitPlannerView: View {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -2795,13 +2903,16 @@ struct OutfitPlannerView: View {
     }
 
     private func applyQuickSwap(_ garment: Garment, target: SlotTarget, replacedID: UUID?) {
-        guard target.dayIndex < boardState.days.count else { return }
+        let destination = placementSlot(for: garment, requestedSlot: target.slot)
+        guard canPlace(garment, in: destination, dayIndex: target.dayIndex, lookTime: target.lookTime) else { return }
         DS.haptic(0.4)
         withAnimation(reduceMotion ? nil : DS.Animation.standard) {
+            clearStructuralConflicts(for: destination, dayIndex: target.dayIndex, lookTime: target.lookTime)
             if target.lookTime == .evening {
-                boardState.days[target.dayIndex].setEveningGarment(garment.id, for: target.slot)
+                boardState.days[target.dayIndex].setEveningGarment(garment.id, for: destination)
             } else {
-                boardState.days[target.dayIndex].setGarment(garment.id, for: target.slot)
+                boardState.days[target.dayIndex].setGarment(garment.id, for: destination)
+                synchronizeEveningLinks(forDay: target.dayIndex)
             }
             quickSwapTarget = nil
         }
@@ -3000,25 +3111,8 @@ struct OutfitPlannerView: View {
     }
     
     private func outfitRow(for dayIndex: Int, lookTime: LookTime) -> some View {
-        let order: [OutfitSlot] = [.shoes, .bottom, .top, .outer, .accessory]
-        let slotsToShow = order.filter { slot in
-            if slot == .outer {
-                return shouldShowSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
-            }
-            return true
-        }
-        
         let day = boardState.days[dayIndex]
-        let assignedSlots = slotsToShow.filter { slot in
-            let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
-            if isLinked {
-                return day.garmentID(for: slot) != nil
-            } else if lookTime == .evening {
-                return day.eveningGarmentID(for: slot) != nil
-            } else {
-                return day.garmentID(for: slot) != nil
-            }
-        }
+        let assignedSlots = visibleAssignedSlots(dayIndex: dayIndex, lookTime: lookTime)
         let canAdd = !availableSlots(for: dayIndex, lookTime: lookTime).isEmpty
         return Group {
             if assignedSlots.isEmpty {
@@ -3031,43 +3125,41 @@ struct OutfitPlannerView: View {
                     .buttonStyle(PlannerSuggestionActionStyle())
                 }
             } else {
-                PlannerOutfitLayout() {
-                    ForEach(assignedSlots, id: \.self) { slot in
-                        let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
-                        let id: UUID? = {
-                            if isLinked {
-                                return day.garmentID(for: slot)
-                            } else if lookTime == .evening {
-                                return day.eveningGarmentID(for: slot)
-                            } else {
-                                return day.garmentID(for: slot)
-                            }
-                        }()
+                VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+                    PlannerOutfitLayout(minimumTileWidth: dynamicTypeSize.isAccessibilitySize ? 132 : 88) {
+                        ForEach(assignedSlots, id: \.self) { slot in
+                            let isLinked = lookTime == .evening && isEveningLinked(dayIndex: dayIndex, slot: slot)
+                            let id: UUID? = {
+                                if isLinked {
+                                    return day.garmentID(for: slot)
+                                } else if lookTime == .evening {
+                                    return day.eveningGarmentID(for: slot)
+                                } else {
+                                    return day.garmentID(for: slot)
+                                }
+                            }()
 
-                        Group {
-                            if let id, let garment = garment(for: id) {
-                                let isLocked = isLinked || (lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot))
-                                draggableGarmentTile(
-                                    garment: garment,
-                                    slot: slot,
-                                    dayIndex: dayIndex,
-                                    lookTime: lookTime,
-                                    isLocked: isLocked,
-                                    isLinked: isLinked
-                                )
-                                .transition(.asymmetric(
-                                    insertion: .scale(scale: 0.92).combined(with: .opacity),
-                                    removal: .opacity
-                                ))
+                            Group {
+                                if let id, let garment = garment(for: id) {
+                                    let isLocked = isLinked || (lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot))
+                                    draggableGarmentTile(
+                                        garment: garment,
+                                        slot: slot,
+                                        dayIndex: dayIndex,
+                                        lookTime: lookTime,
+                                        isLocked: isLocked,
+                                        isLinked: isLinked
+                                    )
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.92).combined(with: .opacity),
+                                        removal: .opacity
+                                    ))
+                                }
                             }
                         }
                     }
-
                     if canAdd {
-                        addItemsButton(
-                            dayIndex: dayIndex,
-                            lookTime: lookTime
-                        )
+                        addItemsButton(dayIndex: dayIndex, lookTime: lookTime)
                     }
                 }
             }
@@ -3079,21 +3171,9 @@ struct OutfitPlannerView: View {
         Button {
             openAddPicker(dayIndex: dayIndex, lookTime: lookTime)
         } label: {
-            RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                .fill(Color.accentColor.opacity(0.035))
-                .overlay {
-                    RoundedRectangle(cornerRadius: DS.Radius.tile, style: .continuous)
-                        .strokeBorder(Color.accentColor.opacity(0.24), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                }
-                .overlay {
-                    Image(systemName: "plus")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .aspectRatio(DS.AspectRatio.garmentTile, contentMode: .fit)
+            Label(String(localized: "planner_add_to_look"), systemImage: "plus")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(String(localized: "planner_add_new_item"))
+        .buttonStyle(PlannerSuggestionActionStyle())
     }
 
     @ViewBuilder
@@ -3163,19 +3243,22 @@ struct OutfitPlannerView: View {
     private func missingSlotHints(for dayIndex: Int, lookTime: LookTime) -> [String] {
         guard dayIndex < boardState.days.count else { return [] }
         var hints: [String] = []
-        let slots = OutfitSlot.allCases.filter { slot in
+        let core: [OutfitSlot] = hasOnePiece(dayIndex: dayIndex, lookTime: lookTime)
+            ? [.shoes, .outer] : [.top, .bottom, .shoes, .outer]
+        let slots = core.filter { slot in
             slot != .outer || shouldShowSlot(slot, dayIndex: dayIndex, lookTime: lookTime)
         }
-        for slot in slots {
-            if currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime) == nil {
-                if recommendedItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime).isEmpty {
-                    let slotName = slot.title.lowercased()
-                    let hint = String(
-                        format: NSLocalizedString("planner_no_available_slot_format", comment: ""),
-                        slotName
-                    )
-                    hints.append(hint)
-                }
+        let missingSlots = slots.filter { currentGarmentID(for: $0, dayIndex: dayIndex, lookTime: lookTime) == nil }
+        guard !missingSlots.isEmpty else { return [] }
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        for slot in missingSlots {
+            if eligibleItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime, ctx: ctx).isEmpty {
+                let slotName = slot.title.lowercased()
+                let hint = String(
+                    format: NSLocalizedString("planner_no_available_slot_format", comment: ""),
+                    slotName
+                )
+                hints.append(hint)
             }
         }
         return hints
@@ -3207,8 +3290,22 @@ struct OutfitPlannerView: View {
         }
     }
 
+    private func addEveningLookButton(dayIndex: Int) -> some View {
+        Button {
+            DS.haptic(0.35)
+            enableAfterWorkLook(dayIndex: dayIndex)
+        } label: {
+            Label(String(localized: "planner_add_evening_look"), systemImage: "plus")
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .buttonStyle(PlannerSuggestionActionStyle())
+    }
+
     private func shouldShowSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
+        if slot == .top || slot == .bottom {
+            return !hasOnePiece(dayIndex: dayIndex, lookTime: lookTime)
+        }
         if slot != .outer {
             return true
         }
@@ -3362,7 +3459,8 @@ struct OutfitPlannerView: View {
         isLocked: Bool,
         isLinked: Bool
     ) -> String {
-        var parts: [String] = [garment.displayTitle, slot.title]
+        let presentedSlot = garment.itemType?.isOnePiece == true ? OutfitSlot.onePiece : slot
+        var parts: [String] = [garment.displayTitle, presentedSlot.title]
         switch status {
         case .available:
             break
@@ -3677,7 +3775,13 @@ struct OutfitPlannerView: View {
     }
 
     private func handleDrop(items: [GarmentDragItem], targetDay: Int, targetSlot: OutfitSlot, lookTime: LookTime) -> Bool {
-        guard let item = items.first else { return false }
+        guard let item = items.first,
+              boardState.days.indices.contains(item.sourceDayIndex),
+              boardState.days.indices.contains(targetDay),
+              garmentID(for: item.sourceDayIndex, slot: item.sourceSlot, lookTime: item.lookTime) == item.garmentID else {
+            clearDragState()
+            return false
+        }
         
         // Same slot type check
         guard item.sourceSlot == targetSlot else {
@@ -3688,12 +3792,24 @@ struct OutfitPlannerView: View {
             return false
         }
 
-        // Same position - no action needed
-        if item.sourceDayIndex == targetDay && item.sourceSlot == targetSlot && item.lookTime == lookTime {
+        // Same position - no action needed.
+        if item.sourceDayIndex == targetDay && item.lookTime == lookTime {
             clearDragState()
             return false
         }
-        
+
+        if let source = garment(for: item.garmentID),
+           !canPlace(source, in: placementSlot(for: source, requestedSlot: targetSlot), dayIndex: targetDay, lookTime: lookTime) {
+            clearDragState()
+            return false
+        }
+        if let targetID = garmentID(for: targetDay, slot: targetSlot, lookTime: lookTime),
+           let target = garment(for: targetID),
+           !canPlace(target, in: placementSlot(for: target, requestedSlot: item.sourceSlot), dayIndex: item.sourceDayIndex, lookTime: item.lookTime) {
+            clearDragState()
+            return false
+        }
+
         // Check if garment is available
         if let garment = allGarments.first(where: { $0.id == item.garmentID }),
            garment.isCurrentlyUnavailable {
@@ -3720,7 +3836,11 @@ struct OutfitPlannerView: View {
         
         // Perform swap
         let success: Bool = withAnimation(DS.Animation.fast) {
-            if item.lookTime != lookTime {
+            let legacyOnePiece = item.sourceSlot == .top && (
+                garment(for: item.garmentID)?.itemType?.isOnePiece == true
+                || garmentID(for: targetDay, slot: targetSlot, lookTime: lookTime).flatMap { garment(for: $0) }?.itemType?.isOnePiece == true
+            )
+            if item.lookTime != lookTime || legacyOnePiece {
                 return swapAcrossLooks(
                     fromDay: item.sourceDayIndex,
                     fromSlot: item.sourceSlot,
@@ -3747,6 +3867,17 @@ struct OutfitPlannerView: View {
         }
         
         if success {
+            if item.lookTime == .day,
+               boardState.days[item.sourceDayIndex].garmentID(for: item.sourceSlot) != nil {
+                clearStructuralConflicts(for: item.sourceSlot, dayIndex: item.sourceDayIndex, lookTime: .day)
+            }
+            if lookTime == .day, boardState.days[targetDay].garmentID(for: targetSlot) != nil {
+                clearStructuralConflicts(for: targetSlot, dayIndex: targetDay, lookTime: .day)
+            }
+            for index in Set([item.sourceDayIndex, targetDay]) {
+                // The board swap can remove a day slot that was linked to evening.
+                synchronizeEveningLinks(forDay: index)
+            }
             DS.haptic(0.3)
             persistPlans(for: [item.sourceDayIndex, targetDay])
         } else {
@@ -3758,7 +3889,7 @@ struct OutfitPlannerView: View {
     }
 
     private func swapEveningGarments(fromDay: Int, fromSlot: OutfitSlot, toDay: Int, toSlot: OutfitSlot) -> Bool {
-        guard fromDay < boardState.days.count, toDay < boardState.days.count else { return false }
+        guard boardState.days.indices.contains(fromDay), boardState.days.indices.contains(toDay) else { return false }
         guard fromSlot == toSlot else {
             boardState.alertMessage = String(localized: "swap_error_different_slots")
             boardState.showUnavailableAlert = true
@@ -3785,6 +3916,8 @@ struct OutfitPlannerView: View {
             return false
         }
 
+        if toID != nil { clearStructuralConflicts(for: fromSlot, dayIndex: fromDay, lookTime: .evening) }
+        if fromID != nil { clearStructuralConflicts(for: toSlot, dayIndex: toDay, lookTime: .evening) }
         boardState.days[fromDay].setEveningGarment(toID, for: fromSlot)
         boardState.days[toDay].setEveningGarment(fromID, for: toSlot)
         return true
@@ -3798,7 +3931,7 @@ struct OutfitPlannerView: View {
         toSlot: OutfitSlot,
         toLook: LookTime
     ) -> Bool {
-        guard fromDay < boardState.days.count, toDay < boardState.days.count else { return false }
+        guard boardState.days.indices.contains(fromDay), boardState.days.indices.contains(toDay) else { return false }
         guard fromSlot == toSlot else {
             boardState.alertMessage = String(localized: "swap_error_different_slots")
             boardState.showUnavailableAlert = true
@@ -3828,8 +3961,15 @@ struct OutfitPlannerView: View {
             return false
         }
 
-        setGarmentID(toID, for: fromDay, slot: fromSlot, lookTime: fromLook)
-        setGarmentID(fromID, for: toDay, slot: toSlot, lookTime: toLook)
+        let fromDestination = toID.flatMap { garment(for: $0) }.map { placementSlot(for: $0, requestedSlot: fromSlot) } ?? fromSlot
+        let toDestination = fromID.flatMap { garment(for: $0) }.map { placementSlot(for: $0, requestedSlot: toSlot) } ?? toSlot
+        // Explicit swaps canonicalize a legacy top-stored dress only at its new destination.
+        setGarmentID(nil, for: fromDay, slot: fromSlot, lookTime: fromLook)
+        setGarmentID(nil, for: toDay, slot: toSlot, lookTime: toLook)
+        if toID != nil { clearStructuralConflicts(for: fromDestination, dayIndex: fromDay, lookTime: fromLook) }
+        if fromID != nil { clearStructuralConflicts(for: toDestination, dayIndex: toDay, lookTime: toLook) }
+        setGarmentID(toID, for: fromDay, slot: fromDestination, lookTime: fromLook)
+        setGarmentID(fromID, for: toDay, slot: toDestination, lookTime: toLook)
         return true
     }
 
@@ -3908,9 +4048,8 @@ struct OutfitPlannerView: View {
             ctx: ctx,
             baseExcludedIDs: baseExcludedIDs
         )
-        let lockedCats = lockedCategories(for: dayIndex, lookTime: .day)
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
-            .filter { !lockedCats.contains($0.category) }
+            .filter { generationAllows($0, dayIndex: dayIndex, lookTime: .day) }
 
         // Cycle through the wardrobe on repeated taps instead of ping-ponging
         // between the two highest-scoring items.
@@ -3953,7 +4092,10 @@ struct OutfitPlannerView: View {
         for slot in OutfitSlot.allCases {
             if boardState.days[dayIndex].isLocked(slot) { continue }
             let previousID = previousIDsBySlot[slot]
-            if boardState.days[dayIndex].garmentID(for: slot) == nil, let previousID {
+            if boardState.days[dayIndex].garmentID(for: slot) == nil, let previousID,
+               let previous = garment(for: previousID),
+               structuralConflicts(for: OutfitSlot.from(garment: previous), dayIndex: dayIndex, lookTime: .day).isEmpty,
+               !boardState.days[dayIndex].assignedGarmentIDs.contains(previousID) {
                 boardState.days[dayIndex].setGarment(previousID, for: slot)
             }
             let currentID = boardState.days[dayIndex].garmentID(for: slot)
@@ -3961,6 +4103,8 @@ struct OutfitPlannerView: View {
                 didChange = true
             }
         }
+
+        synchronizeEveningLinks(forDay: dayIndex)
 
         boardState.days[dayIndex].regenVersion += 1
         persistDayPlan(dayIndex)
@@ -4015,6 +4159,7 @@ struct OutfitPlannerView: View {
     }
 
     private func openAddPicker(dayIndex: Int, lookTime: LookTime, preferredSlot: OutfitSlot? = nil) {
+        let preferredSlot = preferredSlot.map { editingSlot(for: $0, dayIndex: dayIndex, lookTime: lookTime) }
         var slots = availableSlots(for: dayIndex, lookTime: lookTime)
         if let preferredSlot, !slots.contains(preferredSlot) {
             slots.insert(preferredSlot, at: 0)
@@ -4033,15 +4178,127 @@ struct OutfitPlannerView: View {
         activeSheet = .addNewItem(dayIndex: dayIndex, slot: slot, lookTime: lookTime)
     }
 
+    private func assignmentIDs(dayIndex: Int, lookTime: LookTime) -> [OutfitSlot: UUID] {
+        OutfitSlot.allCases.reduce(into: [:]) { result, slot in
+            result[slot] = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime)
+        }
+    }
+
+    private func hasOnePiece(dayIndex: Int, lookTime: LookTime) -> Bool {
+        assignmentIDs(dayIndex: dayIndex, lookTime: lookTime).values.contains {
+            garment(for: $0)?.itemType?.isOnePiece == true
+        }
+    }
+
+    private func visibleAssignedSlots(dayIndex: Int, lookTime: LookTime) -> [OutfitSlot] {
+        let assignments = assignmentIDs(dayIndex: dayIndex, lookTime: lookTime)
+        let onePiece = assignments[.onePiece] != nil || assignments[.top].flatMap { garment(for: $0) }?.itemType?.isOnePiece == true
+        return OutfitSlot.displayOrder.filter { slot in
+            guard let id = assignments[slot], garment(for: id) != nil else { return false }
+            if onePiece, slot == .bottom { return false }
+            if assignments[.onePiece] != nil, slot == .top { return false }
+            return true
+        }
+    }
+
+    private func structuralConflicts(for slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> Set<OutfitSlot> {
+        conflictingSlots(for: slot, assignments: assignmentIDs(dayIndex: dayIndex, lookTime: lookTime))
+    }
+
+    private func placementSlot(for item: Garment, requestedSlot: OutfitSlot) -> OutfitSlot {
+        requestedSlot == .top && item.itemType?.isOnePiece == true ? .onePiece : requestedSlot
+    }
+
+    private func editingSlot(for slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> OutfitSlot {
+        guard let id = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime),
+              let item = garment(for: id) else { return slot }
+        return placementSlot(for: item, requestedSlot: slot)
+    }
+
+    private func conflictingSlots(for slot: OutfitSlot, assignments: [OutfitSlot: UUID]) -> Set<OutfitSlot> {
+        var conflicts = slot.conflictingSlots
+        if slot == .bottom,
+           let id = assignments[.top],
+           garment(for: id)?.itemType?.isOnePiece == true {
+            conflicts.insert(.top)
+        }
+        return conflicts.filter { assignments[$0] != nil }
+    }
+
+    private func canPlace(_ garment: Garment, in slot: OutfitSlot, dayIndex: Int, lookTime: LookTime, allowLockedTarget: Bool = false) -> Bool {
+        guard boardState.days.indices.contains(dayIndex), slot.accepts(garment) else { return false }
+        let targetLocked = lookTime == .day ? boardState.days[dayIndex].isLocked(slot)
+            : boardState.days[dayIndex].isEveningLocked(slot) || isEveningLinked(dayIndex: dayIndex, slot: slot)
+        if targetLocked, !allowLockedTarget {
+            boardState.alertMessage = String(localized: "swap_error_locked")
+            boardState.showUnavailableAlert = true
+            return false
+        }
+        if assignmentIDs(dayIndex: dayIndex, lookTime: lookTime).contains(where: { $0.key != slot && $0.value == garment.id }) {
+            boardState.alertMessage = String(localized: "swap_error_duplicate")
+            boardState.showUnavailableAlert = true
+            return false
+        }
+        let conflicts = structuralConflicts(for: slot, dayIndex: dayIndex, lookTime: lookTime)
+        let lockedConflict = conflicts.contains { conflict in
+            lookTime == .day ? boardState.days[dayIndex].isLocked(conflict)
+                : boardState.days[dayIndex].isEveningLocked(conflict) || isEveningLinked(dayIndex: dayIndex, slot: conflict)
+        }
+        if lockedConflict {
+            boardState.alertMessage = String(localized: "assign_error_structure_locked")
+            boardState.showUnavailableAlert = true
+        }
+        return !lockedConflict
+    }
+
+    private func clearStructuralConflicts(for slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) {
+        for conflict in structuralConflicts(for: slot, dayIndex: dayIndex, lookTime: lookTime) {
+            setGarmentID(nil, for: dayIndex, slot: conflict, lookTime: lookTime)
+            if lookTime == .day {
+                // Keep the evening assignment as its own item when its day source disappears.
+                boardState.days[dayIndex].eveningLinkedSlots.remove(conflict)
+            }
+        }
+        boardState.days[dayIndex].eveningUsesDayBottom = boardState.days[dayIndex].eveningLinkedSlots.contains(.bottom)
+    }
+
+    /// Follow a changed day item only while the evening can keep its own structure.
+    /// A removed day source leaves its existing evening item intact and independent.
+    private func synchronizeEveningLinks(forDay dayIndex: Int) {
+        guard boardState.days.indices.contains(dayIndex) else { return }
+        for slot in Array(boardState.days[dayIndex].eveningLinkedSlots) {
+            let eveningID = boardState.days[dayIndex].eveningGarmentID(for: slot)
+            let dayID = boardState.days[dayIndex].garmentID(for: slot)
+            if dayID == eveningID, dayID != nil { continue }
+            let status = lookWearStatus(dayIndex: dayIndex, lookTime: .evening)
+            let eveningAssignments = boardState.days[dayIndex].eveningSlots.compactMapValues(\.garmentID)
+            var conflicts = slot.conflictingSlots
+            if slot == .bottom, let topID = eveningAssignments[.top],
+               garment(for: topID)?.itemType?.isOnePiece == true {
+                conflicts.insert(.top)
+            }
+            if let dayID, let item = garment(for: dayID), slot.accepts(item),
+               status != .worn, status != .planned,
+               !conflicts.contains(where: { eveningAssignments[$0] != nil }),
+               !eveningAssignments.contains(where: { $0.key != slot && $0.value == dayID }) {
+                boardState.days[dayIndex].setEveningGarment(dayID, for: slot, locked: true)
+            } else {
+                boardState.days[dayIndex].eveningLinkedSlots.remove(slot)
+            }
+        }
+        boardState.days[dayIndex].eveningUsesDayBottom = boardState.days[dayIndex].eveningLinkedSlots.contains(.bottom)
+    }
+
     private func availableSlots(for dayIndex: Int, lookTime: LookTime) -> [OutfitSlot] {
-        guard dayIndex < boardState.days.count else { return [] }
+        guard boardState.days.indices.contains(dayIndex) else { return [] }
         var slots: [OutfitSlot] = []
+        let onePiece = hasOnePiece(dayIndex: dayIndex, lookTime: lookTime)
 
         let topID = currentGarmentID(for: .top, dayIndex: dayIndex, lookTime: lookTime)
-        if topID == nil { slots.append(.top) }
+        if topID == nil, !onePiece { slots.append(.top) }
 
         let bottomID = currentGarmentID(for: .bottom, dayIndex: dayIndex, lookTime: lookTime)
-        if bottomID == nil { slots.append(.bottom) }
+        if bottomID == nil, !onePiece { slots.append(.bottom) }
 
         let shoesID = currentGarmentID(for: .shoes, dayIndex: dayIndex, lookTime: lookTime)
         if shoesID == nil { slots.append(.shoes) }
@@ -4052,16 +4309,23 @@ struct OutfitPlannerView: View {
             slots.append(.outer)
         }
 
-        let accessoryID = currentGarmentID(for: .accessory, dayIndex: dayIndex, lookTime: lookTime)
-        if accessoryID == nil {
-            slots.append(.accessory)
+        if let accessory = OutfitSlot.accessorySlots.first(where: {
+            currentGarmentID(for: $0, dayIndex: dayIndex, lookTime: lookTime) == nil
+        }) {
+            slots.append(accessory)
+        }
+
+        // Add complements first; changing the core structure remains an explicit choice.
+        if onePiece, topID == nil { slots.append(.top) }
+        if !onePiece, currentGarmentID(for: .onePiece, dayIndex: dayIndex, lookTime: lookTime) == nil {
+            slots.append(.onePiece)
         }
 
         return slots
     }
 
     private func currentGarmentID(for slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> UUID? {
-        guard dayIndex < boardState.days.count else { return nil }
+        guard boardState.days.indices.contains(dayIndex) else { return nil }
         let day = boardState.days[dayIndex]
         if lookTime == .evening, isEveningLinked(dayIndex: dayIndex, slot: slot) {
             return day.garmentID(for: slot)
@@ -4094,26 +4358,32 @@ struct OutfitPlannerView: View {
     }
 
     private func slotCandidates(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
-        let allowed = slot.allowedCategories
+        let compatibleSlot = editingSlot(for: slot, dayIndex: dayIndex, lookTime: lookTime)
         let currentID = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime)
+        let usedInLook = Set(assignmentIDs(dayIndex: dayIndex, lookTime: lookTime).values)
         return allGarments.filter { garment in
-            guard allowed.contains(garment.category) else { return false }
+            guard compatibleSlot.accepts(garment) else { return false }
             if garment.id == currentID { return true }
-            return !isGarmentUsedElsewhere(garment.id, excludingDay: dayIndex)
+            return !usedInLook.contains(garment.id) && !isGarmentUsedElsewhere(garment.id, excludingDay: dayIndex)
         }
     }
 
-    private func recommendedItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
+    /// Eligibility only: render-time empty hints do not need recommendation scoring.
+    private func eligibleItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime, ctx: RecoContext) -> [Garment] {
         let referenceDate = boardState.days[dayIndex].date
-        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         let candidates = slotCandidates(slot, dayIndex: dayIndex, lookTime: lookTime)
-        let base = AvailabilityService.recommendedItemsForSlot(
-            slot,
+        return AvailabilityService.recommendedItemsForSlot(
+            editingSlot(for: slot, dayIndex: dayIndex, lookTime: lookTime),
             garments: candidates,
             date: referenceDate,
             ctx: ctx,
             latestWearMap: latestWearByGarmentID
         )
+    }
+
+    private func recommendedItemsForSlot(_ slot: OutfitSlot, dayIndex: Int, lookTime: LookTime) -> [Garment] {
+        let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
+        let base = eligibleItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime, ctx: ctx)
         let day = boardState.days[dayIndex]
         let pairedIDs = lookTime == .evening ? day.eveningAssignedGarmentIDs : day.assignedGarmentIDs
         let paired = pairedIDs.compactMap { id in allGarments.first { $0.id == id } }
@@ -4132,7 +4402,7 @@ struct OutfitPlannerView: View {
         let ctx = recoContext(for: dayIndex, isEvening: lookTime == .evening)
         let candidates = slotCandidates(slot, dayIndex: dayIndex, lookTime: lookTime)
         return AvailabilityService.allItemsForSlot(
-            slot,
+            editingSlot(for: slot, dayIndex: dayIndex, lookTime: lookTime),
             garments: candidates,
             date: referenceDate,
             ctx: ctx,
@@ -4314,21 +4584,29 @@ struct OutfitPlannerView: View {
         return excluded
     }
 
-    private func lockedCategories(for dayIndex: Int, lookTime: LookTime) -> Set<Category> {
-        guard dayIndex < boardState.days.count else { return [] }
+    private func generationAllows(_ garment: Garment, dayIndex: Int, lookTime: LookTime, preserveStructure: Bool = false) -> Bool {
+        guard boardState.days.indices.contains(dayIndex) else { return false }
         let day = boardState.days[dayIndex]
-        let lockedSlots = OutfitSlot.allCases.filter { slot in
-            lookTime == .day ? day.isLocked(slot) : day.isEveningLocked(slot)
-        }
-        var categories = Set(lockedSlots.compactMap { $0.allowedCategories.first })
-        if lookTime == .evening {
-            for slot in day.eveningLinkedSlots {
-                if let category = slot.allowedCategories.first {
-                    categories.insert(category)
-                }
+        let assignments = assignmentIDs(dayIndex: dayIndex, lookTime: lookTime)
+        let candidateSlot = OutfitSlot.from(garment: garment)
+        for (slot, id) in assignments {
+            let protected = lookTime == .day ? day.isLocked(slot)
+                : day.isEveningLocked(slot) || isEveningLinked(dayIndex: dayIndex, slot: slot)
+            if protected {
+                if id == garment.id { return false }
+                let protectedSlot = self.garment(for: id)?.itemType?.isOnePiece == true ? OutfitSlot.onePiece : slot
+                if !protectedSlot.isAccessory,
+                   protectedSlot == candidateSlot || protectedSlot.conflictingSlots.contains(candidateSlot) { return false }
             }
         }
-        return categories
+        if preserveStructure {
+            if hasOnePiece(dayIndex: dayIndex, lookTime: lookTime), candidateSlot == .top || candidateSlot == .bottom {
+                return false
+            }
+            if candidateSlot == .onePiece,
+               assignments[.onePiece] != nil || assignments[.top] != nil || assignments[.bottom] != nil { return false }
+        }
+        return true
     }
 
     #if DEBUG
@@ -4447,7 +4725,8 @@ struct OutfitPlannerView: View {
             occasionStyle: cachedOccasionStyle,
             habitOccasion: habitOccasion,
             layerChoice: isEvening ? nil : ComfortPreferences.answer(for: state.date),
-            shortSleeveFromC: ComfortPreferences.shortSleeveFromC(comfortSamples)
+            shortSleeveFromC: ComfortPreferences.shortSleeveFromC(comfortSamples),
+            weatherHistory: cachedWeatherHistory
         )
     }
 
@@ -4675,7 +4954,15 @@ struct OutfitPlannerView: View {
     }
 
     private func refreshAffinityCaches() {
-        let signature = "\(occasionTagVersion)|\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
+        var historyHash = Hasher()
+        historyHash.combine(activeProfile?.id)
+        for garment in allGarments { historyHash.combine(garment.id); historyHash.combine(garment.itemType) }
+        for event in recommendationEvents.prefix(400) {
+            historyHash.combine(event.id); historyHash.combine(event.kindRaw); historyHash.combine(event.temperatureC)
+            historyHash.combine(event.wasRaining); historyHash.combine(event.selectedGarmentIDs)
+        }
+        let historySignature = historyHash.finalize()
+        let signature = "\(historySignature)|\(occasionTagVersion)|\(allGarments.count)|\(wearEvents.count)|\(dismissedOutfits.count)|\(recommendationEvents.count)|\(allGarments.first?.id.uuidString ?? "")|\(wearEvents.first?.id.uuidString ?? "")"
         guard signature != affinityCacheSignature else { return }
         affinityCacheSignature = signature
         cachedTaste = TasteAffinityBuilder.build(
@@ -4699,6 +4986,7 @@ struct OutfitPlannerView: View {
             rejectedEvents: Array(recentRejections),
             swipeEvents: Array(recentSwipes)
         )
+        cachedWeatherHistory = GarmentWeatherHistory(events: Array(recommendationEvents.prefix(400)), garments: allGarments, profileID: activeProfile?.id)
         cachedLatestWearByGarmentID = WearHistoryService.latestWearMap(events: wearEvents)
         cachedOccasionStyle = OccasionStyleProfile.build(events: wearEvents, garments: allGarments)
         TasteProfileStore.persist(cachedTaste, profileID: activeProfile?.id, context: context)
@@ -4725,6 +5013,9 @@ struct OutfitPlannerView: View {
         lookTime: LookTime,
         allowUnavailable: Bool = false
     ) -> Bool {
+        let previousID = currentGarmentID(for: slot, dayIndex: dayIndex, lookTime: lookTime)
+        let slot = placementSlot(for: garment, requestedSlot: slot)
+        guard canPlace(garment, in: slot, dayIndex: dayIndex, lookTime: lookTime) else { return false }
         if !allowUnavailable {
             let status = availabilityStatus(for: garment, dayIndex: dayIndex, lookTime: lookTime)
             if !AvailabilityService.isRecommendedEligible(status) {
@@ -4733,12 +5024,6 @@ struct OutfitPlannerView: View {
                 return false
             }
         }
-
-        let previousID: UUID? = dayIndex < boardState.days.count
-            ? (lookTime == .evening
-                ? boardState.days[dayIndex].eveningGarmentID(for: slot)
-                : boardState.days[dayIndex].garmentID(for: slot))
-            : nil
 
         let success: Bool
         if lookTime == .evening {
@@ -4754,8 +5039,10 @@ struct OutfitPlannerView: View {
             )
         }
         if success {
-            if lookTime == .day && isEveningLinked(dayIndex: dayIndex, slot: slot) {
-                boardState.days[dayIndex].setEveningGarment(garment.id, for: slot, locked: true)
+            if lookTime == .day {
+                clearStructuralConflicts(for: slot, dayIndex: dayIndex, lookTime: .day)
+                // Assignment can also move an unprotected item from another day.
+                for index in boardState.days.indices { synchronizeEveningLinks(forDay: index) }
             }
             if let previousID, previousID != garment.id {
                 learnUserChoice(garment, over: previousID, dayIndex: dayIndex, lookTime: lookTime)
@@ -4774,7 +5061,7 @@ struct OutfitPlannerView: View {
         dayIndex: Int,
         allowUnavailable: Bool
     ) -> Bool {
-        guard dayIndex < boardState.days.count else { return false }
+        guard canPlace(garment, in: slot, dayIndex: dayIndex, lookTime: .evening) else { return false }
         if boardState.days[dayIndex].isEveningLocked(slot) || isEveningLinked(dayIndex: dayIndex, slot: slot) {
             boardState.alertMessage = String(localized: "swap_error_locked")
             boardState.showUnavailableAlert = true
@@ -4793,6 +5080,7 @@ struct OutfitPlannerView: View {
             boardState.showUnavailableAlert = true
             return false
         }
+        clearStructuralConflicts(for: slot, dayIndex: dayIndex, lookTime: .evening)
         boardState.days[dayIndex].setEveningGarment(garment.id, for: slot)
         return true
     }
@@ -4837,15 +5125,21 @@ struct OutfitPlannerView: View {
     }
 
     private func toggleEveningLink(dayIndex: Int, slot: OutfitSlot, enable: Bool) {
-        guard dayIndex < boardState.days.count else { return }
+        guard boardState.days.indices.contains(dayIndex) else { return }
         if enable {
-            guard let dayID = boardState.days[dayIndex].garmentID(for: slot) else { return }
+            guard let dayID = boardState.days[dayIndex].garmentID(for: slot),
+                  let item = garment(for: dayID) else { return }
+            let destination = placementSlot(for: item, requestedSlot: slot)
+            guard canPlace(item, in: destination, dayIndex: dayIndex, lookTime: .evening) else { return }
+            clearStructuralConflicts(for: destination, dayIndex: dayIndex, lookTime: .evening)
+            if destination != slot { boardState.days[dayIndex].setEveningGarment(nil, for: destination) }
             boardState.days[dayIndex].eveningLinkedSlots.insert(slot)
             boardState.days[dayIndex].setEveningGarment(dayID, for: slot, locked: true)
         } else {
             boardState.days[dayIndex].eveningLinkedSlots.remove(slot)
             boardState.days[dayIndex].setEveningGarment(nil, for: slot, locked: false)
         }
+        boardState.days[dayIndex].eveningUsesDayBottom = boardState.days[dayIndex].eveningLinkedSlots.contains(.bottom)
         persistDayPlan(dayIndex)
     }
 
@@ -4924,7 +5218,7 @@ struct OutfitPlannerView: View {
         )
 
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
-            .filter { slot.allowedCategories.contains($0.category) }
+            .filter { editingSlot(for: slot, dayIndex: dayIndex, lookTime: lookTime).accepts($0) }
             .filter { $0.id != currentID }
         var excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
         if let currentID {
@@ -4958,10 +5252,14 @@ struct OutfitPlannerView: View {
         )
 
         if let replacement = suggestions.first {
+            let destination = placementSlot(for: replacement, requestedSlot: slot)
+            guard canPlace(replacement, in: destination, dayIndex: dayIndex, lookTime: lookTime, allowLockedTarget: replacingUnavailable) else { return }
+            clearStructuralConflicts(for: destination, dayIndex: dayIndex, lookTime: lookTime)
             if lookTime == .evening {
-                boardState.days[dayIndex].setEveningGarment(replacement.id, for: slot)
+                boardState.days[dayIndex].setEveningGarment(replacement.id, for: destination)
             } else {
-                boardState.days[dayIndex].setGarment(replacement.id, for: slot)
+                boardState.days[dayIndex].setGarment(replacement.id, for: destination)
+                synchronizeEveningLinks(forDay: dayIndex)
             }
             if !replacingUnavailable, let currentID {
                 recordReplacement(
@@ -5082,6 +5380,8 @@ struct OutfitPlannerView: View {
     private func generateDayOutfit(dayIndex i: Int, fillMissingOnly: Bool) {
         guard i < boardState.days.count else { return }
         guard !isUniformOnlyDay(i) else { return }
+        let status = lookWearStatus(dayIndex: i, lookTime: .day)
+        guard !fillMissingOnly || (status != .planned && status != .worn) else { return }
         let state = boardState.days[i]
         let signposter = WearItPerformance.plannerSignposter
         let missingSlots = Set(OutfitSlot.allCases.filter {
@@ -5101,16 +5401,15 @@ struct OutfitPlannerView: View {
             baseExcludedIDs: baseExcludedIDs
         )
         let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
-        let lockedCats = lockedCategories(for: i, lookTime: .day)
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
-            .filter { !lockedCats.contains($0.category) }
+            .filter { generationAllows($0, dayIndex: i, lookTime: .day, preserveStructure: fillMissingOnly) }
 
         // Optional slots (e.g. an outer layer in summer) must not trigger a
         // complete recommendation pass that cannot change any assignment.
         // Keep the full pool for partial looks so combination scoring stays intact.
         if fillMissingOnly {
             let canFillMissingSlot = pool.contains { garment in
-                guard missingSlots.contains(OutfitSlot.from(category: garment.category)),
+                guard missingSlots.contains(OutfitSlot.from(garment: garment)),
                       !excludedMerged.contains(garment.id),
                       !garment.isBlocked,
                       !garment.isCurrentlyUnavailable else { return false }
@@ -5137,6 +5436,7 @@ struct OutfitPlannerView: View {
         )
 
         boardState.setOutfit(forDay: i, garments: outfit, overwriteExisting: !fillMissingOnly)
+        synchronizeEveningLinks(forDay: i)
         boardState.days[i].insufficientItemsWarning = boardState.days[i].assignedGarmentIDs.isEmpty && i > 0
         persistDayPlan(i)
         #if DEBUG
@@ -5168,9 +5468,8 @@ struct OutfitPlannerView: View {
             ctx: ctx,
             baseExcludedIDs: baseExcludedIDs
         )
-        let lockedCats = lockedCategories(for: dayIndex, lookTime: .evening)
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
-            .filter { !lockedCats.contains($0.category) }
+            .filter { generationAllows($0, dayIndex: dayIndex, lookTime: .evening) }
         var excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
         if rotate {
             excludedMerged.formUnion(previousEveningIDs)
@@ -5209,6 +5508,8 @@ struct OutfitPlannerView: View {
     private func generateEveningOutfitIfNeeded(dayIndex i: Int, fillMissingOnly: Bool) {
         guard i < boardState.days.count else { return }
         guard boardState.days[i].useEveningLook else { return }
+        let status = lookWearStatus(dayIndex: i, lookTime: .evening)
+        guard !fillMissingOnly || (status != .planned && status != .worn) else { return }
 
         let currentEveningIDs = boardState.days[i].eveningAssignedGarmentIDs
         if fillMissingOnly, !currentEveningIDs.isEmpty {
@@ -5224,9 +5525,8 @@ struct OutfitPlannerView: View {
             baseExcludedIDs: baseExcludedIDs
         )
         let excludedMerged = baseExcludedIDs.union(cooldownExcludedIDs)
-        let lockedCats = lockedCategories(for: i, lookTime: .evening)
         let pool = recommendedPool(referenceDate: referenceDate, ctx: ctx)
-            .filter { !lockedCats.contains($0.category) }
+            .filter { generationAllows($0, dayIndex: i, lookTime: .evening, preserveStructure: fillMissingOnly) }
         let outfit = AIRecommender.shared.suggestOutfit(
             from: pool,
             ctx: ctx,
@@ -5251,20 +5551,39 @@ struct OutfitPlannerView: View {
     }
 
     private func setEveningOutfit(forDay dayIndex: Int, garments: [Garment]) {
-        guard dayIndex < boardState.days.count else { return }
-        for slot in OutfitSlot.allCases {
-            if !boardState.days[dayIndex].isEveningLocked(slot) &&
-                !isEveningLinked(dayIndex: dayIndex, slot: slot) {
-                boardState.days[dayIndex].setEveningGarment(nil, for: slot)
-            }
+        guard boardState.days.indices.contains(dayIndex) else { return }
+        let state = boardState.days[dayIndex]
+        let original = state.eveningSlots.compactMapValues(\.garmentID)
+        let protected = Set(OutfitSlot.allCases.filter {
+            state.isEveningLocked($0) || state.eveningLinkedSlots.contains($0)
+        })
+        // Validate before clearing, so a stale suggestion cannot remove a locked structure.
+        guard !garments.contains(where: { item in
+            !conflictingSlots(for: OutfitSlot.from(garment: item), assignments: original).isDisjoint(with: protected)
+        }) else { return }
+
+        var assignments = original.filter { protected.contains($0.key) }
+        let retained = garments.filter { item in
+            original.contains { $0.value == item.id && $0.key.accepts(item) }
         }
-        for garment in garments {
-            let slot = OutfitSlot.from(category: garment.category)
-            if !boardState.days[dayIndex].isEveningLocked(slot),
-               !isEveningLinked(dayIndex: dayIndex, slot: slot),
-               boardState.days[dayIndex].eveningGarmentID(for: slot) == nil {
-                boardState.days[dayIndex].setEveningGarment(garment.id, for: slot)
+        let incoming = retained + garments.filter { item in !retained.contains { $0.id == item.id } }
+        var assignedCore: Set<OutfitSlot> = []
+        for item in incoming {
+            guard !assignments.values.contains(item.id) else { continue }
+            let previous = OutfitSlot.displayOrder.first {
+                original[$0] == item.id && $0.accepts(item) && assignments[$0] == nil
             }
+            guard let slot = previous ?? OutfitSlot.allocationSlot(for: item, assignments: assignments),
+                  !protected.contains(slot), assignments[slot] == nil,
+                  assignedCore.isDisjoint(with: slot.conflictingSlots) else { continue }
+            let conflicts = conflictingSlots(for: slot, assignments: assignments)
+            guard conflicts.isDisjoint(with: protected) else { continue }
+            for conflict in conflicts { assignments[conflict] = nil }
+            assignments[slot] = item.id
+            if !slot.isAccessory { assignedCore.insert(slot) }
+        }
+        for slot in OutfitSlot.allCases where !protected.contains(slot) {
+            boardState.days[dayIndex].setEveningGarment(assignments[slot], for: slot)
         }
     }
 
@@ -5317,16 +5636,14 @@ struct OutfitPlannerView: View {
                 }
             }
         } else {
-            var remainingIDs = plan.selectedGarmentIDs
-            for slot in OutfitSlot.allCases {
-                if let id = remainingIDs.first(where: { id in
-                    guard let garment = allGarments.first(where: { $0.id == id }) else { return false }
-                    return OutfitSlot.from(category: garment.category) == slot
-                }) {
-                    boardState.days[dayIndex].setGarment(id, for: slot)
-                    usedIDs.insert(id)
-                    remainingIDs.removeAll { $0 == id }
-                }
+            var allocated: [OutfitSlot: UUID] = [:]
+            for id in plan.selectedGarmentIDs {
+                guard let item = garment(for: id), !allocated.values.contains(id),
+                      let slot = OutfitSlot.allocationSlot(for: item, assignments: allocated) else { continue }
+                // This is an in-memory legacy fallback; saved slot maps remain authoritative.
+                allocated[slot] = id
+                boardState.days[dayIndex].setGarment(id, for: slot)
+                usedIDs.insert(id)
             }
 
             if !plan.lockedGarmentIDs.isEmpty {
@@ -5478,6 +5795,7 @@ struct OutfitPlannerView: View {
         let key = [
             String(day.date.timeIntervalSince1970),
             OutfitSlot.allCases.map { current[$0]?.uuidString ?? "-" }.joined(separator: ","),
+            OutfitSlot.allCases.filter { day.isLocked($0) }.map(\.rawValue).joined(separator: ","),
             forecastKey(for: day.forecast),
             availableGarmentsSignature
         ].joined(separator: "#")
@@ -5486,9 +5804,8 @@ struct OutfitPlannerView: View {
         let locked: [OutfitSlot: UUID] = current.filter { day.isLocked($0.key) }
         let crossDay = crossDayExclusions(excludingDay: dayIndex)
         let ctx = recoContext(for: dayIndex)
-        let lockedCats = lockedCategories(for: dayIndex, lookTime: .day)
         let pool = recommendedPool(referenceDate: day.date, ctx: ctx)
-            .filter { !lockedCats.contains($0.category) }
+            .filter { generationAllows($0, dayIndex: dayIndex, lookTime: .day) }
         let ranked = AIRecommender.shared.rankLooks(
             from: pool,
             ctx: ctx,
@@ -5503,8 +5820,11 @@ struct OutfitPlannerView: View {
         for look in ranked {
             var assignment = locked
             for garment in look.garments {
-                let slot = OutfitSlot.from(category: garment.category)
-                if assignment[slot] == nil { assignment[slot] = garment.id }
+                guard !assignment.values.contains(garment.id),
+                      let slot = OutfitSlot.allocationSlot(for: garment, assignments: assignment),
+                      assignment[slot] == nil,
+                      conflictingSlots(for: slot, assignments: assignment).isEmpty else { continue }
+                assignment[slot] = garment.id
             }
             let ids = Set(assignment.values)
             guard !seen.contains(ids) else { continue }
@@ -5622,11 +5942,9 @@ struct OutfitPlannerView: View {
     private func submitFormalityFeedback(for dayIndex: Int, direction: Int) {
         guard dayIndex < boardState.days.count else { return }
         let kind: RecommendationFeedbackKind = direction < 0 ? .tooFormal : .tooCasual
-        let shownIDs = shownAlternatives(for: dayIndex).map(\.id)
         guard recordLearningEvent(
             dayIndex: dayIndex,
-            kind: kind,
-            shownGarmentIDs: shownIDs
+            kind: kind
         ) else { return }
         DS.haptic(0.4)
         let current = boardState.days[dayIndex].overrides.desiredFormality ?? preferredFormality
@@ -5662,11 +5980,9 @@ struct OutfitPlannerView: View {
         }
         guard !selected.isEmpty else { return }
 
-        let shown = shownAlternatives(for: dayIndex)
         guard recordLearningEvent(
             dayIndex: dayIndex,
-            kind: kind,
-            shownGarmentIDs: shown.map(\.id)
+            kind: kind
         ) else { return }
 
         let ctx = recoContext(for: dayIndex)
@@ -5679,46 +5995,17 @@ struct OutfitPlannerView: View {
         )
         AIRecommender.shared.learn(
             from: selected,
-            shown: shown,
             ctx: ctx,
             reward: reward,
             modelContext: context
         )
     }
 
-    /// Top recommended alternatives per filled slot — used as negative samples for learning.
-    private func shownAlternatives(for dayIndex: Int) -> [Garment] {
-        guard dayIndex < boardState.days.count else { return [] }
-        let day = boardState.days[dayIndex]
-        var result: [Garment] = []
-        var seen = Set<UUID>()
-
-        func appendRecommended(for lookTime: LookTime, filledSlots: [OutfitSlot]) {
-            for slot in filledSlots {
-                for garment in recommendedItemsForSlot(slot, dayIndex: dayIndex, lookTime: lookTime).prefix(5) {
-                    if seen.insert(garment.id).inserted {
-                        result.append(garment)
-                    }
-                }
-            }
-        }
-
-        let dayFilled = OutfitSlot.allCases.filter { day.garmentID(for: $0) != nil }
-        appendRecommended(for: .day, filledSlots: dayFilled)
-        if day.useEveningLook {
-            let eveningFilled = OutfitSlot.allCases.filter { day.eveningGarmentID(for: $0) != nil }
-            appendRecommended(for: .evening, filledSlots: eveningFilled)
-        }
-        return result
-    }
-
     private func applyDirectionalFeedback(dayIndex: Int, kind: RecommendationFeedbackKind) {
         guard dayIndex < boardState.days.count else { return }
-        let shownIDs = shownAlternatives(for: dayIndex).map(\.id)
         guard recordLearningEvent(
             dayIndex: dayIndex,
-            kind: kind,
-            shownGarmentIDs: shownIDs
+            kind: kind
         ) else { return }
         AIRecommender.shared.applyDirectionalFeedback(
             kind,
@@ -5729,20 +6016,19 @@ struct OutfitPlannerView: View {
 
     private func recordLearningEvent(
         dayIndex: Int,
-        kind: RecommendationFeedbackKind,
-        shownGarmentIDs: [UUID]
+        kind: RecommendationFeedbackKind
     ) -> Bool {
         guard dayIndex < boardState.days.count else { return false }
         let day = boardState.days[dayIndex]
         let garmentIDs = day.assignedGarmentIDs
         guard !garmentIDs.isEmpty else { return false }
         let plan = DayPlanService.shared.planFor(date: day.date, context: context)
-        let shownIDs = Array(Set(shownGarmentIDs + garmentIDs))
+        // Only this look was evaluated. Unseen day/evening alternatives are not rejections.
 
         return RecommendationEventStore.record(
             kind: kind,
             selectedGarmentIDs: garmentIDs,
-            shownGarmentIDs: shownIDs,
+            shownGarmentIDs: garmentIDs,
             dayPlanID: plan.id,
             context: recoContext(for: dayIndex),
             modelContext: context
@@ -6369,6 +6655,8 @@ struct OutfitPlannerView: View {
         if let garment = garment(for: id) {
             return [
                 garment.id.uuidString,
+                garment.category.rawValue,
+                garment.itemType?.rawValue ?? "",
                 garment.imagePath ?? "",
                 garment.thumbnailPath ?? "",
                 garment.isCurrentlyUnavailable ? "1" : "0"
@@ -6400,6 +6688,10 @@ private struct DayLineLabelStyle: LabelStyle {
 private struct DayCardSignature: Equatable {
     let dayIndex: Int
     let state: PlannerDayState
+    /// Resolve legacy day status too; wear history alone must not collapse a replacement.
+    let dayWearStatus: LookWearStatus?
+    let isDayLookCollapsed: Bool
+    let dynamicTypeSize: DynamicTypeSize
     let isExpanded: Bool
     let isSelected: Bool
     let welcomeLine: String?
@@ -6423,6 +6715,8 @@ private struct DayCardSignature: Equatable {
     let changeSuggestion: OutfitChangeSuggestion?
     /// The question shown on this card ("short with a jacket?" / "what is this event?").
     let question: String?
+    /// Saving a look photo must retire its capture prompt even if the outfit is unchanged.
+    let capturePrompts: String
     /// Open quick-swap strip on this card ("slot-lookTime"), if any.
     let quickSwap: String?
     /// A look on this card is mid-action, so the row renders dimmed and disabled.
@@ -6431,11 +6725,11 @@ private struct DayCardSignature: Equatable {
 
 private struct DayCardContainer<Content: View>: View, Equatable {
     let signature: DayCardSignature
-    let content: Content
+    let content: () -> Content
 
-    init(signature: DayCardSignature, @ViewBuilder content: () -> Content) {
+    init(signature: DayCardSignature, @ViewBuilder content: @escaping () -> Content) {
         self.signature = signature
-        self.content = content()
+        self.content = content
     }
 
     static func == (lhs: DayCardContainer<Content>, rhs: DayCardContainer<Content>) -> Bool {
@@ -6443,7 +6737,20 @@ private struct DayCardContainer<Content: View>: View, Equatable {
     }
 
     var body: some View {
-        content
+        content()
+    }
+}
+
+/// A concrete, deferred boundary between the card's large view-builder sections.
+/// The device crash exhausted the stack in Swift's recursive generic metadata
+/// decoding when every section was part of one eagerly constructed content type.
+/// Erase each section inside its body; erasing only the completed card is too late.
+/// Group keeps the existing rows/spacing, and garment lists retain their own IDs.
+private struct DayCardSection: View {
+    let content: () -> AnyView
+
+    var body: some View {
+        content()
     }
 }
 

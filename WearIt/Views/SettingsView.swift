@@ -15,6 +15,7 @@ import EventKit
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var cloudKit: CloudKitSyncMonitor
 
@@ -44,7 +45,7 @@ struct SettingsView: View {
     /// full-resolution photo on the main thread inside `body`.
     @State private var backdropPreviewImage: UIImage?
     @AppStorage("didSkipSignIn") private var didSkipSignIn = false
-    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.softSky.rawValue
+    @AppStorage(AppBackdropKeys.preset) private var backdropPresetRaw: String = AppBackdropPreset.system.rawValue
     @AppStorage(AppBackdropKeys.customImagePath) private var backdropCustomPath: String = ""
     @AppStorage(AppBackdropKeys.blurAmount) private var backdropBlurAmount: Double = AppBackdropBlur.defaultAmount
     @AppStorage(CalendarContextKeys.hebrewEnabled) private var hebrewCalendarEnabled = true
@@ -603,7 +604,7 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: preset.previewColors,
+                            colors: preset.colors(for: colorScheme),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
@@ -617,9 +618,9 @@ struct SettingsView: View {
                             )
                     }
                     .overlay(alignment: .bottom) {
-                        // Mini glass card to preview the floating effect
+                        // Preview the same adaptive content surface used by app cards.
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(.ultraThinMaterial)
+                            .fill(DS.Surface.content)
                             .frame(width: 44, height: 28)
                             .padding(.bottom, 10)
                     }
@@ -651,7 +652,7 @@ struct SettingsView: View {
                             .scaledToFill()
                             .frame(width: 72, height: 96)
                             .clipped()
-                            .overlay(Color.black.opacity(0.12))
+                            .overlay(DS.Surface.content.opacity(0.70))
                     } else {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .fill(Color(.systemGray5))
@@ -696,7 +697,7 @@ struct SettingsView: View {
                 Button(role: .destructive) {
                     AppBackdropStore.clearCustomImage()
                     backdropCustomPath = ""
-                    backdropPresetRaw = AppBackdropPreset.softSky.rawValue
+                    backdropPresetRaw = AppBackdropPreset.system.rawValue
                 } label: {
                     Label(String(localized: "backdrop_remove_photo"), systemImage: "trash")
                 }

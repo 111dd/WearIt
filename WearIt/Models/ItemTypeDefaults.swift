@@ -34,6 +34,8 @@ struct ItemTypeDefaults {
         .hoodie: .init(warmth: 3, formality: 1, season: .transitional, layerRole: .mid, weatherTags: [], styleTags: [.casual, .streetwear]),
         .cardigan: .init(warmth: 3, formality: 3, season: .transitional, layerRole: .mid, weatherTags: [], styleTags: [.smart_casual]),
         .vest: .init(warmth: 2, formality: 3, season: .transitional, layerRole: .mid, weatherTags: [], styleTags: [.smart_casual]),
+        .dress: .init(warmth: 2, formality: 3, season: .allSeason, layerRole: .base, weatherTags: [], styleTags: []),
+        .jumpsuit: .init(warmth: 2, formality: 3, season: .allSeason, layerRole: .base, weatherTags: [], styleTags: []),
 
         // MARK: Bottoms
         .jeans: .init(warmth: 3, formality: 2, season: .allSeason, layerRole: .base, weatherTags: [], styleTags: [.casual]),

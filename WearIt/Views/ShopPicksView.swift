@@ -17,6 +17,19 @@ import UIKit
 enum ShopPicksEngine {
     static let minimumWardrobe = 5
 
+    /// Both surfaces use the same bounded history; Stats keeps its own statistics window.
+    static func wearDescriptor() -> FetchDescriptor<WearEvent> {
+        var descriptor = FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)])
+        descriptor.fetchLimit = 400
+        return descriptor
+    }
+
+    static func recommendationDescriptor() -> FetchDescriptor<RecommendationEvent> {
+        var descriptor = FetchDescriptor<RecommendationEvent>(sortBy: [SortDescriptor(\RecommendationEvent.createdAt, order: .reverse)])
+        descriptor.fetchLimit = 300
+        return descriptor
+    }
+
     static func picks(
         products: [ShopProduct],
         garments: [Garment],
@@ -28,72 +41,149 @@ enum ShopPicksEngine {
         context: ModelContext,
         upcomingPlans: [DayPlan] = [],
         includeNextSeasonDeals: Bool = false,
-        overridePreferences: ShoppingPreferences? = nil,
-        limit: Int = 40
-    ) -> [PurchaseScorer.Pick] {
+        contentSignature: Int
+    ) async -> ShopRankingWorker.Result {
+        guard !Task.isCancelled else { return .init() }
         let wardrobe = personalWardrobe(garments, profile: profile)
-        guard wardrobe.count >= minimumWardrobe, !products.isEmpty else { return [] }
-        let wardrobeIDs = Set(wardrobe.map(\.id))
-        let wears = wearEvents.filter { event in event.garmentIDs.contains { wardrobeIDs.contains($0) } }
-        let recommendations = recommendationEvents.filter { $0.profileID == nil || $0.profileID == profile?.id }
-        let wear = WardrobeGapAnalyzer.wearSummary(events: wears)
-        let taste = TasteAffinityBuilder.build(
-            from: wardrobe,
-            choiceSignals: TasteAffinityBuilder.choiceSignals(
-                wearEvents: wears,
-                recommendationEvents: recommendations
-            )
-        )
-        let gaps = WardrobeGapAnalyzer.analyze(WardrobeGapAnalyzer.Input(
-            garments: wardrobe,
-            wearCounts: wear.counts,
-            wearDays: wear.days,
-            climate: WardrobeGapAnalyzer.climate(forecasts: forecasts, pastEvents: recommendations),
-            pastFormalShare: WardrobeGapAnalyzer.pastFormalShare(recommendations),
-            taste: taste,
-            checksRotation: true
-        ))
-        let preferences = overridePreferences ?? profile?.shoppingPreferences ?? ShoppingPreferences()
-        let resolution = ShoppingPreferences.resolvedDepartment(profile: profile, garments: wardrobe, feedback: feedback, products: products)
-        let input = PurchaseScorer.Input(
-            garments: wardrobe,
-            wearCounts: wear.counts,
-            taste: taste,
-            gaps: gaps,
-            profile: profile,
-            model: feedback.state.model,
-            modelContext: context,
-            forecasts: forecasts,
-            upcomingPlans: upcomingPlans,
-            includeNextSeasonDeals: includeNextSeasonDeals,
-            feedbackSignals: feedback.signals,
-            preferences: preferences,
-            department: preferences.department == .automatic ? resolution.department : preferences.department
-        )
-        return PurchaseScorer.rank(products, input: input, isHidden: { feedback.isHidden($0) }, limit: limit)
+        guard wardrobe.count >= minimumWardrobe, !products.isEmpty else {
+            return .init()
+        }
+        let preferences = profile?.shoppingPreferences ?? ShoppingPreferences()
+        let retainedIDs = ShopPersonalSelection.retainedIDs(profileID: profile?.id, preferences: preferences)
+        let state = AIRecommender.shared.ensureState(context: context, profileID: profile?.id)
+        var hash = Hasher()
+        hash.combine(contentSignature)
+        hash.combine(profile?.id)
+        hash.combine(preferences)
+        hash.combine(retainedIDs)
+        hash.combine(state.lookWeights)
+        hash.combine(state.lookBias)
+        hash.combine(state.lookInteractionCount)
+        let now = Date()
+        // Expire reuse on lookup without making elapsed time a semantic stale-result check.
+        hash.combine(Int(now.timeIntervalSince1970 / 60))
+        let key = hash.finalize()
+
+        return await ShopRankingCoordinator.shared.result(key: key) {
+            // Canonical value order lets Shopping and Stats reuse the same result.
+            let ordered = wardrobe.sorted { $0.id.uuidString < $1.id.uuidString }
+            let sizes = Dictionary(uniqueKeysWithValues: [Category.top, .bottom, .shoes, .outer].compactMap { category in
+                MySizesView.usualSize(for: category, profile: profile, garments: ordered).map { (category, $0) }
+            })
+            let profileValue = profile.map { PurchaseScorer.Profile(id: $0.id, warmthSensitivity: $0.warmthSensitivity,
+                rainTolerance: $0.rainTolerance, sizes: sizes) }
+            let resolution = ShoppingPreferences.resolvedDepartment(profile: profile, garments: ordered,
+                feedback: feedback, products: products)
+            let recommendations = recommendationEvents.sorted {
+                $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
+            }
+            return ShopRankingWorker.Request(key: key, products: products,
+                garments: ordered.map { ShopRankingWorker.GarmentValue($0) },
+                wearEvents: wearEvents.sorted {
+                    $0.date == $1.date ? $0.id.uuidString < $1.id.uuidString : $0.date > $1.date
+                }.map { ShopRankingWorker.WearValue($0) },
+                recommendationEvents: recommendations.map { ShopRankingWorker.RecommendationValue($0) },
+                searchItems: ordered.map { ShopSearchProfile.OwnedItem($0) },
+                searchFeedback: searchFeedback(feedback),
+                profile: profileValue, model: feedback.state.model,
+                lookWeights: state.lookWeights, lookBias: state.lookBias, lookInteractions: state.lookInteractionCount,
+                forecasts: forecasts, plans: planSnapshots(upcomingPlans, forecasts: forecasts, profileID: profile?.id, now: now),
+                includeNextSeason: includeNextSeasonDeals, feedback: feedback.signals, preferences: preferences,
+                department: preferences.department == .automatic ? resolution.department : preferences.department,
+                comfort: GarmentWeatherHistory(events: recommendations, garments: ordered, profileID: profile?.id),
+                hidden: Set(feedback.state.actions.keys.filter { feedback.isHidden($0, now: now) }).union(ordered.compactMap(\.shopProductID)),
+                now: now, retainedIDs: retainedIDs)
+        }
+    }
+
+    private static func searchFeedback(_ feedback: ShopFeedbackStore) -> [ShopSearchProfile.FeedbackItem] {
+        feedback.state.actions.keys.sorted().compactMap { id in
+            guard let actions = feedback.state.actions[id],
+                  let item = feedback.state.observedItems?[id] ?? feedback.state.keptItems[id] else { return nil }
+            let kind: ShopFeedbackKind
+            if actions[.bought] != nil { kind = .bought }
+            else if let dismissed = actions[.dismissed], dismissed >= (actions[.saved] ?? .distantPast) { kind = .dismissed }
+            else if actions[.saved] != nil { kind = .saved }
+            else { kind = .opened }
+            guard let date = actions[kind] else { return nil }
+            return ShopSearchProfile.FeedbackItem(item: item, kind: kind, date: date)
+        }
+    }
+
+    private static func planSnapshots(_ plans: [DayPlan], forecasts: [DayForecast], profileID: UUID?, now: Date) -> [PurchaseScorer.PlannedInput] {
+        let start = Calendar.current.startOfDay(for: now)
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: start) ?? start
+        var result: [PurchaseScorer.PlannedInput] = []
+        for plan in plans.sorted(by: { $0.date == $1.date ? $0.id.uuidString < $1.id.uuidString : $0.date < $1.date }) where plan.date >= start && plan.date < end && (plan.ownerID == nil || plan.ownerID == profileID) {
+            for evening in [false, true] {
+                if evening && plan.eveningEnabled != true { continue }
+                let status = evening ? plan.eveningLookWearStatus : plan.resolvedDayLookWearStatus
+                if status == .worn || status == .notWorn { continue }
+                let assignments = evening ? plan.eveningSlotAssignments : plan.slotAssignments
+                let ids = assignments.isEmpty && !evening ? plan.selectedGarmentIDs : OutfitSlot.allCases.compactMap { assignments[$0] }
+                let forecast = forecasts.first { Calendar.current.isDate($0.date, inSameDayAs: plan.date) }
+                let saved = evening ? plan.contextEveningTemp : plan.contextAfternoonTemp
+                let temps = [plan.contextTempHigh, plan.contextTempLow].compactMap { $0 }.filter(\.isFinite)
+                let mean = temps.isEmpty ? nil : temps.reduce(0, +) / Double(temps.count)
+                let temperature = saved.flatMap { $0.isFinite ? $0 : nil } ?? mean ?? forecast?.temperatureC
+                result.append(PurchaseScorer.PlannedInput(ids: Array(Set(ids)), date: plan.date, isEvening: evening,
+                    temperature: temperature, raining: plan.contextWasRaining ?? forecast?.isRaining ?? false))
+            }
+        }
+        return Array(result.prefix(14))
     }
 
     static func personalWardrobe(_ garments: [Garment], profile: UserProfile?) -> [Garment] {
         garments.filter { !$0.isBlocked && ($0.ownerID == nil || $0.ownerID == profile?.id) }
     }
 
-    static func browse(
-        products: [ShopProduct], preferences: ShoppingPreferences, feedback: ShopFeedbackStore,
-        query: String = "", limit: Int = 100
+    nonisolated static func browse(
+        products: [ShopProduct], preferences: ShoppingPreferences, hidden: Set<String>,
+        matches: [String: PurchaseScorer.Match], category: Category?, dealsOnly: Bool,
+        query: String = "", limit: Int = 100, itemType: ItemType? = nil, includesAccessories: Bool = false
     ) -> [PurchaseScorer.Pick] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let matching = products.lazy.filter { product in
-            guard product.item.available != false, !feedback.isHidden(product.id),
+        let matching = products.filter { product in
+            guard !Task.isCancelled, product.item.available != false, !hidden.contains(product.id),
                   preferences.allows(product: product) else { return false }
+            if let category { if product.category != category { return false } }
+            else if product.category == .accessory && !includesAccessories { return false }
+            if let itemType, product.itemType != itemType { return false }
+            if dealsOnly && product.discountPercent == nil { return false }
             if product.hasKnownSizeAvailability, let sizes = product.item.inStockSizes, sizes.isEmpty { return false }
             guard !search.isEmpty else { return true }
-            let searchable = [product.title, product.item.brand ?? "", product.storeName].joined(separator: " ")
-            return searchable.localizedStandardContains(search)
+            return [product.title, product.item.brand ?? "", product.storeName, product.category.title,
+                product.itemType?.title ?? ""].joined(separator: " ").localizedStandardContains(search)
         }
-        .prefix(max(0, limit))
-        return Array(matching).map { product in
-            PurchaseScorer.Pick(product: product, score: 0, wearsPerMonth: nil, looks: 0, reasons: [.checkSize], features: [])
+        // Stable round-robin by category and type/brand; crawl order never determines the feed.
+        var groups: [Category: [ShopProduct]] = [:]
+        for category in Category.allCases {
+            let buckets = Dictionary(grouping: matching.filter { $0.category == category }) {
+                ($0.itemType?.rawValue ?? "") + "|" + ($0.item.brand ?? "")
+            }
+            let keys = buckets.keys.sorted()
+            let maximum = buckets.values.map(\.count).max() ?? 0
+            var items: [ShopProduct] = []
+            for row in 0..<maximum {
+                for key in keys {
+                    if let bucket = buckets[key], row < bucket.count { items.append(bucket[row]) }
+                }
+                if items.count >= limit { break }
+            }
+            groups[category] = items
         }
+        var result: [PurchaseScorer.Pick] = []
+        for row in 0..<max(0, limit) {
+            for category in Category.allCases {
+                guard let items = groups[category], row < items.count else { continue }
+                let product = items[row]
+                result.append(PurchaseScorer.Pick(product: product, score: 0, wearsPerMonth: nil, looks: 0,
+                    reasons: [.checkSize], features: [], match: matches[product.id]))
+                if result.count >= limit { return result }
+            }
+            if Task.isCancelled { return [] }
+        }
+        return result
     }
 
     static func reasonText(_ reason: PurchaseScorer.Reason) -> String {
@@ -165,7 +255,10 @@ enum ShopPicksEngine {
         hash.combine(includeNextSeasonDeals)
         hash.combine(AuthManager.shared.userIdentifier)
         hash.combine(Calendar.current.startOfDay(for: .now))
-        for garment in garments {
+        hash.combine(Calendar.current.identifier)
+        hash.combine(TimeZone.current.identifier)
+        hash.combine(Locale.current.identifier)
+        for garment in garments.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             hash.combine(garment.id)
             hash.combine(garment.ownerID)
             hash.combine(garment.category)
@@ -196,21 +289,25 @@ enum ShopPicksEngine {
             hash.combine(garment.seasonSuitability)
             hash.combine(garment.isBlocked)
             hash.combine(garment.unavailableUntil)
-            hash.combine(garment.thumbnailPath)
-            hash.combine(garment.imagePath)
-            hash.combine(garment.photoMetadataRaw)
+            hash.combine(garment.shopProductID)
+            hash.combine(garment.shopProductURL)
+            hash.combine(garment.photoMetadata.values.compactMap(\.sourceURL).sorted())
+            hash.combine(garment.aiEnrichedFieldsRaw)
         }
-        for event in wearEvents {
+        for event in wearEvents.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             hash.combine(event.id)
+            hash.combine(event.sourceRaw)
             hash.combine(event.date)
             hash.combine(event.garmentIDs)
             hash.combine(event.occasionRaw)
         }
-        for event in recommendationEvents {
+        for event in recommendationEvents.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             hash.combine(event.id)
             hash.combine(event.profileID)
             hash.combine(event.createdAt)
             hash.combine(event.kindRaw)
+            hash.combine(event.dayPlanID)
+            hash.combine(event.deduplicationKey)
             hash.combine(event.selectedGarmentIDs)
             hash.combine(event.shownGarmentIDs)
             hash.combine(event.temperatureC)
@@ -220,14 +317,18 @@ enum ShopPicksEngine {
             hash.combine(event.rainTolerance)
             hash.combine(event.lookTimeRaw)
         }
-        for forecast in forecasts {
+        for forecast in forecasts.sorted(by: { $0.date < $1.date }) {
             hash.combine(forecast.date)
             hash.combine(forecast.temperatureC)
             hash.combine(forecast.highTempC)
             hash.combine(forecast.lowTempC)
             hash.combine(forecast.rainProbability)
+            for sample in forecast.thermalSamples(for: .day) {
+                hash.combine(sample.date); hash.combine(sample.temperatureC)
+                hash.combine(sample.apparentTemperatureC); hash.combine(sample.rainProbability)
+            }
         }
-        for user in users {
+        for user in users.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             hash.combine(user.id)
             hash.combine(user.userIdentifier)
             hash.combine(user.createdAt)
@@ -240,7 +341,7 @@ enum ShopPicksEngine {
             hash.combine(user.workDressCodeRaw)
             hash.combine(user.shoppingPreferencesRaw)
         }
-        for plan in plans {
+        for plan in plans.sorted(by: { $0.id.uuidString < $1.id.uuidString }) {
             hash.combine(plan.id)
             hash.combine(plan.ownerID)
             hash.combine(plan.date)
@@ -267,6 +368,7 @@ enum ShopPicksEngine {
             hash.combine(plan.wasWornConfirmed)
             hash.combine(plan.eveningUsesDayBottom)
         }
+        hash.combine(feedback.revision)
         hash.combine(feedback.state.model.weights)
         hash.combine(feedback.state.model.bias)
         hash.combine(feedback.state.model.interactions)
@@ -292,25 +394,44 @@ struct ShopPicksView: View {
     @ObservedObject private var catalog = ShopCatalogService.shared
     @ObservedObject private var feedback = ShopFeedbackStore.shared
 
+    @ObservedObject private var personalSelection = ShopPersonalSelection.shared
+
     @Query private var garments: [Garment]
     @Query private var wearEvents: [WearEvent]
     @Query private var recommendationEvents: [RecommendationEvent]
     @Query private var users: [UserProfile]
+    @Query private var recommendationStates: [RecoState]
     @Query private var upcomingPlans: [DayPlan]
 
     @AppStorage("shop.includeNextSeasonDeals") private var includeNextSeasonDeals = false
-    @State private var filter: Filter = .all
+    @State private var personalFilters = ShopResultFilters()
+    @State private var browseFilters = ShopResultFilters()
     @State private var picks: [PurchaseScorer.Pick] = []
+    @State private var personalPicks: [PurchaseScorer.Pick] = []
+    @State private var productDetails: PurchaseScorer.Pick?
+    @State private var refreshGeneration = 0
+    @State private var matches: [String: PurchaseScorer.Match] = [:]
+    @State private var matchRevision = 0
+    @State private var isRanking = false
+    @State private var purchaseNotice: PurchaseNotice?
+    @State private var purchaseDetails: Garment?
+    @State private var purchaseError = false
+    private struct PurchaseNotice: Identifiable {
+        let id = UUID()
+        let imported: ShopPurchaseImporter.Result
+        let profile: UserProfile?
+        let undo: ShopFeedbackStore.PurchaseUndo
+        var garment: Garment { imported.garment }
+    }
     @State private var mode: Mode = .personalized
     @State private var shoppingPreferencesProfile: UserProfile?
     @State private var showBrowseFilters = false
     @State private var browseQuery = ""
     @State private var browseLimit = 60
-    @State private var browsePreferences: ShoppingPreferences = {
-        var preferences = ShoppingPreferences()
-        preferences.department = .all
-        return preferences
-    }()
+    @State private var browsedPicks: [PurchaseScorer.Pick] = []
+    @State private var browseResultKey: BrowseKey?
+    @State private var browsePreferences = ShoppingPreferences()
+    @State private var hasInitializedBrowsePreferences = false
 
     private enum Mode: String, CaseIterable, Identifiable {
         case personalized, browse
@@ -323,19 +444,10 @@ struct ShopPicksView: View {
         }
     }
 
-    enum Filter: Hashable {
-        case all, deals, upcoming, everyday, nextSeason, saved
-        case category(Category)
-    }
-
     init(isRoot: Bool = false) {
         self.isRoot = isRoot
-        var wears = FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\WearEvent.date, order: .reverse)])
-        wears.fetchLimit = 400
-        _wearEvents = Query(wears)
-        var events = FetchDescriptor<RecommendationEvent>(sortBy: [SortDescriptor(\RecommendationEvent.createdAt, order: .reverse)])
-        events.fetchLimit = 300
-        _recommendationEvents = Query(events)
+        _wearEvents = Query(ShopPicksEngine.wearDescriptor())
+        _recommendationEvents = Query(ShopPicksEngine.recommendationDescriptor())
         let today = Calendar.current.startOfDay(for: .now)
         let start = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
         let end = Calendar.current.date(byAdding: .day, value: 14, to: today) ?? today
@@ -343,31 +455,82 @@ struct ShopPicksView: View {
     }
 
     private var shown: [PurchaseScorer.Pick] {
-        if filter == .saved { return savedPicks }
-        if mode == .browse { return browsedPicks }
-        switch filter {
-        case .all: return picks
-        case .deals: return picks.filter { $0.product.discountPercent != nil }
-        case .upcoming: return picks.filter { $0.intent == .upcoming }
-        case .everyday: return picks.filter { $0.intent == .everyday }
-        case .nextSeason: return picks.filter { $0.intent == .nextSeason }
-        case .category(let category): return picks.filter { $0.product.category == category }
-        case .saved: return savedPicks
+        if mode == .browse { return browseResultKey == browseKey ? browsedPicks : [] }
+        let department = ShoppingPreferences.resolvedDepartment(profile: profile, garments: garments,
+            feedback: feedback, products: catalog.products).department ?? .automatic
+        if personalFilters.isDefault {
+            return personalPicks.filter { department.includes($0.product.audience, category: $0.product.category) }
         }
+        let candidates = personalFilters.savedOnly ? savedPicks : picks
+        let filtered = candidates.filter { pick in
+            guard department.includes(pick.product.audience, category: pick.product.category),
+                  personalFilters.includes(pick) else { return false }
+            return personalFilters.savedOnly || personalFilters.category != nil || pick.product.category != .accessory
+        }
+        return personalFilters.savedOnly ? filtered : Array(filtered.prefix(20))
     }
 
-    private var browsedPicks: [PurchaseScorer.Pick] {
-        let products = catalog.products.filter { product in
-            switch filter {
-            case .category(let category): return product.category == category
-            case .deals: return product.discountPercent != nil
-            default: return true
-            }
+    private var activeFilters: ShopResultFilters {
+        mode == .personalized ? personalFilters : browseFilters
+    }
+
+    private func updateActiveFilters(_ update: (inout ShopResultFilters) -> Void) {
+        if mode == .personalized { update(&personalFilters) }
+        else { update(&browseFilters) }
+    }
+
+    private struct BrowseKey: Hashable {
+        let catalog: Int
+        let feedback: Int
+        let matches: Int
+        let filters: ShopResultFilters
+        let preferences: ShoppingPreferences
+        let query: String
+        let limit: Int
+        let profileID: UUID?
+    }
+
+    private struct BrowseTaskKey: Hashable {
+        let isActive: Bool
+        let request: BrowseKey
+    }
+    private var browseKey: BrowseKey {
+        BrowseKey(catalog: catalog.revision, feedback: feedback.revision, matches: matchRevision,
+            filters: browseFilters, preferences: effectiveBrowsePreferences, query: browseQuery, limit: browseLimit,
+            profileID: profile?.id)
+    }
+
+    private var effectiveBrowsePreferences: ShoppingPreferences {
+        var preferences = browsePreferences
+        if preferences.department == .automatic {
+            preferences.department = ShoppingPreferences.resolvedDepartment(profile: profile, garments: garments,
+                feedback: feedback, products: catalog.products).department ?? .all
         }
-        return ShopPicksEngine.browse(
-            products: products, preferences: browsePreferences, feedback: feedback,
-            query: browseQuery, limit: browseLimit
-        )
+        return preferences
+    }
+
+    @MainActor private func rebuildBrowse() async {
+        guard mode == .browse else { return }
+        if !hasInitializedBrowsePreferences {
+            // Seed once from the saved department, then keep Explore independent of
+            // later For You preference edits for the lifetime of this profile/session.
+            browsePreferences = effectiveBrowsePreferences
+            hasInitializedBrowsePreferences = true
+        }
+        let key = browseKey
+        let products = key.filters.savedOnly ? savedProducts : catalog.products
+        let hidden = Set(feedback.state.actions.keys.filter { feedback.isHidden($0) })
+            .union(ShopPicksEngine.personalWardrobe(garments, profile: profile).compactMap(\.shopProductID))
+        let reports = matches
+        let task = Task.detached(priority: .userInitiated) {
+            ShopPicksEngine.browse(products: products, preferences: key.preferences, hidden: hidden,
+                matches: reports, category: key.filters.category, dealsOnly: key.filters.dealsOnly, query: key.query,
+                limit: key.limit, itemType: key.filters.itemType, includesAccessories: key.filters.savedOnly)
+        }
+        let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        guard !Task.isCancelled, key == browseKey else { return }
+        browsedPicks = result
+        browseResultKey = key
     }
 
     private var profile: UserProfile? {
@@ -378,18 +541,30 @@ struct ShopPicksView: View {
         ShopPicksEngine.personalWardrobe(garments, profile: profile).count
     }
 
-    /// Saved products, scored like the rest when still in the catalog.
-    private var savedPicks: [PurchaseScorer.Pick] {
-        let ranked = mode == .personalized ? picks : []
-        let byID = Dictionary(ranked.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    private var savedProducts: [ShopProduct] {
+        let current = Dictionary(catalog.products.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return feedback.savedIDs.compactMap { id in
-            if let pick = byID[id] { return pick }
-            let current = catalog.products.first { $0.id == id }
+            guard !feedback.isHidden(id) else { return nil }
+            if let product = current[id] { return product }
             let kept = feedback.keptItem(id).flatMap { item in
                 ShopCatalogService.map(item, storeName: storeName(for: item))
             }
-            guard let product = current ?? kept else { return nil }
-            return PurchaseScorer.Pick(product: product, score: 0, wearsPerMonth: nil, looks: 0, reasons: [.checkSize], features: [])
+            return kept
+        }
+    }
+
+    /// Keep bookmarks independent of ranking, but honor the personal department and list filters.
+    private var savedPicks: [PurchaseScorer.Pick] {
+        let byID = Dictionary(picks.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let department = ShoppingPreferences.resolvedDepartment(profile: profile, garments: garments,
+            feedback: feedback, products: catalog.products).department ?? .automatic
+        return savedProducts.compactMap { product in
+            guard department.includes(product.audience, category: product.category) else { return nil }
+            if let pick = byID[product.id] { return pick }
+            // No evaluated upcoming/everyday/seasonal claim is available for an unranked bookmark.
+            guard personalFilters.focus == .all else { return nil }
+            return PurchaseScorer.Pick(product: product, score: 0, wearsPerMonth: nil, looks: 0,
+                reasons: [.checkSize], features: [], match: matches[product.id])
         }
     }
 
@@ -413,44 +588,108 @@ struct ShopPicksView: View {
         .modifier(ShopNavigationStyle(isRoot: isRoot))
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    shoppingPreferencesProfile = profile
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                }
-                .accessibilityLabel(String(localized: "shop_preferences_title"))
-                .disabled(profile == nil)
+                preferencesMenu
             }
         }
         .sheet(item: $shoppingPreferencesProfile) { profile in
             ShoppingPreferencesView(profile: profile)
         }
+        .sheet(item: $productDetails) { pick in
+            ShopProductDetailsSheet(pick: pick, onOpen: { open(pick) },
+                onToggleSave: { toggleSave(pick) }, onDismiss: { record(.dismissed, pick) },
+                onBought: { record(.bought, pick) })
+        }
+        .sheet(item: $purchaseDetails) { garment in GarmentPurchaseView(garment: garment) }
+        .alert(String(localized: "error_title"), isPresented: $purchaseError) {
+            Button(String(localized: "action_ok"), role: .cancel) {}
+        } message: { Text(String(localized: "shop_purchase_failed")) }
+        .safeAreaInset(edge: .bottom) {
+            if let notice = purchaseNotice {
+                HStack(spacing: DS.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(String(localized: "shop_purchase_added")).font(.subheadline.weight(.semibold))
+                        Button(String(localized: "purchase_details_receipt")) { purchaseDetails = notice.garment }
+                            .font(.caption)
+                    }
+                    Spacer()
+                    Button(String(localized: "action_undo")) { undoPurchase(notice) }
+                        .frame(minHeight: 44)
+                }
+                .padding().background(.regularMaterial)
+                .task(id: notice.id) {
+                    try? await Task.sleep(for: .seconds(10))
+                    guard !Task.isCancelled, purchaseNotice?.id == notice.id else { return }
+                    purchaseNotice = nil
+                }
+            }
+        }
         .sheet(isPresented: $showBrowseFilters) {
-            ShopBrowseFiltersView(preferences: $browsePreferences)
+            ShopBrowseFiltersView(preferences: Binding(get: { effectiveBrowsePreferences }, set: { browsePreferences = $0 }),
+                filters: $browseFilters)
         }
         .task {
             await catalog.refreshIfNeeded()
+            ShopPurchaseImporter.shared.restoreKnownPurchases(garments: garments, profileID: profile?.id,
+                feedback: feedback, products: catalog.products, context: context)
         }
-        .task(id: rankingSignature) {
-            try? await Task.sleep(for: .milliseconds(250))
+        .task(id: BrowseTaskKey(isActive: mode == .browse, request: browseKey)) {
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
-            rebuild()
+            await rebuildBrowse()
+        }
+        .task(id: "\(rankingSignature)|\(refreshGeneration)|\(scenePhase)") {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            await rebuild()
         }
         .refreshable {
             await catalog.refreshIfNeeded(force: true)
         }
         .onChange(of: includeNextSeasonDeals) { _, enabled in
-            if !enabled, filter == .nextSeason { filter = .all }
+            if !enabled, personalFilters.focus == .nextSeason { personalFilters.focus = .all }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { rebuild() }
+            if phase == .active {
+                refreshGeneration += 1
+                Task { await catalog.refreshIfNeeded() }
+            }
+        }
+        .onChange(of: profile?.id) { _, _ in
+            picks = []; personalPicks = []; matches = [:]; browsedPicks = []; purchaseNotice = nil; productDetails = nil
+            browsePreferences = ShoppingPreferences(); browseResultKey = nil; hasInitializedBrowsePreferences = false
+            personalFilters = ShopResultFilters(); browseFilters = ShopResultFilters(); browseQuery = ""; browseLimit = 60
+            matchRevision += 1
+        }
+        .onChange(of: browseFilters) { old, new in
+            browseLimit = 60
+            if !old.dealsOnly && new.dealsOnly { refreshOffers() }
+        }
+        .onChange(of: personalFilters.dealsOnly) { _, enabled in
+            if enabled { refreshOffers() }
         }
         .onChange(of: mode) { _, _ in
-            filter = .all
-            browseLimit = 60
+            if activeFilters.dealsOnly { refreshOffers() }
         }
         .onChange(of: browseQuery) { _, _ in browseLimit = 60 }
         .onChange(of: browsePreferences) { _, _ in browseLimit = 60 }
+    }
+
+    private var preferencesMenu: some View {
+        Menu {
+            if mode == .personalized {
+                Button(String(localized: "shop_preferences_title")) { shoppingPreferencesProfile = profile }
+                    .disabled(profile == nil)
+                Toggle(String(localized: "shop_next_season_toggle"), isOn: $includeNextSeasonDeals)
+                Button(String(localized: "shop_clear_personal_filters")) { personalFilters = ShopResultFilters() }
+                    .disabled(personalFilters.isDefault)
+            } else {
+                Button(String(localized: "shop_browse_preferences")) { showBrowseFilters = true }
+                Button(String(localized: "shop_clear_browse_filters")) { clearBrowseFilters() }
+            }
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+        }
+        .accessibilityLabel(String(localized: mode == .browse ? "shop_browse_preferences" : "shop_personal_filters_title"))
     }
 
     private var header: some View {
@@ -476,30 +715,9 @@ struct ShopPicksView: View {
                     Text(String(localized: "shop_department_needed"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if let department = resolution.department {
-                    Button {
-                        shoppingPreferencesProfile = profile
-                    } label: {
-                        Text(String(format: String(localized: "shop_preferences_summary_format"), department.title))
-                            .font(.caption)
-                    }
                 }
-                Toggle(isOn: $includeNextSeasonDeals) {
-                    VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                        Text(String(localized: "shop_next_season_toggle"))
-                            .font(.subheadline.weight(.medium))
-                        Text(String(localized: "shop_next_season_detail"))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .tint(.accentColor)
-                .padding(.top, DS.Spacing.xs)
             } else {
                 browseControls
-                Text(browsePreferences.department.title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -514,39 +732,69 @@ struct ShopPicksView: View {
                     .submitLabel(.search)
             }
             .dsFieldStyle()
-            Button { showBrowseFilters = true } label: {
-                Label(String(localized: "shop_browse_filters"), systemImage: "line.3.horizontal.decrease")
-                    .font(.subheadline.weight(.medium))
-            }
-            .buttonStyle(.plain)
         }
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Spacing.xs) {
-                chip(String(localized: mode == .personalized ? "shop_filter_all" : "shop_browse_all"), .all)
-                chip(String(localized: "shop_filter_deals"), .deals, icon: "tag")
-                if mode == .personalized {
-                    chip(String(localized: "shop_filter_upcoming"), .upcoming, icon: "calendar")
-                    chip(String(localized: "shop_filter_everyday"), .everyday, icon: "repeat")
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.xs) {
+                    chip(String(localized: mode == .personalized ? "shop_filter_clothes_for_you" : "shop_browse_all_categories"),
+                        selected: activeFilters.category == nil && activeFilters.focus == .all) {
+                            updateActiveFilters { $0.selectCategory(nil); $0.focus = .all }
+                        }
+                    ForEach(Category.allCases) { category in
+                        chip(category.title, selected: activeFilters.category == category, icon: category.icon) {
+                            updateActiveFilters {
+                                let next = $0.category == category ? nil : category
+                                $0.selectCategory(next)
+                            }
+                        }
+                    }
+                    chip(String(localized: "shop_filter_deals"), selected: activeFilters.dealsOnly, icon: "tag") {
+                        updateActiveFilters { $0.dealsOnly.toggle() }
+                    }
+                    chip(String(localized: "shop_filter_saved"), selected: activeFilters.savedOnly, icon: "heart.fill") {
+                        updateActiveFilters { $0.savedOnly.toggle() }
+                    }
+                    if mode == .personalized {
+                        focusChip(String(localized: "shop_filter_upcoming"), .upcoming, icon: "calendar")
+                        focusChip(String(localized: "shop_filter_everyday"), .everyday, icon: "repeat")
+                    }
+                    if mode == .personalized, includeNextSeasonDeals {
+                        focusChip(String(localized: "shop_filter_next_season"), .nextSeason, icon: "leaf")
+                    }
                 }
-                ForEach(Category.allCases) { category in
-                    chip(category.title, .category(category))
+            }
+            if let category = activeFilters.category {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        browseTypeChip(String(localized: "shop_browse_all_types"), type: nil)
+                        ForEach(category.itemTypes) { type in
+                            browseTypeChip(type.title, type: type)
+                        }
+                    }
                 }
-                if mode == .personalized, includeNextSeasonDeals {
-                    chip(String(localized: "shop_filter_next_season"), .nextSeason, icon: "leaf")
-                }
-                chip(String(localized: "shop_filter_saved"), .saved, icon: "heart.fill")
             }
         }
     }
 
-    private func chip(_ title: String, _ value: Filter, icon: String? = nil) -> some View {
-        let selected = filter == value
+    private func browseTypeChip(_ title: String, type: ItemType?) -> some View {
+        chip(title, selected: activeFilters.itemType == type) {
+            updateActiveFilters { $0.itemType = type }
+        }
+    }
+
+    private func focusChip(_ title: String, _ focus: ShopResultFilters.Focus, icon: String) -> some View {
+        chip(title, selected: personalFilters.focus == focus, icon: icon) {
+            personalFilters.focus = personalFilters.focus == focus ? .all : focus
+        }
+    }
+
+    private func chip(_ title: String, selected: Bool, icon: String? = nil, action: @escaping () -> Void) -> some View {
         return Button {
             DS.haptic(0.3)
-            filter = value
+            action()
         } label: {
             HStack(spacing: DS.Spacing.xxs) {
                 if let icon { Image(systemName: icon).font(.caption) }
@@ -565,52 +813,101 @@ struct ShopPicksView: View {
 
     @ViewBuilder
     private var content: some View {
-        if filter == .saved {
-            if shown.isEmpty {
-                emptyState(icon: "heart", text: String(localized: "shop_empty_saved"))
-            } else {
-                pickList
-            }
-        } else if mode == .personalized, personalGarmentCount < ShopPicksEngine.minimumWardrobe {
+        if mode == .personalized, !personalFilters.savedOnly, personalGarmentCount < ShopPicksEngine.minimumWardrobe {
             emptyState(icon: "tshirt", text: String(localized: "shop_empty_wardrobe"))
-        } else if catalog.products.isEmpty {
+        } else if catalog.products.isEmpty && !activeFilters.savedOnly {
             if catalog.isLoading {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, DS.Spacing.xl)
             } else {
                 emptyState(icon: "bag", text: String(localized: "shop_empty_catalog"))
             }
+        } else if mode == .browse, browseResultKey != browseKey {
+            ProgressView(String(localized: "shop_loading")).frame(maxWidth: .infinity).padding()
+        } else if isRanking && mode == .personalized && !personalFilters.savedOnly && shown.isEmpty {
+            ProgressView(String(localized: "shop_matching")).frame(maxWidth: .infinity).padding()
+        } else if shown.isEmpty, activeFilters.dealsOnly, catalog.isLoading {
+            ProgressView(String(localized: "shop_loading")).frame(maxWidth: .infinity).padding()
+        } else if shown.isEmpty, activeFilters.dealsOnly {
+            dealsEmptyState
+        } else if shown.isEmpty, activeFilters.savedOnly, feedback.savedIDs.isEmpty {
+            emptyState(icon: "heart", text: String(localized: "shop_empty_saved"))
         } else if shown.isEmpty {
             emptyState(icon: "sparkle.magnifyingglass", text: String(localized: mode == .personalized ? "shop_empty_filter" : "shop_browse_empty"))
+            Button(String(localized: "shop_reset_active_filters")) { resetActiveFilters() }
         } else {
             pickList
         }
     }
 
+    private var dealsEmptyState: some View {
+        let hasOffers = catalog.products.contains { $0.discountPercent != nil }
+            || (activeFilters.savedOnly && savedProducts.contains { $0.discountPercent != nil })
+        return VStack(spacing: DS.Spacing.sm) {
+            emptyState(icon: "tag", text: String(localized: hasOffers ? "shop_deals_filtered_empty" : "shop_deals_unavailable"))
+            Button(String(localized: "shop_show_without_deals")) {
+                updateActiveFilters { $0.dealsOnly = false }
+            }
+            Button(String(localized: "shop_reset_active_filters")) { resetActiveFilters() }
+            Button(String(localized: "shop_refresh_catalog")) {
+                Task { await catalog.refreshIfNeeded(force: true) }
+            }
+        }
+    }
+
     private var pickList: some View {
         LazyVStack(spacing: DS.Spacing.sm) {
-            ForEach(shown) { pick in
-                ShopPickCard(
-                    pick: pick,
-                    garments: garments,
-                    preferProductOnlyPhotos: mode == .browse ? browsePreferences.preferProductOnlyPhotos : (profile?.shoppingPreferences.preferProductOnlyPhotos ?? true),
-                    isSaved: feedback.has(.saved, pick.id),
-                    onOpen: { open(pick) },
-                    onToggleSave: { toggleSave(pick) },
-                    onDismiss: { record(.dismissed, pick) },
-                    onBought: { record(.bought, pick) },
-                    onOpenCompanion: { open($0) },
-                    onToggleSaveCompanion: { toggleSave($0) },
-                    onDismissCompanion: { record(.dismissed, $0) },
-                    onBoughtCompanion: { record(.bought, $0) },
-                    isCompanionSaved: { feedback.has(.saved, $0.id) }
-                )
+            if mode == .browse {
+                ForEach(browseSections) { section in
+                    Label(section.category.title, systemImage: section.category.icon)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, DS.Spacing.sm)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(section.picks) { pick in pickCard(pick) }
+                }
+            } else {
+                ForEach(shown) { pick in pickCard(pick) }
             }
-            if mode == .browse, filter != .saved, shown.count >= browseLimit {
+            if mode == .browse, shown.count >= browseLimit {
                 Button(String(localized: "shop_browse_more")) { browseLimit += 60 }
                     .font(.subheadline.weight(.semibold))
                     .padding(.vertical, DS.Spacing.sm)
             }
         }
+    }
+
+    private struct BrowseSection: Identifiable {
+        let category: Category
+        let picks: [PurchaseScorer.Pick]
+        var id: Category { category }
+    }
+
+    private var browseSections: [BrowseSection] {
+        let groups = Dictionary(grouping: shown, by: \.product.category)
+        return Category.allCases.compactMap { category in
+            guard let picks = groups[category], !picks.isEmpty else { return nil }
+            return BrowseSection(category: category, picks: picks)
+        }
+    }
+
+    private func pickCard(_ pick: PurchaseScorer.Pick) -> ShopPickCard {
+        ShopPickCard(
+            pick: pick,
+            garments: garments,
+            preferProductOnlyPhotos: mode == .browse ? browsePreferences.preferProductOnlyPhotos : (profile?.shoppingPreferences.preferProductOnlyPhotos ?? true),
+            isSaved: feedback.has(.saved, pick.id),
+            onOpen: { open(pick) },
+            onToggleSave: { toggleSave(pick) },
+            onDismiss: { record(.dismissed, pick) },
+            onBought: { record(.bought, pick) },
+            onOpenCompanion: { open($0) },
+            onToggleSaveCompanion: { toggleSave($0) },
+            onDismissCompanion: { record(.dismissed, $0) },
+            onBoughtCompanion: { record(.bought, $0) },
+            isCompanionSaved: { feedback.has(.saved, $0.id) },
+            onShowDetails: { productDetails = pick },
+            onShowCompanionDetails: { productDetails = $0 }
+        )
     }
 
     private func emptyState(icon: String, text: String) -> some View {
@@ -642,20 +939,70 @@ struct ShopPicksView: View {
         }
     }
 
+    private func clearBrowseFilters() {
+        browseFilters = ShopResultFilters()
+        browseQuery = ""
+        var cleared = ShoppingPreferences()
+        cleared.department = browsePreferences.department
+        cleared.preferProductOnlyPhotos = browsePreferences.preferProductOnlyPhotos
+        browsePreferences = cleared
+        browseLimit = 60
+    }
+
+    private func resetActiveFilters() {
+        if mode == .personalized { personalFilters = ShopResultFilters() }
+        else { clearBrowseFilters() }
+    }
+
+    private func refreshOffers() {
+        // An explicit offer request must see newly published prices, even within the
+        // normal six-hour catalog interval. ETag and the in-flight guard still apply.
+        Task { await catalog.refreshIfNeeded(force: true) }
+    }
+
     private func record(_ kind: ShopFeedbackKind, _ pick: PurchaseScorer.Pick) {
         DS.haptic(0.4)
-        feedback.record(kind, pick: pick)
+        if kind == .bought {
+            guard !feedback.has(.bought, pick.id) else { return }
+            do {
+                let imported = try ShopPurchaseImporter.shared.add(pick.product, profile: profile, context: context)
+                let undo = feedback.recordPurchase(pick)
+                purchaseNotice = PurchaseNotice(imported: imported, profile: profile, undo: undo)
+            } catch { purchaseError = true; return }
+        } else {
+            feedback.record(kind, pick: pick)
+            if kind == .dismissed {
+                ShopPersonalSelection.dismiss(pick.id, profileID: profile?.id,
+                    preferences: profile?.shoppingPreferences ?? ShoppingPreferences())
+            }
+        }
         withAnimation(.snappy) {
             // A companion can replace an owned core piece. Remove that whole preview
             // until the debounced rebuild supplies a complete look without this product.
+            browsedPicks.removeAll { $0.id == pick.id }
             picks.removeAll { candidate in
+                candidate.id == pick.id || candidate.preview?.companions.contains(where: { $0.id == pick.id }) == true
+            }
+            personalPicks.removeAll { candidate in
                 candidate.id == pick.id || candidate.preview?.companions.contains(where: { $0.id == pick.id }) == true
             }
         }
     }
 
-    private func rebuild() {
-        picks = ShopPicksEngine.picks(
+    private func undoPurchase(_ notice: PurchaseNotice) {
+        do {
+            try ShopPurchaseImporter.shared.undo(notice.imported, profile: notice.profile, context: context)
+            feedback.undoPurchase(notice.undo)
+            purchaseNotice = nil
+        } catch { purchaseError = true }
+    }
+
+    @MainActor private func rebuild() async {
+        let signature = rankingSignature
+        let profileID = profile?.id
+        isRanking = true
+        defer { if !Task.isCancelled { isRanking = false } }
+        let result = await ShopPicksEngine.picks(
             products: catalog.products,
             garments: garments,
             wearEvents: wearEvents,
@@ -666,17 +1013,34 @@ struct ShopPicksView: View {
             context: context,
             upcomingPlans: upcomingPlans,
             includeNextSeasonDeals: includeNextSeasonDeals,
-            limit: 60
+            contentSignature: signature
         )
+        guard !Task.isCancelled else { return }
+        guard signature == rankingSignature, profileID == profile?.id else {
+            refreshGeneration += 1
+            return
+        }
+        picks = result.picks.filter { !feedback.isHidden($0.id) }
+        personalPicks = ShopPersonalSelection.select(from: picks, profileID: profileID,
+            preferences: profile?.shoppingPreferences ?? ShoppingPreferences())
+        matches = result.matches
+        matchRevision += 1
     }
 
     private var rankingSignature: Int {
-        ShopPicksEngine.signature(
+        let base = ShopPicksEngine.signature(
             catalogRevision: catalog.revision, garments: garments, wearEvents: wearEvents,
             recommendationEvents: recommendationEvents, forecasts: weather.forecasts,
             users: users, plans: upcomingPlans, feedback: feedback,
             includeNextSeasonDeals: includeNextSeasonDeals
         )
+        var hash = Hasher()
+        hash.combine(base)
+        hash.combine(personalSelection.revision)
+        for state in recommendationStates where state.profileID == profile?.id {
+            hash.combine(state.lookWeights); hash.combine(state.lookBias); hash.combine(state.lookInteractionCount)
+        }
+        return hash.finalize()
     }
 
     private func storeName(for item: ShopCatalogItem) -> String {
@@ -691,6 +1055,21 @@ private struct ShopNavigationStyle: ViewModifier {
     func body(content: Content) -> some View {
         if isRoot { content.minimalCollapsingNavBar() }
         else { content.compactNavBar() }
+    }
+}
+
+/// Observe save changes while the details sheet is open, independently of its presenting row.
+private struct ShopProductDetailsSheet: View {
+    let pick: PurchaseScorer.Pick
+    var onOpen: () -> Void
+    var onToggleSave: () -> Void
+    var onDismiss: () -> Void
+    var onBought: () -> Void
+    @ObservedObject private var feedback = ShopFeedbackStore.shared
+
+    var body: some View {
+        ShopProductDetailsView(pick: pick, isSaved: feedback.has(.saved, pick.id),
+            onOpen: onOpen, onToggleSave: onToggleSave, onDismiss: onDismiss, onBought: onBought)
     }
 }
 
@@ -766,29 +1145,54 @@ struct ShoppingPreferencesView: View {
 private struct ShopBrowseFiltersView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var preferences: ShoppingPreferences
+    @Binding var filters: ShopResultFilters
     @State private var draft: ShoppingPreferences
+    @State private var draftFilters: ShopResultFilters
     @State private var brands: String
 
-    init(preferences: Binding<ShoppingPreferences>) {
+    init(preferences: Binding<ShoppingPreferences>, filters: Binding<ShopResultFilters>) {
         _preferences = preferences
+        _filters = filters
         _draft = State(initialValue: preferences.wrappedValue)
+        _draftFilters = State(initialValue: filters.wrappedValue)
         _brands = State(initialValue: preferences.wrappedValue.preferredBrands.joined(separator: ", "))
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Picker(String(localized: "shop_filter_category"), selection: Binding(
+                        get: { draftFilters.category }, set: { draftFilters.selectCategory($0) })) {
+                        Text(String(localized: "shop_browse_all_categories")).tag(Optional<Category>.none)
+                        ForEach(Category.allCases) { category in
+                            Text(category.title).tag(Optional(category))
+                        }
+                    }
+                    if let category = draftFilters.category {
+                        Picker(String(localized: "shop_filter_item_type"), selection: $draftFilters.itemType) {
+                            Text(String(localized: "shop_browse_all_types")).tag(Optional<ItemType>.none)
+                            ForEach(category.itemTypes) { type in
+                                Text(type.title).tag(Optional(type))
+                            }
+                        }
+                    }
+                    Toggle(String(localized: "shop_filter_deals"), isOn: $draftFilters.dealsOnly)
+                    Toggle(String(localized: "shop_filter_saved"), isOn: $draftFilters.savedOnly)
+                }
                 ShopPreferenceFields(preferences: $draft, brands: $brands, isManual: true)
                 Section {
                     Button(String(localized: "shop_browse_reset")) {
+                        let department = draft.department
                         draft = ShoppingPreferences()
-                        draft.department = .all
+                        draft.department = department
+                        draftFilters = ShopResultFilters()
                         brands = ""
                     }
                 }
             }
             .scrollContentBackground(.hidden)
-            .navigationTitle(String(localized: "shop_browse_filters"))
+            .navigationTitle(String(localized: "shop_browse_preferences"))
             .compactNavBar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -798,6 +1202,7 @@ private struct ShopBrowseFiltersView: View {
                     Button(String(localized: "shop_browse_apply")) {
                         draft.preferredBrands = ShopPreferenceFields.brandValues(brands)
                         preferences = draft
+                        filters = draftFilters
                         dismiss()
                     }
                 }
@@ -941,17 +1346,19 @@ struct ShopPickCard: View {
     var onDismissCompanion: (PurchaseScorer.Pick) -> Void
     var onBoughtCompanion: (PurchaseScorer.Pick) -> Void
     var isCompanionSaved: (PurchaseScorer.Pick) -> Bool
+    var onShowDetails: () -> Void
+    var onShowCompanionDetails: (PurchaseScorer.Pick) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack(alignment: .top, spacing: DS.Spacing.sm) {
-                Button(action: onOpen) {
-                    ShopProductImage(product: pick.product, preferProductOnly: preferProductOnlyPhotos)
+                Button(action: onShowDetails) {
+                    ShopProductImage(product: pick.product, preferProductOnly: preferProductOnlyPhotos, canRetry: false)
                         .frame(width: 104, height: 138)
                         .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(pick.product.title)
+                .accessibilityLabel(pick.product.title + ", " + String(localized: "shop_details_title"))
 
                 VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
                     if pick.intent == .nextSeason {
@@ -967,6 +1374,7 @@ struct ShopPickCard: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(2)
                     priceRow
+                    ShopMatchBadge(match: pick.match)
                     if let wears = ShopPicksEngine.wearsText(pick) {
                         Label(wears, systemImage: "repeat")
                             .font(.caption.weight(.medium))
@@ -986,7 +1394,7 @@ struct ShopPickCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            if let preview = pick.preview {
+            if let preview = pick.preview, preview.ownedGarmentIDs.allSatisfy({ id in garments.contains { $0.id == id } }) {
                 ShopLookPreview(
                     pick: pick, preview: preview, garments: garments,
                     preferProductOnlyPhotos: preferProductOnlyPhotos,
@@ -994,13 +1402,15 @@ struct ShopPickCard: View {
                     onToggleSaveCompanion: onToggleSaveCompanion,
                     onDismissCompanion: onDismissCompanion,
                     onBoughtCompanion: onBoughtCompanion,
-                    isCompanionSaved: isCompanionSaved
+                    isCompanionSaved: isCompanionSaved,
+                    onShowCompanionDetails: onShowCompanionDetails
                 )
             }
             actions
         }
         .dsCard(padding: DS.Spacing.sm)
         .contextMenu {
+            Button(action: onShowDetails) { Label(String(localized: "shop_details_title"), systemImage: "photo.on.rectangle") }
             Button(action: onOpen) { Label(String(localized: "shop_action_open"), systemImage: "arrow.up.right.square") }
             Button(action: onBought) { Label(String(localized: "shop_action_bought"), systemImage: "bag.badge.plus") }
             Button(role: .destructive, action: onDismiss) { Label(String(localized: "shop_action_dismiss"), systemImage: "hand.thumbsdown") }
@@ -1034,6 +1444,13 @@ struct ShopPickCard: View {
 
     private var actions: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+            Button(action: onShowDetails) {
+                let count = photoCount
+                Label(count > 1 ? String(format: String(localized: "shop_details_all_photos_format"), count) : String(localized: "shop_details_title"),
+                    systemImage: "photo.on.rectangle")
+                    .font(.caption.weight(.medium))
+                    .frame(minHeight: 44)
+            }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: DS.Spacing.md) {
                     openButton.fixedSize(horizontal: true, vertical: true)
@@ -1073,6 +1490,15 @@ struct ShopPickCard: View {
         }
     }
 
+    private var photoCount: Int {
+        let raw = (pick.product.item.images ?? []) + [pick.product.imageURL?.absoluteString].compactMap { $0 }
+        return Set(raw.compactMap { value -> URL? in
+            guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host != nil else { return nil }
+            return url
+        }).count
+    }
+
     private var purchaseButton: some View {
         Button(action: onBought) {
             Label(String(localized: "shop_action_bought"), systemImage: "bag.badge.plus")
@@ -1094,6 +1520,7 @@ private struct ShopLookPreview: View {
     let onDismissCompanion: (PurchaseScorer.Pick) -> Void
     let onBoughtCompanion: (PurchaseScorer.Pick) -> Void
     let isCompanionSaved: (PurchaseScorer.Pick) -> Bool
+    let onShowCompanionDetails: (PurchaseScorer.Pick) -> Void
 
     private var owned: [Garment] {
         let byID = Dictionary(garments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1118,10 +1545,7 @@ private struct ShopLookPreview: View {
                         .accessibilityLabel(garment.displayTitle + ", " + String(localized: "shop_preview_owned"))
                     }
                     ForEach(preview.companions) { companion in
-                        Button { onOpenCompanion(companion) } label: {
-                            productTile(companion.product)
-                        }
-                        .buttonStyle(.plain)
+                        productTile(companion.product)
                         .accessibilityLabel(companion.product.title)
                     }
                 }
@@ -1156,33 +1580,36 @@ private struct ShopLookPreview: View {
 
     private func companionRow(_ companion: PurchaseScorer.Pick) -> some View {
         HStack(alignment: .top, spacing: DS.Spacing.sm) {
-            Button { onOpenCompanion(companion) } label: {
-                VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                    Text(String(localized: "shop_preview_optional_extra"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(companion.product.title)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(2)
-                    if let price = companion.product.priceText {
-                        HStack(spacing: DS.Spacing.xxs) {
-                            Text(price).font(.caption)
-                            if let discount = companion.product.discountPercent {
-                                Text("-\(discount)%")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                Button { onShowCompanionDetails(companion) } label: {
+                    VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
+                        Text(String(localized: "shop_preview_optional_extra"))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(companion.product.title)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(2)
+                        if let price = companion.product.priceText {
+                            HStack(spacing: DS.Spacing.xxs) {
+                                Text(price).font(.caption)
+                                if let discount = companion.product.discountPercent {
+                                    Text("-\(discount)%")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(Color.accentColor)
+                                }
                             }
                         }
                     }
-                    if companion.reasons.contains(.checkSize) {
-                        Text(String(localized: "shop_reason_check_size"))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    .multilineTextAlignment(.leading)
                 }
-                .multilineTextAlignment(.leading)
+                .buttonStyle(.plain)
+                ShopMatchBadge(match: companion.match)
+                if companion.reasons.contains(.checkSize) {
+                    Text(String(localized: "shop_reason_check_size"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.plain)
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: DS.Spacing.xxs) {
                 Button { onToggleSaveCompanion(companion) } label: {
@@ -1213,32 +1640,48 @@ private struct ShopLookPreview: View {
     }
 }
 
-/// Remote product photo with a quiet placeholder.
+/// Stable URL-based identity shares decoded photos between card and outfit preview.
 struct ShopProductImage: View {
     let product: ShopProduct
     var preferProductOnly = true
+    var canRetry = true
     @State private var image: UIImage?
+    @State private var isLoading = true
+    @State private var retry = 0
 
     private var taskID: String {
-        [product.id, product.imageURL?.absoluteString ?? "", product.item.images?.joined(separator: "|") ?? "", product.item.fetchedAt ?? "", String(preferProductOnly)].joined(separator: "|")
+        [product.id, product.imageURL?.absoluteString ?? "", product.item.images?.joined(separator: "|") ?? "", String(preferProductOnly), String(retry)].joined(separator: "|")
     }
-
     var body: some View {
         ZStack {
             Color(.secondarySystemBackground)
             if let image {
                 Image(uiImage: image).resizable().scaledToFit().padding(4)
+            } else if isLoading {
+                ProgressView().accessibilityLabel(String(localized: "shop_loading"))
             } else {
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.1))
-                    .overlay(Image(systemName: preferProductOnly ? product.category.icon : "photo").foregroundStyle(.secondary))
+                VStack(spacing: 4) {
+                    Image(systemName: product.category.icon).foregroundStyle(.secondary)
+                    if canRetry {
+                        Button { retry += 1 } label: { Image(systemName: "arrow.clockwise").frame(minWidth: 44, minHeight: 44) }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(String(localized: "shop_photo_retry"))
+                    }
+                }
             }
         }
         .task(id: taskID) {
-            image = nil
-            let loaded = await ShopProductPhotoService.shared.image(for: product, preferProductOnly: preferProductOnly)
-            guard !Task.isCancelled else { return }
-            image = loaded
+            image = nil; isLoading = true
+            defer { if !Task.isCancelled { isLoading = false } }
+            for attempt in 0..<2 {
+                let stream = await ShopProductPhotoService.shared.images(for: product, preferProductOnly: preferProductOnly)
+                for await photo in stream {
+                    guard !Task.isCancelled else { return }
+                    image = photo
+                }
+                if image != nil || Task.isCancelled { return }
+                if attempt == 0 { try? await Task.sleep(for: .seconds(3)) }
+            }
         }
     }
 }
@@ -1248,8 +1691,8 @@ struct ShopProductImage: View {
 /// The top three picks, shown in Stats under the wardrobe gaps.
 struct ShopPicksSection: View {
     let garments: [Garment]
-    let wearEvents: [WearEvent]
-    let recommendationEvents: [RecommendationEvent]
+    @Query private var wearEvents: [WearEvent]
+    @Query private var recommendationEvents: [RecommendationEvent]
 
     @Environment(\.modelContext) private var context
     @Environment(\.openURL) private var openURL
@@ -1257,15 +1700,18 @@ struct ShopPicksSection: View {
     @EnvironmentObject private var weather: WeatherCenter
     @ObservedObject private var catalog = ShopCatalogService.shared
     @ObservedObject private var feedback = ShopFeedbackStore.shared
+    @ObservedObject private var personalSelection = ShopPersonalSelection.shared
     @Query private var users: [UserProfile]
+    @Query private var recommendationStates: [RecoState]
     @Query private var upcomingPlans: [DayPlan]
     @AppStorage("shop.includeNextSeasonDeals") private var includeNextSeasonDeals = false
     @State private var picks: [PurchaseScorer.Pick] = []
+    @State private var refreshGeneration = 0
 
-    init(garments: [Garment], wearEvents: [WearEvent], recommendationEvents: [RecommendationEvent]) {
+    init(garments: [Garment]) {
         self.garments = garments
-        self.wearEvents = wearEvents
-        self.recommendationEvents = recommendationEvents
+        _wearEvents = Query(ShopPicksEngine.wearDescriptor())
+        _recommendationEvents = Query(ShopPicksEngine.recommendationDescriptor())
         let today = Calendar.current.startOfDay(for: .now)
         let start = Calendar.current.date(byAdding: .day, value: -1, to: today) ?? today
         let end = Calendar.current.date(byAdding: .day, value: 14, to: today) ?? today
@@ -1315,13 +1761,13 @@ struct ShopPicksSection: View {
         .task {
             await catalog.refreshIfNeeded()
         }
-        .task(id: rankingSignature) {
+        .task(id: "\(rankingSignature)|\(refreshGeneration)|\(scenePhase)") {
             try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            rebuild()
+            guard !Task.isCancelled, scenePhase == .active else { return }
+            await rebuild()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { rebuild() }
+            if phase == .active { refreshGeneration += 1 }
         }
     }
 
@@ -1332,7 +1778,7 @@ struct ShopPicksSection: View {
             openURL(pick.product.url)
         } label: {
             VStack(alignment: .leading, spacing: DS.Spacing.xxs) {
-                ShopProductImage(product: pick.product, preferProductOnly: profile?.shoppingPreferences.preferProductOnlyPhotos ?? true)
+                ShopProductImage(product: pick.product, preferProductOnly: profile?.shoppingPreferences.preferProductOnlyPhotos ?? true, canRetry: false)
                     .frame(width: 120, height: 160)
                     .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
                 Text(pick.product.title)
@@ -1354,6 +1800,10 @@ struct ShopPicksSection: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.accentColor)
                 }
+                if let match = pick.match {
+                    Text(String(format: String(localized: "shop_match_percent_format"), match.percent))
+                        .font(.caption2.weight(.semibold)).foregroundStyle(Color.accentColor)
+                }
                 if let reason = pick.reasons.first {
                     Text(ShopPicksEngine.reasonText(reason))
                         .font(.caption2)
@@ -1373,8 +1823,9 @@ struct ShopPicksSection: View {
         return String(localized: "shop_empty_filter")
     }
 
-    private func rebuild() {
-        picks = ShopPicksEngine.picks(
+    @MainActor private func rebuild() async {
+        let signature = rankingSignature
+        let result = await ShopPicksEngine.picks(
             products: catalog.products,
             garments: garments,
             wearEvents: wearEvents,
@@ -1385,16 +1836,30 @@ struct ShopPicksSection: View {
             context: context,
             upcomingPlans: upcomingPlans,
             includeNextSeasonDeals: includeNextSeasonDeals,
-            limit: 3
+            contentSignature: signature
         )
+        guard !Task.isCancelled else { return }
+        guard signature == rankingSignature else {
+            refreshGeneration += 1
+            return
+        }
+        picks = Array(ShopPersonalSelection.select(from: result.picks.filter { !feedback.isHidden($0.id) },
+            profileID: profile?.id, preferences: profile?.shoppingPreferences ?? ShoppingPreferences()).prefix(3))
     }
 
     private var rankingSignature: Int {
-        ShopPicksEngine.signature(
+        let base = ShopPicksEngine.signature(
             catalogRevision: catalog.revision, garments: garments, wearEvents: wearEvents,
             recommendationEvents: recommendationEvents, forecasts: weather.forecasts,
             users: users, plans: upcomingPlans, feedback: feedback,
             includeNextSeasonDeals: includeNextSeasonDeals
         )
+        var hash = Hasher()
+        hash.combine(base)
+        hash.combine(personalSelection.revision)
+        for state in recommendationStates where state.profileID == profile?.id {
+            hash.combine(state.lookWeights); hash.combine(state.lookBias); hash.combine(state.lookInteractionCount)
+        }
+        return hash.finalize()
     }
 }

@@ -86,8 +86,31 @@ enum LookPhotoProcessor {
     }
 
     static func render(_ analysis: Analysis, options: Options) -> UIImage? {
-        let extent = analysis.image.extent
-        var output = analysis.image
+        let output = applyPrivacy(to: analysis.image, analysis: analysis, options: options)
+        let crop = analysis.cropRect
+        let scale = outputSize.width / crop.width
+        let framed = output
+            .cropped(to: crop)
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let cgImage = ciContext.createCGImage(framed, from: CGRect(origin: .zero, size: outputSize)) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// The same face and background blur, without the look post's 4:5 crop.
+    static func renderEdited(_ analysis: Analysis, options: Options) -> UIImage? {
+        let output = applyPrivacy(to: analysis.image, analysis: analysis, options: options)
+        let extent = output.extent.integral
+        guard extent.width > 1, extent.height > 1,
+              let cgImage = ciContext.createCGImage(output, from: extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    private static func applyPrivacy(to image: CIImage, analysis: Analysis, options: Options) -> CIImage {
+        let extent = image.extent
+        var output = image
 
         if options.blurBackground, let mask = analysis.personMask {
             let blurred = output.clampedToExtent().applyingGaussianBlur(sigma: 30).cropped(to: extent)
@@ -130,17 +153,7 @@ enum LookPhotoProcessor {
                 output = blend.outputImage ?? output
             }
         }
-
-        let crop = analysis.cropRect
-        let scale = outputSize.width / crop.width
-        let framed = output
-            .cropped(to: crop)
-            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
-            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        guard let cgImage = ciContext.createCGImage(framed, from: CGRect(origin: .zero, size: outputSize)) else {
-            return nil
-        }
-        return UIImage(cgImage: cgImage)
+        return output
     }
 
     /// The post's JPEG. Built from pixels only, so no camera metadata or location survives.
@@ -177,7 +190,9 @@ enum LookPhotoProcessor {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
-        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+        let rendered = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
             image.draw(in: CGRect(origin: .zero, size: size))
         }
         return rendered.cgImage

@@ -461,10 +461,10 @@ private struct LookActions: View {
     }
 }
 
-/// Items in flat-lay order: the top (or outer layer) as the main piece, then
-/// bottom, shoes, the outer layer and accessories.
+/// Items in flat-lay order: a one-piece, top or outer layer leads, followed
+/// by the remaining assigned clothing and accessories.
 private struct LookItems {
-    private static let order = ["top", "bottom", "shoes", "outer", "accessory"]
+    private static let order = ["onePiece", "top", "bottom", "shoes", "outer", "accessory", "accessory2", "accessory3", "accessory4", "accessory5", "accessory6"]
     let all: [WidgetLookItem]
 
     init(_ items: [WidgetLookItem]) {
@@ -474,7 +474,7 @@ private struct LookItems {
     }
 
     var hero: WidgetLookItem? {
-        all.first { $0.slot == "top" } ?? all.first { $0.slot == "outer" } ?? all.first
+        all.first { $0.slot == "onePiece" } ?? all.first { $0.slot == "top" } ?? all.first { $0.slot == "outer" } ?? all.first
     }
 
     var rest: [WidgetLookItem] {

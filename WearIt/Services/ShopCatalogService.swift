@@ -105,17 +105,15 @@ struct ShopProduct: Identifiable, Hashable, Sendable {
     }
 
     var originalPriceText: String? {
-        guard discountPercent != nil else { return nil }
-        return formattedPrice(originalPrice)
+        // A reliable before/after comparison is useful even below the 5% deal threshold.
+        guard item.originalPriceVerified == true, hasRecentOffer,
+              let price, let original = originalPrice, original > price else { return nil }
+        return formattedPrice(original)
     }
 
     private func formattedPrice(_ amount: Double?) -> String? {
         guard let amount else { return nil }
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = item.currency ?? "ILS"
-        formatter.maximumFractionDigits = amount.rounded() == amount ? 0 : 2
-        return formatter.string(from: NSNumber(value: amount))
+        return amount.formatted(.currency(code: item.currency ?? "ILS").precision(.fractionLength(amount.rounded() == amount ? 0 : 2)))
     }
 
     static func == (lhs: ShopProduct, rhs: ShopProduct) -> Bool { lhs.id == rhs.id }
@@ -149,13 +147,6 @@ final class ShopCatalogService: ObservableObject {
         URL(string: "https://raw.githubusercontent.com/111dd/WearIt/catalog-data/\(country.lowercased())/catalog.json")!
     }
 
-    private static var cacheURL: URL? {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
-        let folder = caches.appendingPathComponent("ShopCatalog", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("\(country.lowercased()).json")
-    }
-
     private static let etagKey = "shopCatalog.etag"
 
     /// Loads the cached catalog right away, then refreshes from the network when it's due.
@@ -165,8 +156,7 @@ final class ShopCatalogService: ObservableObject {
         defer { isLoading = false }
         if !didLoadCache {
             didLoadCache = true
-            if let cached = Self.cacheURL,
-               let data = try? Data(contentsOf: cached),
+            if let data = await Self.readCachedData(),
                let decoded = try? await Self.decodeAndMap(data) {
                 apply(decoded)
             }
@@ -197,7 +187,7 @@ final class ShopCatalogService: ObservableObject {
             apply(decoded)
             lastError = nil
             lastSuccess = Date()
-            if let cached = Self.cacheURL { try? data.write(to: cached, options: .atomic) }
+            await Self.writeCachedData(data)
             UserDefaults.standard.set(http.value(forHTTPHeaderField: "ETag"), forKey: Self.etagKey)
         } catch {
             lastError = error.localizedDescription
@@ -213,6 +203,28 @@ final class ShopCatalogService: ObservableObject {
     private struct MappedCatalog: Sendable {
         let products: [ShopProduct]
         let generatedAt: Date?
+    }
+
+    /// Resolve/create the cache directory only inside the disk workers below.
+    nonisolated private static var cacheURL: URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let folder = caches.appendingPathComponent("ShopCatalog", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("\(country.lowercased()).json")
+    }
+
+    nonisolated private static func readCachedData() async -> Data? {
+        await Task.detached(priority: .utility) { () -> Data? in
+            guard let cached = cacheURL else { return nil }
+            return try? Data(contentsOf: cached)
+        }.value
+    }
+
+    nonisolated private static func writeCachedData(_ data: Data) async {
+        await Task.detached(priority: .utility) {
+            guard let cached = cacheURL else { return }
+            try? data.write(to: cached, options: .atomic)
+        }.value
     }
 
     /// Decoding a few MB of JSON and running the mapper over thousands of titles stays off the main thread.

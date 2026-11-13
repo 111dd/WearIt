@@ -47,6 +47,9 @@ struct OutfitLookRow<Content: View>: View {
     let accessibilitySlotLabel: String
     /// Future looks show no wear prompt; they are confirmed from the day menu.
     var isFuture: Bool = false
+    /// The compact worn summary carries its own status and expands before editing.
+    var showsStatusMark: Bool = true
+    var allowsReplacement: Bool = true
     var feedback: LookFeedbackActions? = nil
     var capturePrompt: LookCapturePrompt? = nil
     let onConfirm: () -> Void
@@ -60,6 +63,7 @@ struct OutfitLookRow<Content: View>: View {
     @State private var captureDismissed = false
     @State private var heartBurst = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.layoutDirection) private var layoutDirection
 
     /// Horizontal travel that commits a swipe-to-replace.
@@ -69,7 +73,9 @@ struct OutfitLookRow<Content: View>: View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .topLeading) { statusMark }
+                .overlay(alignment: .topLeading) {
+                    if showsStatusMark { statusMark }
+                }
                 .overlay { heartOverlay }
                 .offset(x: swipeOffset)
                 .opacity(1 - min(0.5, abs(swipeOffset) / 300))
@@ -96,21 +102,24 @@ struct OutfitLookRow<Content: View>: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(accessibilitySummary))
-        .accessibilityAction(named: Text(confirmTitle)) {
-            guard canConfirm, !isBusy else { return }
-            onConfirm()
-        }
-        .accessibilityAction(named: Text(notWornTitle)) {
-            guard !isBusy else { return }
-            onNotWorn()
-        }
-        .accessibilityAction(named: Text(replaceTitle)) {
-            guard !isBusy else { return }
-            onReplace()
-        }
-        .accessibilityAction(named: Text(String(localized: "planner_love_it"))) {
-            guard let feedback, !feedback.isLoved, !isBusy else { return }
-            feedback.onLove()
+        .accessibilityActions {
+            if !isBusy {
+                if canConfirm {
+                    Button(confirmTitle, action: onConfirm)
+                }
+                if status != .notWorn {
+                    Button(notWornTitle, action: onNotWorn)
+                }
+                if allowsReplacement {
+                    Button(replaceTitle, action: onReplace)
+                }
+                if let clearStatusTitle, let onClearStatus {
+                    Button(clearStatusTitle, action: onClearStatus)
+                }
+                if let feedback, !feedback.isLoved {
+                    Button(String(localized: "planner_love_it"), action: feedback.onLove)
+                }
+            }
         }
     }
 
@@ -138,43 +147,67 @@ struct OutfitLookRow<Content: View>: View {
 
     private var wearPrompt: some View {
         LiquidGlassGroup(spacing: DS.Spacing.xs) {
-            HStack(spacing: DS.Spacing.xs) {
-                Text(String(localized: "planner_did_you_wear_question"))
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Spacer(minLength: DS.Spacing.xs)
-                Button {
-                    DS.haptic(0.3)
-                    onNotWorn()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(width: 40, height: 40)
-                        .liquidGlassCircle(interactive: true)
-                        .contentShape(Circle())
+            if dynamicTypeSize.isAccessibilitySize {
+                stackedWearPrompt
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: DS.Spacing.xs) {
+                        wearPromptTitle.fixedSize()
+                        Spacer(minLength: DS.Spacing.xs)
+                        wearPromptActions.fixedSize(horizontal: true, vertical: false)
+                    }
+                    stackedWearPrompt
                 }
-                .buttonStyle(.plain)
-                .disabled(isBusy)
-                .accessibilityLabel(Text(notWornTitle))
-
-                Button {
-                    DS.haptic(0.45)
-                    onConfirm()
-                } label: {
-                    Image(systemName: "checkmark")
-                        .font(.body.weight(.bold))
-                        .foregroundStyle(DS.Accent.onFill)
-                        .frame(width: 44, height: 44)
-                        .modifier(ProminentGlassCircle())
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isBusy)
-                .accessibilityLabel(Text(confirmTitle))
             }
+        }
+    }
+
+    private var wearPromptTitle: some View {
+        Text(String(localized: "planner_did_you_wear_question"))
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var stackedWearPrompt: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            wearPromptTitle
+            wearPromptActions
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private var wearPromptActions: some View {
+        HStack(spacing: DS.Spacing.xs) {
+            Button {
+                DS.haptic(0.3)
+                onNotWorn()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .liquidGlassCircle(interactive: true)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .accessibilityLabel(Text(notWornTitle))
+
+            Button {
+                DS.haptic(0.45)
+                onConfirm()
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.bold))
+                    .foregroundStyle(DS.Accent.onFill)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .modifier(ProminentGlassCircle())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+            .accessibilityLabel(Text(confirmTitle))
         }
     }
 
@@ -223,10 +256,16 @@ struct OutfitLookRow<Content: View>: View {
                     }
                 }
             } label: {
-                Image(systemName: Self.icon(for: status))
+                Group {
+                    if reduceMotion {
+                        Image(systemName: Self.icon(for: status))
+                    } else {
+                        Image(systemName: Self.icon(for: status))
+                            .symbolEffect(.bounce, value: status)
+                    }
+                }
                     .font(.caption.weight(.bold))
                     .foregroundStyle(Self.color(for: status))
-                    .symbolEffect(.bounce, value: status)
                     .frame(width: 30, height: 30)
                     .liquidGlassCircle(interactive: true, tint: Self.color(for: status).opacity(0.18))
                     .frame(width: 44, height: 44)
@@ -260,50 +299,103 @@ struct OutfitLookRow<Content: View>: View {
 
     // MARK: - Reaction strip
 
+    @ViewBuilder
     private func reactionStrip(_ feedback: LookFeedbackActions) -> some View {
-        HStack(spacing: DS.Spacing.xs) {
-            Text(String(localized: "planner_how_was_it"))
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-            Spacer(minLength: DS.Spacing.xxs)
-            LiquidGlassGroup(spacing: DS.Spacing.xxs) {
-                HStack(spacing: DS.Spacing.xxs) {
-                    reactionButton("😍", label: "planner_love_it") { feedback.onLove() }
-                    reactionButton("🥶", label: "planner_too_cold") { feedback.onTemperature(.tooCold) }
-                    reactionButton("🥵", label: "planner_too_warm") { feedback.onTemperature(.tooWarm) }
-                    reactionButton("👎", label: "planner_not_my_style") { feedback.onNotMyStyle() }
+        if dynamicTypeSize.isAccessibilitySize {
+            stackedReactionStrip(feedback, usesGrid: true)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: DS.Spacing.xs) {
+                    reactionTitle.fixedSize()
+                    Spacer(minLength: DS.Spacing.xxs)
+                    reactionButtonRow(feedback)
+                        .fixedSize(horizontal: true, vertical: false)
+                    dismissReactionButton
+                }
+                stackedReactionStrip(feedback, usesGrid: false)
+            }
+        }
+    }
+
+    private var reactionTitle: some View {
+        Text(String(localized: "planner_how_was_it"))
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func stackedReactionStrip(_ feedback: LookFeedbackActions, usesGrid: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            HStack(alignment: .top, spacing: DS.Spacing.xs) {
+                reactionTitle
+                Spacer(minLength: DS.Spacing.xxs)
+                dismissReactionButton
+            }
+            if usesGrid {
+                reactionButtonGrid(feedback)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    reactionButtonRow(feedback)
+                        .fixedSize(horizontal: true, vertical: false)
+                    reactionButtonGrid(feedback)
                 }
             }
-            Button {
-                reactionDismissed = true
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(String(localized: "micro_question_skip")))
         }
+    }
+
+    private func reactionButtonRow(_ feedback: LookFeedbackActions) -> some View {
+        LiquidGlassGroup(spacing: DS.Spacing.xxs) {
+            HStack(spacing: DS.Spacing.xxs) {
+                reactionButtons(feedback)
+            }
+        }
+    }
+
+    private func reactionButtonGrid(_ feedback: LookFeedbackActions) -> some View {
+        LiquidGlassGroup(spacing: DS.Spacing.xs) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DS.Spacing.xs) {
+                reactionButtons(feedback)
+            }
+        }
+    }
+
+    private func reactionButtons(_ feedback: LookFeedbackActions) -> some View {
+        Group {
+            reactionButton("😍", label: "planner_love_it") { feedback.onLove() }
+            reactionButton("🥶", label: "planner_too_cold") { feedback.onTemperature(.tooCold) }
+            reactionButton("🥵", label: "planner_too_warm") { feedback.onTemperature(.tooWarm) }
+            reactionButton("👎", label: "planner_not_my_style") { feedback.onNotMyStyle() }
+        }
+    }
+
+    private var dismissReactionButton: some View {
+        Button {
+            reactionDismissed = true
+        } label: {
+            Image(systemName: "xmark")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(String(localized: "micro_question_skip")))
     }
 
     // MARK: - Snap the look
 
     private func capturePromptRow(_ prompt: LookCapturePrompt) -> some View {
-        HStack(spacing: DS.Spacing.xs) {
+        HStack(alignment: .top, spacing: DS.Spacing.xs) {
             Button {
                 DS.haptic(0.35)
                 prompt.onCapture()
             } label: {
                 Label(String(localized: "look_capture_cta"), systemImage: "camera")
                     .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, DS.Spacing.sm)
-                    .frame(height: 40)
+                    .padding(.vertical, DS.Spacing.xxs)
+                    .frame(minHeight: 44)
                     .liquidGlassPill(interactive: true)
             }
             .buttonStyle(.plain)
@@ -316,7 +408,7 @@ struct OutfitLookRow<Content: View>: View {
                 Image(systemName: "xmark")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 44)
+                    .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -331,9 +423,9 @@ struct OutfitLookRow<Content: View>: View {
         } label: {
             Text(emoji)
                 .font(.title3)
-                .frame(width: 40, height: 40)
+                .frame(minWidth: 44, minHeight: 44)
                 .liquidGlassCircle(interactive: true)
-                .contentShape(Circle())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isBusy)
@@ -371,13 +463,13 @@ struct OutfitLookRow<Content: View>: View {
 
     private var swipeGesture: HorizontalSwipeGesture {
         HorizontalSwipeGesture(
-            isEnabled: !isBusy,
+            isEnabled: allowsReplacement && !isBusy,
             onChanged: { travel in
                 swipeOffset = travel * 0.55
             },
             onEnded: { travel, speed in
                 let isFling = abs(travel) >= 30 && speed >= 700
-                guard abs(travel) >= Self.swipeCommitDistance || isFling, !isBusy else {
+                guard allowsReplacement, abs(travel) >= Self.swipeCommitDistance || isFling, !isBusy else {
                     withAnimation(reduceMotion ? nil : DS.Animation.standard) { swipeOffset = 0 }
                     return
                 }

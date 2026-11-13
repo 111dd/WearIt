@@ -107,9 +107,8 @@ enum AvailabilityService {
         ctx: RecoContext,
         latestWearMap: [UUID: Date]
     ) -> [Garment] {
-        let allowed = Set(slot.allowedCategories)
         let available = garments.filter { garment in
-            guard allowed.contains(garment.category) else { return false }
+            guard slot.accepts(garment) else { return false }
             let status = availabilityStatus(for: garment, on: date, ctx: ctx, latestWearMap: latestWearMap)
             return isRecommendedEligible(status)
         }
@@ -129,9 +128,8 @@ enum AvailabilityService {
         ctx: RecoContext,
         latestWearMap: [UUID: Date]
     ) -> [AvailabilityItem] {
-        let allowed = Set(slot.allowedCategories)
         let items: [AvailabilityItem] = garments.compactMap { garment in
-            guard allowed.contains(garment.category) else { return nil }
+            guard slot.accepts(garment) else { return nil }
             let status = availabilityStatus(for: garment, on: date, ctx: ctx, latestWearMap: latestWearMap)
             return AvailabilityItem(garment: garment, status: status)
         }

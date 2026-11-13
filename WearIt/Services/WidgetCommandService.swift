@@ -174,10 +174,45 @@ enum WidgetCommandService {
         for slot in OutfitSlot.allCases {
             assignments[slot] = locked.contains(slot) ? current[slot] : chosen[slot]
         }
-        guard assignments.compactMapValues({ $0 }) != current else { return }
+        let merged = assignments.compactMapValues { $0 }
+        guard merged != current,
+              choicePreservesStructure(merged, current: current, context: context) else { return }
         plan.setSlotAssignments(assignments, lockedSlots: locked)
         try? context.save()
         postDayChanged(day)
+    }
+
+    /// An option can outlive a wardrobe edit or a newly locked slot. Reject new
+    /// conflicts without normalizing assignments already saved on the look.
+    @MainActor private static func choicePreservesStructure(
+        _ assignments: [OutfitSlot: UUID],
+        current: [OutfitSlot: UUID],
+        context: ModelContext
+    ) -> Bool {
+        let ids = Array(Set(Array(assignments.values) + Array(current.values)))
+        let descriptor = FetchDescriptor<Garment>(predicate: #Predicate { ids.contains($0.id) })
+        guard let garments = try? context.fetch(descriptor) else { return false }
+        let garmentsByID = Dictionary(garments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        for (slot, id) in assignments {
+            if current[slot] != id {
+                guard let garment = garmentsByID[id], slot.accepts(garment) else { return false }
+            }
+
+            let matchingSlots = Set(assignments.compactMap { $0.value == id ? $0.key : nil })
+            if matchingSlots.count > 1 {
+                let previousSlots = Set(current.compactMap { $0.value == id ? $0.key : nil })
+                guard matchingSlots.isSubset(of: previousSlots) else { return false }
+            }
+
+            let isOnePiece = slot == .onePiece || garmentsByID[id]?.itemType?.isOnePiece == true
+            guard isOnePiece else { continue }
+            for otherSlot in [OutfitSlot.onePiece, .top, .bottom] where otherSlot != slot {
+                guard let otherID = assignments[otherSlot] else { continue }
+                guard current[slot] == id, current[otherSlot] == otherID else { return false }
+            }
+        }
+        return true
     }
 
     @MainActor private static func postDayChanged(_ day: Date) {

@@ -14,6 +14,8 @@ import UIKit
 enum DS {
     // MARK: Theme Tokens
     enum Surface {
+        static var canvas: Color { Color(uiColor: .systemGroupedBackground) }
+        static var content: Color { Color(uiColor: .secondarySystemGroupedBackground) }
         static var bg: Color { Color(uiColor: .systemBackground) }
         static var card: Color { Color(uiColor: .secondarySystemBackground) }
         static var raised: Color { Color(uiColor: .tertiarySystemBackground) }
@@ -39,8 +41,8 @@ enum DS {
         static var danger: Color { .red }
 
         /// Glyph or label drawn on a solid accent fill.
-        /// Light backdrops use a deep accent (white label). Dark photos use a
-        /// light accent, so the label switches to a near-black ink.
+        /// Light appearance uses a deep accent (white label). Dark appearance
+        /// uses a light accent, so the label switches to a near-black ink.
         static var onFill: Color {
             Color(uiColor: UIColor { traits in
                 traits.userInterfaceStyle == .dark
@@ -167,13 +169,18 @@ struct DSContentSurface: ViewModifier {
         content
             .background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(DS.Surface.bg.opacity(opaque ? 1 : 0.92))
+                    .fill(DS.Surface.content)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(emphasized ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.07), lineWidth: 1)
+                    .strokeBorder(borderColor(opaque: opaque), lineWidth: 1)
                     .allowsHitTesting(false)
             }
+    }
+
+    private func borderColor(opaque: Bool) -> Color {
+        if emphasized { return Color.accentColor.opacity(opaque ? 0.55 : 0.25) }
+        return Color.primary.opacity(opaque ? 0.25 : 0.07)
     }
 }
 

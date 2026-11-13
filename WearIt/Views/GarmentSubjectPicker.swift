@@ -4,7 +4,7 @@ import UIKit
 import Observation
 
 enum GarmentPhotoTool: String, Identifiable {
-    case subject, findPhoto
+    case subject, findPhoto, polish
     var id: String { rawValue }
 }
 

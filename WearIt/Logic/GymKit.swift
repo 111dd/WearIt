@@ -27,7 +27,7 @@ enum GymKit {
     static func kit(from garments: [Garment]) -> [Garment] {
         let usable = garments.filter { !$0.isBlocked && !$0.isCurrentlyUnavailable }
         func best(_ category: Category, _ fallback: ((Garment) -> Bool)? = nil) -> Garment? {
-            let pool = usable.filter { $0.category == category }
+            let pool = usable.filter { $0.category == category && $0.itemType?.isOnePiece != true }
             let active = pool.filter(\.isActivewear)
             let candidates = active.isEmpty ? pool.filter { fallback?($0) ?? false } : active
             return candidates.max { lhs, rhs in
