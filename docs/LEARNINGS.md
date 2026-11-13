@@ -2,6 +2,12 @@
 
 Newest first. Written by agents, for agents. Keep each entry short.
 
+
+## 2026-11-13 — Shop catalog: prioritised crawl, split files, children's-item rule
+- **Did:** `scripts/catalog/build_catalog.py` (sitemap title/lastmod hints, `unusable_reason`, `state.json`, `order_new_pages`, `write_shards`, stores in threads, `maxSeconds`, `excludeUrlPattern`), `.github/workflows/catalog.yml` (previous run read as a folder), `stores.json`, `Services/ShopCatalogService.swift` (index + files, `childrenPattern`, `classifyAudience`, `isChildrensItem`).
+- **Why:** the catalog held about 4% of Terminal X, new pages were fetched in sitemap order, non-product pages were refetched every night, and about half of the stored items (children's, homeware, cosmetics, sold out) were ones the app discards. The app also dropped adult items because Terminal X's `categoryPath` is a list of every collection a product appears in, not a breadcrumb.
+- **Watch:** the shards are the crawler's own memory (it reads them back as `--previous`); `catalog.json` is a capped copy and must not be used as the source. `KIDS_PATTERN`/`unusable_reason` in the script and `childrenPattern`/`isChildrensItem`/`isNonWearable` in the app must stay in step, or the crawler drops items the app would show. `APPAREL_HINT` only orders the queue; do not turn it into a filter. A cached file's name includes its hash, and the app deletes every other file in `Caches/ShopCatalog` after a successful index load.
+
 ## 2026-11-13 — Review fixes: bundle contents, photo search, held shopping slots
 - **Did:** moved design notes to `design-docs/` and the quality-report tool to `scripts/`; removed DuckDuckGo/Bing scraping from `GarmentPhotoDiscovery` (product-link import only); `ShopPersonalSelection.updatedSlots` frees a slot for an owned product at once and for a product missing from a non-empty ranking for 14 days; widened the "dress as adjective" list in `ProductFieldMapper`.
 - **Why:** `WearIt/WearIt/` is a synchronized Xcode folder, so every `.md`/`.py` in it was copied into the app; the scraping used an unofficial token and a fake Safari User-Agent; bought or delisted products held a For You slot forever; "Dress Loafers" mapped to a dress in category top.

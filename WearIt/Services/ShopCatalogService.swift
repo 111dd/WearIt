@@ -5,9 +5,12 @@
 //  Downloads the nightly shop catalog (built by scripts/catalog/build_catalog.py and published on
 //  the repo's `catalog-data` branch) and maps each product to the app's taxonomy through
 //  `ProductPageMetadataService.makeProduct`, the same path a pasted product link takes.
+//  The catalog is an index plus several small files; only files whose content changed are
+//  downloaded again, and they are decoded one at a time.
 //  The wardrobe never leaves the device: ranking happens in `PurchaseScorer`.
 //
 
+import CryptoKit
 import Foundation
 
 /// One product exactly as the catalog stores it (raw shop fields).
@@ -48,6 +51,30 @@ struct ShopCatalog: Codable, Sendable {
     let country: String
     let generatedAt: String
     let stores: [Store]
+    let items: [ShopCatalogItem]
+}
+
+/// The list of catalog files for one country (`index.json`, version 2).
+struct ShopCatalogIndex: Codable, Sendable {
+    struct Shard: Codable, Hashable, Sendable {
+        /// Relative to the country folder, e.g. `shards/castro-men-0.json`.
+        let path: String
+        /// First 16 hex digits of the file's SHA-1; a changed file has a new hash.
+        let hash: String
+        var store: String?
+        var audience: String?
+        var items: Int?
+    }
+
+    let version: Int
+    let country: String
+    let generatedAt: String
+    let stores: [ShopCatalog.Store]
+    let shards: [Shard]
+}
+
+/// One catalog file named by the index.
+struct ShopCatalogShardFile: Codable, Sendable {
     let items: [ShopCatalogItem]
 }
 
@@ -143,11 +170,27 @@ final class ShopCatalogService: ObservableObject {
 
     private init() {}
 
-    private static var remoteURL: URL {
-        URL(string: "https://raw.githubusercontent.com/111dd/WearIt/catalog-data/\(country.lowercased())/catalog.json")!
+    nonisolated private static var countryFolderURL: URL {
+        URL(string: "https://raw.githubusercontent.com/111dd/WearIt/catalog-data/\(country.lowercased())/")!
     }
 
+    /// The single-file catalog, still published for app versions that predate the index.
+    private static var remoteURL: URL { countryFolderURL.appendingPathComponent("catalog.json") }
+
     private static let etagKey = "shopCatalog.etag"
+    private static let indexEtagKey = "shopCatalog.indexEtag"
+
+    private struct HTTPStatusError: LocalizedError {
+        let code: Int
+        var errorDescription: String? { "HTTP \(code)" }
+    }
+
+    private enum IndexRefresh: Sendable {
+        case unchanged
+        /// The crawler has not published an index yet; the single file is the catalog.
+        case notPublished
+        case loaded(MappedCatalog, etag: String?)
+    }
 
     /// Loads the cached catalog right away, then refreshes from the network when it's due.
     func refreshIfNeeded(force: Bool = false) async {
@@ -156,10 +199,7 @@ final class ShopCatalogService: ObservableObject {
         defer { isLoading = false }
         if !didLoadCache {
             didLoadCache = true
-            if let data = await Self.readCachedData(),
-               let decoded = try? await Self.decodeAndMap(data) {
-                apply(decoded)
-            }
+            if let cached = await Self.loadCachedCatalog() { apply(cached) }
         }
         if !force {
             if let lastSuccess, Date().timeIntervalSince(lastSuccess) < Self.refreshInterval { return }
@@ -167,31 +207,129 @@ final class ShopCatalogService: ObservableObject {
         }
         lastCheck = Date()
 
+        do {
+            let etag = products.isEmpty ? nil : UserDefaults.standard.string(forKey: Self.indexEtagKey)
+            switch try await Self.fetchIndexedCatalog(etag: etag) {
+            case .unchanged:
+                break
+            case .loaded(let catalog, let newEtag):
+                apply(catalog)
+                UserDefaults.standard.set(newEtag, forKey: Self.indexEtagKey)
+                UserDefaults.standard.removeObject(forKey: Self.etagKey)
+            case .notPublished:
+                try await refreshSingleFile()
+            }
+            lastError = nil
+            lastSuccess = Date()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func refreshSingleFile() async throws {
         var request = URLRequest(url: Self.remoteURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         if !products.isEmpty, let etag = UserDefaults.standard.string(forKey: Self.etagKey) {
             request.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
-            if http.statusCode == 304 {
-                lastError = nil
-                lastSuccess = Date()
-                return
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if http.statusCode == 304 { return }
+        guard http.statusCode == 200 else { throw HTTPStatusError(code: http.statusCode) }
+        let decoded = try await Self.decodeAndMap(data)
+        apply(decoded)
+        await Self.writeCachedData(data)
+        UserDefaults.standard.set(http.value(forHTTPHeaderField: "ETag"), forKey: Self.etagKey)
+    }
+
+    // MARK: - Index and files
+
+    nonisolated private static let indexCacheName = "\(country.lowercased())-index.json"
+
+    nonisolated private static func fetchIndexedCatalog(etag: String?) async throws -> IndexRefresh {
+        var request = URLRequest(url: countryFolderURL.appendingPathComponent("index.json"),
+            cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
+        if let etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if http.statusCode == 304 { return .unchanged }
+        if http.statusCode == 404 { return .notPublished }
+        guard http.statusCode == 200 else { throw HTTPStatusError(code: http.statusCode) }
+        let index = try decodeIndex(data)
+        let catalog = try await loadShards(index, download: true)
+        // Every file of this index is on disk now; older files and the single-file cache can go.
+        let keep = Set(index.shards.compactMap(cacheName) + [indexCacheName])
+        await Task.detached(priority: .utility) {
+            guard let folder = cacheFolder else { return }
+            try? data.write(to: folder.appendingPathComponent(indexCacheName), options: .atomic)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where !keep.contains(name) {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             }
-            guard http.statusCode == 200 else {
-                lastError = "HTTP \(http.statusCode)"
-                return
-            }
-            let decoded = try await Self.decodeAndMap(data)
-            apply(decoded)
-            lastError = nil
-            lastSuccess = Date()
-            await Self.writeCachedData(data)
-            UserDefaults.standard.set(http.value(forHTTPHeaderField: "ETag"), forKey: Self.etagKey)
-        } catch {
-            lastError = error.localizedDescription
+        }.value
+        return .loaded(catalog, etag: http.value(forHTTPHeaderField: "ETag"))
+    }
+
+    nonisolated private static func decodeIndex(_ data: Data) throws -> ShopCatalogIndex {
+        let index = try JSONDecoder().decode(ShopCatalogIndex.self, from: data)
+        guard index.version == 2, index.country.uppercased() == country, !index.shards.isEmpty else {
+            throw URLError(.cannotParseResponse)
         }
+        return index
+    }
+
+    /// The cached index and its files, or the single-file cache from before the index existed.
+    nonisolated private static func loadCachedCatalog() async -> MappedCatalog? {
+        let cachedIndex = await Task.detached(priority: .utility) { () -> ShopCatalogIndex? in
+            guard let folder = cacheFolder,
+                  let data = try? Data(contentsOf: folder.appendingPathComponent(indexCacheName)) else { return nil }
+            return try? decodeIndex(data)
+        }.value
+        if let cachedIndex, let catalog = try? await loadShards(cachedIndex, download: false) { return catalog }
+        guard let data = await readCachedData() else { return nil }
+        return try? await decodeAndMap(data)
+    }
+
+    /// Decodes one file at a time, so memory stays bounded however large the catalog grows.
+    nonisolated private static func loadShards(_ index: ShopCatalogIndex, download: Bool) async throws -> MappedCatalog {
+        try await Task.detached(priority: .utility) {
+            let storeNames = Dictionary(index.stores.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            var seen = Set<String>()
+            var products: [ShopProduct] = []
+            for shard in index.shards {
+                let data = try await shardData(shard, download: download)
+                let items = try JSONDecoder().decode(ShopCatalogShardFile.self, from: data).items
+                for item in items where seen.insert(item.id).inserted {
+                    if let product = map(item, storeName: storeNames[item.store] ?? item.store) {
+                        products.append(product)
+                    }
+                }
+            }
+            return MappedCatalog(products: products, generatedAt: catalogDate(index.generatedAt))
+        }.value
+    }
+
+    /// The hash is part of the cached name, so a file on disk always matches its index entry.
+    nonisolated private static func cacheName(_ shard: ShopCatalogIndex.Shard) -> String? {
+        guard shard.hash.range(of: "^[0-9a-f]{8,64}$", options: .regularExpression) != nil,
+              shard.path.range(of: "^[A-Za-z0-9_/-]+\\.json$", options: .regularExpression) != nil else { return nil }
+        return "\(country.lowercased())-\(shard.hash)-\(shard.path.replacingOccurrences(of: "/", with: "-"))"
+    }
+
+    nonisolated private static func shardData(_ shard: ShopCatalogIndex.Shard, download: Bool) async throws -> Data {
+        guard let name = cacheName(shard) else { throw URLError(.cannotParseResponse) }
+        let file = cacheFolder?.appendingPathComponent(name)
+        if let file, let cached = try? Data(contentsOf: file) { return cached }
+        guard download else { throw URLError(.resourceUnavailable) }
+        let request = URLRequest(url: countryFolderURL.appendingPathComponent(shard.path),
+            cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 60)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw HTTPStatusError(code: http.statusCode) }
+        // The index and its files are published together, but the CDN can briefly serve an
+        // older copy of one of them. A mismatch fails this refresh; the next one retries.
+        let digest = Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        guard digest.hasPrefix(shard.hash) else { throw URLError(.cannotParseResponse) }
+        if let file { try? data.write(to: file, options: .atomic) }
+        return data
     }
 
     private func apply(_ catalog: MappedCatalog) {
@@ -205,12 +343,17 @@ final class ShopCatalogService: ObservableObject {
         let generatedAt: Date?
     }
 
-    /// Resolve/create the cache directory only inside the disk workers below.
-    nonisolated private static var cacheURL: URL? {
+    /// Resolve/create the cache directory only inside the disk workers.
+    nonisolated private static var cacheFolder: URL? {
         guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
         let folder = caches.appendingPathComponent("ShopCatalog", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("\(country.lowercased()).json")
+        return folder
+    }
+
+    /// The single-file catalog's cache.
+    nonisolated private static var cacheURL: URL? {
+        cacheFolder?.appendingPathComponent("\(country.lowercased()).json")
     }
 
     nonisolated private static func readCachedData() async -> Data? {
@@ -319,7 +462,7 @@ final class ShopCatalogService: ObservableObject {
                 (.men, #"\b(men(?:'s|s)?|man|male|menswear|homme)\b|(?:^|[^\p{L}])(?:גברים|לגברים|לגבר|גבר)(?:$|[^\p{L}])"#),
                 (.women, #"\b(women(?:'s|s)?|woman|female|ladies|womenswear|femme)\b|(?:^|[^\p{L}])(?:נשים|לנשים|אישה|לאישה)(?:$|[^\p{L}])"#),
                 (.unisex, #"\b(unisex|gender[ -]?neutral|genderless)\b|(?:^|[^\p{L}])יוניסקס(?:$|[^\p{L}])"#),
-                (.children, #"\b(kids?|children|boys?|girls?|bab(y|ies)|junior|toddler|youth)\b|ילדים|ילדות|תינוק|בנים|בנות|נוער"#)
+                (.children, childrenPattern)
             ]
             return Set(patterns.compactMap { audience, pattern in
                 value.range(of: pattern, options: .regularExpression) == nil ? nil : audience
@@ -330,6 +473,12 @@ final class ShopCatalogService: ObservableObject {
         // A malformed explicit label is not repaired by picking the first matching department.
         if explicit.count > 1 { return .unknown }
         var inferred = evidence(title).union(evidence(url.path))
+        // The retailer's label, the title and the URL describe this product. Terminal X's category
+        // field also lists every collection it appears in ("BEST OF WOMEN" on a men's item,
+        // a kids' collection on adult sneakers); that list only helps when nothing else is known.
+        let specific = explicit.union(inferred)
+        if specific.count == 1, let audience = specific.first { return audience }
+        if specific.count > 1 { return .unknown }
         let breadcrumbs = (item.categoryPath ?? "").components(separatedBy: CharacterSet(charactersIn: ">/|"))
         for breadcrumb in breadcrumbs {
             let departments = evidence(breadcrumb)
@@ -341,13 +490,21 @@ final class ShopCatalogService: ObservableObject {
         return audience
     }
 
+    /// Hebrew needs explicit word edges: "אבנים" (stones) and "לבנות" (white) contain "בנים"/"בנות".
+    /// scripts/catalog/build_catalog.py uses the same rule (KIDS_PATTERN, unusable_reason).
+    nonisolated private static let childrenPattern =
+        #"\b(kids?|children|boys?|girls?|bab(y|ies)|junior|toddler|youth)\b|(?<![א-ת])(?:ל?ילדים|ל?ילדות|ל?תינוק(?:ות)?|ל?נוער|בנים|בנות)(?![א-ת])"#
+
     nonisolated private static func isChildrensItem(_ item: ShopCatalogItem, title: String) -> Bool {
-        let labels = [item.gender, item.categoryPath, title, URL(string: item.url)?.path.removingPercentEncoding]
-            .compactMap { $0 }.joined(separator: " ").lowercased()
-        return labels.range(
-            of: #"\b(kids?|children|boys?|girls?|bab(y|ies)|junior|toddler|youth)\b|ילדים|ילדות|תינוק|בנים|בנות|נוער"#,
-            options: .regularExpression
-        ) != nil
+        func mentionsChildren(_ raw: String?) -> Bool {
+            raw?.lowercased().range(of: childrenPattern, options: .regularExpression) != nil
+        }
+        if mentionsChildren(item.gender) || mentionsChildren(title)
+            || mentionsChildren(URL(string: item.url)?.path.removingPercentEncoding) { return true }
+        // Terminal X also lists adult shoes and bags in kids' collections, so that list
+        // decides only for products the retailer did not label for adults.
+        let adultLabels: Set<String> = ["men", "women", "unisex"]
+        return !adultLabels.contains(item.gender?.lowercased() ?? "") && mentionsChildren(item.categoryPath)
     }
 
     nonisolated private static func isNonWearable(_ title: String) -> Bool {

@@ -5,7 +5,8 @@
       "name": "Terminal X",
       "base": "https://www.terminalx.com",
       "productUrlPattern": null,
-      "maxPagesPerRun": 1200,
+      "maxPagesPerRun": 3600,
+      "maxSeconds": 5400,
       "delaySeconds": 1.0,
       "currency": "ILS"
     },
@@ -14,7 +15,9 @@
       "name": "Castro",
       "base": "https://www.castro.com",
       "productUrlPattern": null,
+      "excludeUrlPattern": "^/בית/",
       "maxPagesPerRun": 1200,
+      "maxSeconds": 5400,
       "delaySeconds": 1.0,
       "currency": "ILS"
     }

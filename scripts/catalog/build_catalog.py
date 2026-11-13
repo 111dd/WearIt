@@ -7,11 +7,18 @@ are read from /products.json instead. Only raw fields are stored; the app maps t
 through ProductPageMetadataService.makeProduct / ProductFieldMapper, so mapping lives in one place.
 
 Runs are incremental: each run reserves a refresh budget for existing items before discovering
-new products. Products whose URL left the sitemap are dropped.
+new products. Products whose URL left the sitemap are dropped. New pages are fetched in order of
+how likely they are to be adult clothing (sitemap title) and how recently they changed; pages the
+app would discard anyway (children's, non-wearable, sold out, not a product) are remembered in
+state.json and not fetched again until their retry date.
 
-Usage: python3 scripts/catalog/build_catalog.py --country IL --out out/il [--previous prev.json]
+Output: index.json + shards/*.json (what current app versions read), state.json (crawler memory),
+report.json, and a capped version-1 catalog.json for app versions that predate the shards.
+
+Usage: python3 scripts/catalog/build_catalog.py --country IL --out out/il [--previous previous/il]
 No third-party packages."""
 import argparse
+import concurrent.futures
 import gzip
 import hashlib
 import html
@@ -26,7 +33,7 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 USER_AGENT = "WearItCatalogBot/0.1 (+https://111dd.github.io/WearIt/)"
 TIMEOUT = 25
@@ -34,6 +41,32 @@ MAX_SITEMAPS = 60
 DESCRIPTION_LIMIT = 400
 PRICE_EVIDENCE_VERSION = 3
 PRODUCT_SITEMAP_HINT = re.compile(r"product|prod|item|catalog", re.I)
+# One file the phone decodes at a time. Keeps memory bounded as stores are added.
+SHARD_ITEM_LIMIT = 2500
+# App versions that read the single catalog.json decode it whole; keep that file small.
+LEGACY_ITEM_LIMIT = 8000
+# Days before a page the app cannot use is fetched again.
+SKIP_DAYS = {"kids": 90, "not-wearable": 90, "not-product": 30, "gone": 30, "unavailable": 7}
+# Hebrew needs explicit word edges: "אבנים" (stones) and "לבנות" (white) contain "בנים"/"בנות".
+KIDS_PATTERN = (r"\b(kids?|children|boys?|girls?|bab(?:y|ies)|junior|toddler|youth)\b"
+                r"|(?<![א-ת])(?:ל?ילדים|ל?ילדות|ל?תינוק(?:ות)?|ל?נוער|בנים|בנות)(?![א-ת])")
+KIDS = re.compile(KIDS_PATTERN, re.I)
+# Same list as ShopCatalogService.isNonWearable in the app; keep the two in step.
+NOT_WEARABLE = re.compile(
+    r"\b(gift card|perfume|fragrance|cosmetics?|makeup|shampoo|conditioner|candle|phone case|airpods case"
+    r"|water bottle|bedding|towel|shoe cleaner|shoe care)\b|בושם|בשמים|קוסמטיקה|איפור|שמפו|מרכך שיער|מצעים"
+    r"|מגבת|מגבות|בקבוק שתיה|כיסוי לטלפון|גיפט קארד", re.I)
+# Only orders the queue of new pages; it never excludes one. The app's ProductFieldMapper
+# still decides what each product is.
+APPAREL_HINT = re.compile(
+    r"\b(t-?shirts?|shirts?|tees?|tops?|tanks?|blouses?|polo|sweaters?|cardigans?|hood(?:ie|y|ies)|sweatshirts?"
+    r"|jackets?|coats?|parkas?|puffers?|windbreakers?|blazers?|vests?|pants|trousers|jeans|chinos?|joggers?|shorts"
+    r"|leggings|skirts?|dress(?:es)?|jumpsuits?|overalls?|sneakers?|shoes?|boots?|sandals?|loafers?|flats|oxfords?"
+    r"|slippers?|heels|bags?|backpacks?|belts?|hats?|caps?|beanies?|scar(?:f|ves)|ties?|sunglasses|watch(?:es)?"
+    r"|swim\w*|bikini|suits?)\b"
+    r"|חולצ|טישירט|טי[ -]?שירט|טופ|גופיי?[הת]|סריג|סוודר|קרדיגן|סווטשירט|קפוצ|ז'קט|ג'קט|מעיל|פארקה|בלייזר|וסט"
+    r"|עליונית|מכנס|ג'ינס|ג'וגר|שורט|ברמודה|טייץ|חצאית|שמל|אוברול|סרבל|חליפ|טרנינג|פוטר|פולו|בגד גוף|בגד ים"
+    r"|ביקיני|נעל|סניקרס|מגפ|סנדל|כפכפ|מוקסינ|חגור|תיק|ארנק|כובע|צעיף|עניב|משקפי שמש|שעון|עגיל|שרשר|צמיד|טבעת", re.I)
 
 
 def looks_like_product_sitemap(url):
@@ -69,27 +102,35 @@ def fetch(url, accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*
 
 # MARK: - Sitemaps
 
-def sitemap_locations(xml_text):
-    """Returns (child sitemaps, page URLs) from a sitemap or sitemap index."""
+def sitemap_entries(xml_text):
+    """Returns (child sitemaps, [(page URL, lastmod, title)]) from a sitemap or sitemap index."""
     try:
         root = ET.fromstring(xml_text.encode("utf-8"))
     except ET.ParseError:
         return [], []
     tag = root.tag.split("}")[-1]
-    locs = [el.text.strip() for el in root.iter() if el.tag.split("}")[-1] == "loc" and el.text]
     if tag == "sitemapindex":
-        return locs, []
+        return [el.text.strip() for el in root.iter() if el.tag.split("}")[-1] == "loc" and el.text], []
     # Image sitemap entries (<image:loc>) also end in "loc"; keep page URLs only.
     pages = []
     for url_el in root:
+        loc = lastmod = title = None
         for child in url_el:
-            if child.tag.split("}")[-1] == "loc" and child.text:
-                pages.append(child.text.strip())
-                break
+            name = child.tag.split("}")[-1]
+            if name == "loc" and child.text and loc is None:
+                loc = child.text.strip()
+            elif name == "lastmod" and child.text:
+                lastmod = child.text.strip()
+            elif name == "image" and title is None:
+                # Both pilot stores publish the product name as the image title.
+                title = next((text(el.text) for el in child if el.tag.split("}")[-1] == "title" and el.text), None)
+        if loc:
+            pages.append((loc, lastmod, title))
     return [], pages
 
 
-def discover_product_urls(store, robots, log):
+def discover_product_urls(store, robots, log, hints=None):
+    """Product page URLs. `hints` receives {url: (lastmod, title)} from the sitemap."""
     base = store["base"].rstrip("/")
     queue = list(store.get("sitemaps") or robots.site_maps() or [f"{base}/sitemap.xml"])
     pattern = re.compile(store["productUrlPattern"]) if store.get("productUrlPattern") else None
@@ -100,14 +141,17 @@ def discover_product_urls(store, robots, log):
             continue
         seen.add(sitemap)
         try:
-            children, urls = sitemap_locations(fetch(sitemap, accept="application/xml,text/xml,*/*"))
+            children, entries = sitemap_entries(fetch(sitemap, accept="application/xml,text/xml,*/*"))
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             log.append(f"sitemap failed {sitemap}: {error}")
             continue
         # Prefer product sitemaps when the index names them; otherwise walk everything.
         product_children = [c for c in children if looks_like_product_sitemap(c)]
         queue.extend(product_children or children)
-        pages.extend(urls)
+        for url, lastmod, title in entries:
+            pages.append(url)
+            if hints is not None:
+                hints.setdefault(url, (lastmod, title))
         time.sleep(store.get("delaySeconds", 1.0) / 2)
     if pattern:
         pages = [u for u in pages if pattern.search(u)]
@@ -115,6 +159,10 @@ def discover_product_urls(store, robots, log):
         # Their sitemap includes 90k+ navigation/category routes. Product routes
         # are a letter followed by a 5-digit group or 9-digit color SKU.
         pages = [u for u in pages if re.fullmatch(r"/[a-z]\d{5}(?:\d{4})?/?", urllib.parse.urlparse(u).path, re.I)]
+    if store.get("excludeUrlPattern"):
+        # Whole departments the app has no use for, e.g. Castro's homeware under /בית/.
+        exclude = re.compile(store["excludeUrlPattern"])
+        pages = [u for u in pages if not exclude.search(urllib.parse.unquote(urllib.parse.urlparse(u).path))]
     return list(dict.fromkeys(pages))
 
 
@@ -289,7 +337,7 @@ def meta_content(page, prop):
 
 
 GENDER_WORDS = [
-    ("kids", r"\b(kids?|children|boys?|girls?|bab(y|ies)|junior|toddler|youth)\b|ילדים|ילדות|תינוק|בנים|בנות|נוער"),
+    ("kids", KIDS_PATTERN),
     ("women", r"\b(women|womens|woman|female|ladies)\b|נשים|אישה|לנשים"),
     ("men", r"\b(men|mens|man|male)\b|גברים|לגבר|לגברים"),
 ]
@@ -691,10 +739,54 @@ def item_id(store_id, url):
     return f"{store_id}:{hashlib.sha1(url.encode('utf-8')).hexdigest()[:16]}"
 
 
-def crawl_store(store, previous_items, country):
+def unusable_reason(item):
+    """Why the app would discard this stored product, or None. Mirrors ShopCatalogService.map."""
+    title = item.get("title") or ""
+    path = urllib.parse.unquote(urllib.parse.urlparse(item.get("url") or "").path)
+    gender = item.get("gender")
+    if gender == "kids" or KIDS.search(title) or KIDS.search(path):
+        return "kids"
+    # Terminal X lists adult shoes and bags under kids' collections too, so that list
+    # only decides for products without an explicit adult label.
+    if gender is None and KIDS.search(item.get("categoryPath") or ""):
+        return "kids"
+    if NOT_WEARABLE.search(title):
+        return "not-wearable"
+    if item.get("available") is False:
+        return "unavailable"
+    return None
+
+
+def presumed_reason(url, title):
+    """A reason not to fetch a new page at all, judged from its sitemap entry."""
+    if KIDS.search(title or "") or KIDS.search(urllib.parse.unquote(urllib.parse.urlparse(url).path)):
+        return "kids"
+    if title and NOT_WEARABLE.search(title):
+        return "not-wearable"
+    return None
+
+
+def skip_entry(reason, now=None):
+    until = (now or datetime.now(timezone.utc)) + timedelta(days=SKIP_DAYS[reason])
+    return {"reason": reason, "until": until.replace(microsecond=0).isoformat()}
+
+
+def order_new_pages(urls, hints):
+    """Likely clothing first, then pages without a title, then the rest; newest change first in each."""
+    def likelihood(url):
+        title = hints.get(url, (None, None))[1]
+        return 1 if not title else (2 if APPAREL_HINT.search(title) else 0)
+    # Both sorts are stable, so the sitemap's own order breaks the remaining ties.
+    ordered = sorted(urls, key=lambda url: hints.get(url, (None, None))[0] or "", reverse=True)
+    return sorted(ordered, key=likelihood, reverse=True)
+
+
+def crawl_store(store, previous_items, country, skipped=None):
+    """Returns (items the app can use, report, pages to leave alone until their retry date)."""
     log, started = [], time.time()
     base = store["base"].rstrip("/")
     stamp = now_iso()
+    skipped = dict(skipped or {})
 
     shopify = None if store.get("productUrlPattern") else shopify_products(store, log)
     if shopify is not None:
@@ -702,25 +794,46 @@ def crawl_store(store, previous_items, country):
         for product in shopify:
             product.update(id=item_id(store["id"], product["url"]), store=store["id"], country=country, fetchedAt=stamp,
                            currency=product["currency"] or store.get("currency"))
-            items.append(product)
-        return items, {"status": "ok", "source": "shopify", "items": len(items), "log": log[-20:], "seconds": round(time.time() - started)}
+            if unusable_reason(product) is None:
+                items.append(product)
+        return items, {"status": "ok", "source": "shopify", "items": len(items), "log": log[-20:], "seconds": round(time.time() - started)}, {}
 
+    usable_previous = [item for item in previous_items.values() if unusable_reason(item) is None]
     robots = urllib.robotparser.RobotFileParser(f"{base}/robots.txt")
     try:
         robots.parse(fetch(f"{base}/robots.txt", accept="text/plain").splitlines())
     except (urllib.error.URLError, TimeoutError, ValueError) as error:
-        return list(previous_items.values()), {"status": "unreachable", "error": str(error), "items": len(previous_items)}
+        return usable_previous, {"status": "unreachable", "error": str(error), "items": len(usable_previous)}, skipped
     delay = max(store.get("delaySeconds", 1.0), float(robots.crawl_delay(USER_AGENT) or 0))
 
-    urls = [u for u in discover_product_urls(store, robots, log) if robots.can_fetch(USER_AGENT, u)]
+    hints = {}
+    urls = [u for u in discover_product_urls(store, robots, log, hints) if robots.can_fetch(USER_AGENT, u)]
     if not urls:
-        return list(previous_items.values()), {"status": "no-urls", "items": len(previous_items), "log": log[-20:]}
+        return usable_previous, {"status": "no-urls", "items": len(usable_previous), "log": log[-20:]}, skipped
 
-    known = {item["sourcePage"]: item for item in previous_items.values() if item.get("sourcePage")}
     live = set(urls)
-    fresh = [u for u in urls if u not in known]
-    stale = sorted((u for u in urls if u in known),
-                   key=lambda u: (known[u].get("priceEvidenceVersion", 0) >= PRICE_EVIDENCE_VERSION, known[u].get("fetchedAt", "")))
+    known = {item["sourcePage"]: item for item in previous_items.values() if item.get("sourcePage") in live}
+    skipped = {u: entry for u, entry in skipped.items() if u in live and entry.get("until", "") > stamp}
+    reasons = {}
+    # Stored products the app discards stop taking part in the nightly price refresh.
+    for page_url, item in list(known.items()):
+        reason = unusable_reason(item)
+        if reason:
+            skipped[page_url] = skip_entry(reason)
+            del known[page_url]
+    presumed = 0
+    fresh = []
+    for page_url in urls:
+        if page_url in known or page_url in skipped:
+            continue
+        if presumed_reason(page_url, hints.get(page_url, (None, None))[1]):
+            presumed += 1
+        else:
+            fresh.append(page_url)
+    fresh = order_new_pages(fresh, hints)
+    # Oldest price first, but likely clothing before the cosmetics and homeware the app has no category for.
+    stale = sorted(known, key=lambda u: (known[u].get("priceEvidenceVersion", 0) >= PRICE_EVIDENCE_VERSION,
+                                         not APPAREL_HINT.search(known[u].get("title") or ""), known[u].get("fetchedAt", "")))
     budget = max(0, store.get("maxPagesPerRun", 1000))
     # Reserve most of each run for refreshing prices. New sitemap URLs previously
     # starved existing items, leaving old prices and unverified discounts indefinitely.
@@ -730,9 +843,15 @@ def crawl_store(store, previous_items, country):
     if len(to_fetch) < budget:
         to_fetch += stale[refresh_count:refresh_count + budget - len(to_fetch)]
 
-    results = {u: item for u, item in known.items() if u in live}
-    failures = not_products = attempted = refreshed = consecutive_failures = 0
+    results = dict(known)
+    deadline = started + store.get("maxSeconds", 5400)
+    failures = not_products = attempted = refreshed = added = consecutive_failures = 0
+    out_of_time = False
     for page_url in to_fetch:
+        if time.time() > deadline:
+            out_of_time = True
+            log.append(f"time limit reached after {attempted} of {len(to_fetch)} pages; the rest wait for the next run")
+            break
         attempted += 1
         try:
             product = parse_product_page(fetch(page_url), page_url)
@@ -742,6 +861,7 @@ def crawl_store(store, previous_items, country):
             consecutive_failures += 1
             if isinstance(error, urllib.error.HTTPError) and error.code in (404, 410):
                 results.pop(page_url, None)
+                skipped[page_url] = skip_entry("gone")
             if failures <= 5:
                 log.append(f"page failed {page_url}: {error}")
             if consecutive_failures >= 25 or (failures >= 25 and failures > len(to_fetch) // 2):
@@ -753,67 +873,139 @@ def crawl_store(store, previous_items, country):
         if product is None:
             not_products += 1
             results.pop(page_url, None)
+            skipped[page_url] = skip_entry("not-product")
             continue
         product.update(id=item_id(store["id"], product["url"]), store=store["id"], country=country,
                        sourcePage=page_url, fetchedAt=now_iso(), priceEvidenceVersion=PRICE_EVIDENCE_VERSION, currency=product["currency"] or store.get("currency"))
-        results[page_url] = product
         refreshed += 1
+        reason = unusable_reason(product)
+        if reason:
+            results.pop(page_url, None)
+            skipped[page_url] = skip_entry(reason)
+            continue
+        added += page_url not in known
+        results[page_url] = product
 
+    for entry in skipped.values():
+        reasons[entry["reason"]] = reasons.get(entry["reason"], 0) + 1
     items = list({item["id"]: item for item in results.values()}.values())
     report = {
         "status": "ok", "source": "sitemap", "items": len(items), "productUrls": len(urls),
         "scheduled": len(to_fetch), "attempted": attempted, "fetched": attempted - failures,
-        "refreshed": refreshed, "failed": failures, "notProducts": not_products,
+        "refreshed": refreshed, "added": added, "failed": failures, "notProducts": not_products,
+        "waitingNew": max(0, len(fresh) - max(0, budget - len(refresh))), "notFetched": presumed,
+        "skipped": reasons, "outOfTime": out_of_time,
         "verifiedDiscounts": sum(bool(item.get("originalPriceVerified") and item.get("originalPrice")
                                       and item.get("price") and item["originalPrice"] > item["price"]) for item in items),
         "missingImages": sum(not item.get("images") for item in items),
         "seconds": round(time.time() - started), "log": log[-20:],
     }
-    return items, report
+    return items, report, skipped
+
+
+# MARK: - Reading the last run and writing this one
+
+def load_previous(path):
+    """({store id: {item id: item}}, {store id: {url: skip entry}}) from the last published folder."""
+    items, skipped = {}, {}
+    if not path or not os.path.exists(path):
+        return items, skipped
+    folder = path if os.path.isdir(path) else None
+    try:
+        index = os.path.join(folder, "index.json") if folder else None
+        if index and os.path.exists(index):
+            files = [os.path.join(folder, shard["path"]) for shard in json.load(open(index, encoding="utf-8")).get("shards", [])]
+        else:
+            # The first run after the split still starts from the single catalog.json.
+            files = [os.path.join(folder, "catalog.json") if folder else path]
+        for name in files:
+            for item in json.load(open(name, encoding="utf-8")).get("items", []):
+                items.setdefault(item["store"], {})[item["id"]] = item
+        state = os.path.join(folder, "state.json") if folder else None
+        if state and os.path.exists(state):
+            skipped = json.load(open(state, encoding="utf-8")).get("stores", {})
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        print("previous catalog unreadable, starting fresh", file=sys.stderr)
+        return {}, {}
+    return items, skipped
+
+
+def audience_of(item):
+    return item["gender"] if item.get("gender") in ("men", "women") else "other"
+
+
+def write_json(path, data, **options):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    encoded = json.dumps(data, ensure_ascii=False, **options).encode("utf-8")
+    with open(path, "wb") as handle:
+        handle.write(encoded)
+    return encoded
+
+
+def write_shards(out, items):
+    """One or more files per store and department; returns their index entries."""
+    groups = {}
+    for item in items:
+        groups.setdefault((item["store"], audience_of(item)), []).append(item)
+    entries = []
+    for (store_id, audience), group in sorted(groups.items()):
+        parts = max(1, math.ceil(len(group) / SHARD_ITEM_LIMIT))
+        buckets = [[] for _ in range(parts)]
+        for item in group:
+            # A stable split: a product stays in its file as long as the part count does.
+            buckets[int(hashlib.sha1(item["id"].encode("utf-8")).hexdigest()[:8], 16) % parts].append(item)
+        for number, bucket in enumerate(buckets):
+            path = f"shards/{store_id}-{audience}-{number}.json"
+            encoded = write_json(os.path.join(out, path), {"items": sorted(bucket, key=lambda item: item["id"])}, separators=(",", ":"))
+            entries.append({"path": path, "store": store_id, "audience": audience, "items": len(bucket),
+                            "bytes": len(encoded), "hash": hashlib.sha1(encoded).hexdigest()[:16]})
+    return entries
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--country", default="IL")
     parser.add_argument("--out", required=True)
-    parser.add_argument("--previous")
+    parser.add_argument("--previous", help="the last published folder (or an old single catalog.json)")
     parser.add_argument("--stores", default=os.path.join(os.path.dirname(__file__), "stores.json"))
-    parser.add_argument("--only", help="comma-separated store ids")
+    parser.add_argument("--only", help="comma-separated store ids; the other stores keep their last published items")
     args = parser.parse_args()
 
     stores = json.load(open(args.stores, encoding="utf-8"))[args.country]
-    if args.only:
-        wanted = set(args.only.split(","))
-        stores = [s for s in stores if s["id"] in wanted]
+    wanted = set(args.only.split(",")) if args.only else {s["id"] for s in stores}
+    previous, previous_skipped = load_previous(args.previous)
 
-    previous = {}
-    if args.previous and os.path.exists(args.previous):
-        try:
-            for item in json.load(open(args.previous, encoding="utf-8")).get("items", []):
-                previous.setdefault(item["store"], {})[item["id"]] = item
-        except (json.JSONDecodeError, KeyError):
-            print("previous catalog unreadable, starting fresh", file=sys.stderr)
+    def run(store):
+        if store["id"] not in wanted:
+            kept = [item for item in previous.get(store["id"], {}).values() if unusable_reason(item) is None]
+            return kept, {"status": "kept", "items": len(kept)}, previous_skipped.get(store["id"], {})
+        return crawl_store(store, previous.get(store["id"], {}), args.country, previous_skipped.get(store["id"], {}))
 
-    all_items, reports = [], {}
-    for store in stores:
-        items, report = crawl_store(store, previous.get(store["id"], {}), args.country)
+    # Each store keeps its own delay between pages; only different stores run side by side.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(stores))) as pool:
+        outcomes = list(pool.map(run, stores))
+
+    all_items, reports, skipped = [], {}, {}
+    for store, (items, report, store_skipped) in zip(stores, outcomes):
         reports[store["id"]] = {"name": store["name"], **report}
+        skipped[store["id"]] = store_skipped
         all_items.extend(items)
         print(f"{store['id']}: {report.get('status')} · {report.get('items')} items", file=sys.stderr)
 
     os.makedirs(args.out, exist_ok=True)
     generated = now_iso()
-    catalog = {
-        "version": 1,
-        "country": args.country,
-        "generatedAt": generated,
-        "stores": [{"id": s["id"], "name": s["name"], "base": s["base"], "items": reports[s["id"]]["items"]} for s in stores],
-        "items": all_items,
-    }
-    with open(os.path.join(args.out, "catalog.json"), "w", encoding="utf-8") as handle:
-        json.dump(catalog, handle, ensure_ascii=False, separators=(",", ":"))
-    with open(os.path.join(args.out, "report.json"), "w", encoding="utf-8") as handle:
-        json.dump({"generatedAt": generated, "stores": reports}, handle, ensure_ascii=False, indent=2)
+    store_list = [{"id": s["id"], "name": s["name"], "base": s["base"], "items": reports[s["id"]]["items"]} for s in stores]
+    shards = write_shards(args.out, all_items)
+    write_json(os.path.join(args.out, "index.json"),
+               {"version": 2, "country": args.country, "generatedAt": generated, "stores": store_list, "shards": shards}, indent=1)
+    write_json(os.path.join(args.out, "state.json"), {"version": 1, "generatedAt": generated, "stores": skipped}, separators=(",", ":"))
+    # Earlier app versions download this one file and decode it whole.
+    legacy = sorted(all_items, key=lambda item: item.get("fetchedAt") or "", reverse=True)[:LEGACY_ITEM_LIMIT]
+    write_json(os.path.join(args.out, "catalog.json"),
+               {"version": 1, "country": args.country, "generatedAt": generated, "stores": store_list, "items": legacy}, separators=(",", ":"))
+    write_json(os.path.join(args.out, "report.json"),
+               {"generatedAt": generated, "stores": reports, "shards": len(shards), "items": len(all_items),
+                "legacyItems": len(legacy)}, indent=2)
 
 
 if __name__ == "__main__":
