@@ -194,6 +194,8 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 
 ## Progress log
 
+- 2026-11-13 · Claude · At Dor's request, committed the whole uncommitted working tree (48 changed, 22 new files) on branch `claude/local-work-shopping-recommender` and merged origin/main (PR #37 catalog crawler). Kept both sides' entries in AGENTS.md and docs/LEARNINGS.md; `build_catalog.py` merged cleanly. Not pushed. No build/tests/simulator.
+
 - 2026-10-25 · Codex · Implemented Dor-selected system light/dark appearance: removed wallpaper-driven overrides, added neutral System default and paired tinted palettes, semantic grouped canvas/content cards, adaptive photo veils/accessibility, sign-in/onboarding controls, gallery appearance and selected accent-label contrast. EN/HE settings updated. Source review only; no build/tests/simulator/app launch/rendered preview/commit/publication. Handoff: WearIt/Docs/System-Appearance-2026-10-25.md.
 
 - 2026-10-24 · Codex · Addressed Dor-reported ShopSearchProfile compiler type-check timeouts by splitting support arithmetic, typed evidence/confidence aggregation, style accumulation and source-priority construction into small typed steps/helpers. Preserved weights, gates, deduplication and stable ordering. Source review only; owner rebuild confirmation pending, no build/tests/simulator/app launch/commit/publication.
@@ -219,6 +221,8 @@ the planner's `saveWidgetSnapshot` / `widgetAlternatives` feed it), App Shortcut
 - 2026-10-21 · Codex · Planner launch crash: inspected Dor's already-paused device session read-only. Recursive Swift generic metadata decoding reached inaccessible stack memory while eagerly building dayColumn. Split the card into six concrete deferred section boundaries and defer DayCardContainer content; kept signature equality, row order/actions/transitions. No build/tests/simulator, resume or publication; owner rebuild/device confirmation pending.
 
 - 2026-10-21 · Codex · Shopping: progressive concurrent photos with modeled fallback, snapshot-based background ranking, clothing-first feeds, explained fit estimates, purchase-to-wardrobe/date/store/optional receipt and Undo, contextual weather learning and broader preview variety. Catalog paired-price extraction/refresh scheduling corrected. Source review only; no build/tests/simulator or publication. Handoff: WearIt/Docs/Shopping-2026-10-21.md.
+
+- 2026-10-21 · Codex · Dor authorized publishing and running the catalog crawler: encode Hebrew product URLs, extract verified same-product/color prices and full galleries/stock facts, prioritize existing-item refreshes, and report actual attempts. Focused crawler publication; local app changes remain separate. No app build/tests/simulator; live run results pending.
 
 - 2026-10-18 · Codex · Dor authorized publishing all latest local changes together: personal shopping, planner advice/layout and wardrobe/photo tools; preparing one PR for main. No build/tests/simulator; device review remains pending.
 
@@ -386,6 +390,8 @@ Newest first. One line per meaningful change: date, tool, what.
 - Latest shopping review: pull/build only when Dor chooses; check photos on a slow network, fit explanations, purchase/Undo/receipt sync/export, and shorts with positive/negative weather feedback. Publish the crawler only when requested, then inspect refreshed verified offers. The downloaded 2026-10-19 catalog had 3,213 products with image URLs but no verified discounts. WearIt/Docs/Shopping-2026-10-21.md supersedes older strict-photo/MainActor/feedback-only-purchase notes.
 
 - Photo tools owner review: web results for a named/branded item, an empty result falling back to the browser or a product link, and blur face/background on a mirror photo versus a flat product cutout. The wardrobe photo must not be uploaded. No build/tests/simulator.
+
+- Catalog publication: inspect the next manually dispatched Shop catalog run and catalog-data report for successful refreshes and verified price pairs. App UI/ranking/photo changes are local and are not part of this focused crawler publication.
 
 - Publication authorized for the complete 2026-10-18 local change set; after merge, pull main in Xcode and review shopping, planner and photo flows on device. Inspect the next live catalog report; runtime/performance acceptance remains pending.
 
