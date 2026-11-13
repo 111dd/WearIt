@@ -66,6 +66,9 @@ enum WidgetCommandService {
         shared?.removeObject(forKey: WidgetCommand.queueKey)
         shared?.removeObject(forKey: WidgetCommand.legacyKey)
 
+        // Freeze before applying commands/refreshing; never borrow a later app snapshot for an old reaction.
+        let feedbackSnapshot = WidgetSnapshotService.loadSnapshot()
+        var chosenBeforeFeedback: [String: [String: String]] = [:]
         var plannerFeedback: [WidgetCommand] = []
         for command in commands.sorted(by: { $0.timestamp < $1.timestamp }) {
             guard let date = DateFormatter.widgetDate.date(from: command.date) else { continue }
@@ -76,9 +79,15 @@ enum WidgetCommandService {
             case WidgetCommand.notWorn:
                 markNotWorn(date: date, isEvening: isEvening, context: context)
             case WidgetCommand.chooseLook:
+                chosenBeforeFeedback["\(command.date)|\(command.lookKind)"] = command.slots
                 chooseLook(date: date, slots: command.slots ?? [:], context: context)
             case WidgetCommand.feedback:
-                plannerFeedback.append(command)
+                var attributed = command
+                if attributed.slots == nil {
+                    attributed.slots = legacyFeedbackSlots(command, snapshot: feedbackSnapshot,
+                        chosen: chosenBeforeFeedback["\(command.date)|\(command.lookKind)"])
+                }
+                plannerFeedback.append(attributed)
             default:
                 break
             }
@@ -94,11 +103,44 @@ enum WidgetCommandService {
         WidgetSnapshotService.refresh(context: context)
     }
 
+    /// Compatibility for existing widget builds: only a frozen, reaction-marked snapshot
+    /// predating the command can supply identity. Unresolved option state remains unlinked.
+    private static func legacyFeedbackSlots(_ command: WidgetCommand, snapshot: WidgetSnapshot?,
+                                            chosen: [String: String]?) -> [String: String]? {
+        guard let snapshot, snapshot.savedAt <= command.timestamp,
+              let look = snapshot.look(date: command.date, kind: command.lookKind),
+              let value = command.value, look.reaction == value else { return nil }
+        if let chosen { return chosen }
+        let items = Dictionary(look.items.map { ($0.slot, $0.garmentID) }, uniquingKeysWith: { first, _ in first })
+        if let data = UserDefaults(suiteName: WidgetSnapshotService.appGroupID)?.data(forKey: "widgetUIStateV1"),
+           let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let shown = state["shown"] as? [String: [String]],
+           let ids = shown["\(command.date)|\(command.lookKind)"], Set(ids) != Set(items.values) {
+            return nil
+        }
+        return items.isEmpty ? nil : items
+    }
+
     /// Hands the queued reactions to the planner (which applies its own learning) and clears them.
     static func takePlannerFeedback() -> [WidgetCommand] {
         let feedback = decodeQueue(.standard, key: plannerFeedbackKey)
         UserDefaults.standard.removeObject(forKey: plannerFeedbackKey)
         return feedback
+    }
+
+    /// Legacy commands without a slot snapshot, or stale choices, cannot safely train the current look.
+    /// Retain a bounded diagnostic queue instead of guessing garment identity or silently training another look.
+    static func keepUnattributedFeedback(_ command: WidgetCommand) {
+        let key = "widget.unattributedFeedback"
+        var rows = decodeQueue(.standard, key: key)
+        rows.append(command)
+        if let data = try? JSONEncoder().encode(Array(rows.suffix(50))) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    static func unattributedFeedbackForExport() -> [WidgetCommand] {
+        decodeQueue(.standard, key: "widget.unattributedFeedback")
     }
 
     /// Marks a day's day or evening look worn through `LookWearStatus`, records the

@@ -28,6 +28,7 @@ actor ShopRankingWorker {
         let hidden: Set<String>
         let now: Date
         var retainedIDs: [String] = []
+        var storeIDs: Set<String> = []
     }
     struct Result: Sendable {
         var picks: [PurchaseScorer.Pick] = []
@@ -92,7 +93,7 @@ actor ShopRankingWorker {
         let ranking = signposter.beginInterval("ranking", id: signposter.makeSignpostID())
         defer { signposter.endInterval("ranking", ranking) }
         let result = PurchaseScorer.rankAndMatch(request.products, input: input, isHidden: { request.hidden.contains($0) },
-            limit: 70, retainedIDs: request.retainedIDs)
+            limit: 70, retainedIDs: request.retainedIDs, storeIDs: request.storeIDs)
         guard !Task.isCancelled else { return Result() }
         let value = Result(picks: result.picks, matches: result.matches, searchProfile: searchProfile)
         cachedKey = request.key; cached = value; cachedAt = Date()

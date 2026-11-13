@@ -107,11 +107,14 @@ enum PurchaseScorer {
 
     /// Evaluate cheap catalog evidence once for both Explore estimates and the deep shortlist.
     static func rankAndMatch(_ products: [ShopProduct], input: Input, isHidden: (String) -> Bool,
-        limit: Int = 40, retainedIDs: [String] = []) -> (picks: [Pick], matches: [String: Match]) {
+        limit: Int = 40, retainedIDs: [String] = [], storeIDs: Set<String> = []) -> (picks: [Pick], matches: [String: Match]) {
         let evidence = productEvidence(products, input: input)
         guard !Task.isCancelled else { return ([], [:]) }
         let matches = browseMatches(evidence, input: input)
-        let picks = rank(products, input: input, isHidden: isHidden, limit: limit,
+        // Keep Explore estimates for the whole catalog, but narrow the deep shortlist
+        // and companion purchases before they consume the bounded ranking budget.
+        let rankingProducts = storeIDs.isEmpty ? products : products.filter { storeIDs.contains($0.item.store) }
+        let picks = rank(rankingProducts, input: input, isHidden: isHidden, limit: limit,
             retainedIDs: retainedIDs, evidence: evidence)
         return Task.isCancelled ? ([], [:]) : (picks, matches)
     }

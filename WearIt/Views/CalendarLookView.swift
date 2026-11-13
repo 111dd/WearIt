@@ -39,6 +39,8 @@ struct CalendarLookView: View {
     @State private var showPlanTrip = false
     @State private var placePickerEvent: DayJournalEvent?
 
+    @Query private var exposureProfiles: [UserProfile]
+
     @Query(sort: \LookPost.lookDate, order: .reverse) private var lookPosts: [LookPost]
     @Query(sort: \DayPlan.date, order: .reverse) private var dayPlans: [DayPlan]
     @Query(sort: \Garment.createdAt, order: .reverse) private var allGarments: [Garment]
@@ -115,8 +117,26 @@ struct CalendarLookView: View {
             notes: plan?.notes ?? "",
             weather: weatherSummary(for: plan),
             photoPaths: postsForSelectedDay.compactMap { LookPostStore.localPhotoPath(for: $0) },
-            events: dayEvents
+            events: dayEvents,
+            dayExposure: calendarExposure(for: plan, items: dayItems, lookTime: .day),
+            eveningExposure: calendarExposure(for: plan, items: eveningItems, lookTime: .evening)
         )
+    }
+
+    private func calendarExposure(for plan: DayPlan?, items: [(slot: OutfitSlot, garment: Garment)],
+                                  lookTime: LookTime, origin: LookExposure.Origin = .unknown) -> LookExposure? {
+        guard let profile = CurrentUser.activeProfile(from: exposureProfiles, userIdentifier: auth.userIdentifier),
+              let plan, !items.isEmpty else { return nil }
+        var slots: [String: UUID] = [:]
+        for item in items {
+            let slot = item.garment.itemType?.isOnePiece == true ? "onePiece" : item.slot.rawValue
+            slots[slot] = item.garment.id
+        }
+        let temperature = lookTime == .evening ? plan.contextEveningTemp : plan.contextAfternoonTemp
+        return LookExposure(profileID: profile.id, dayPlanID: plan.id, plannedDate: plan.date,
+                            lookTime: lookTime.rawValue, slots: slots, origin: origin, surface: .calendar,
+                            temperatureC: temperature, wasRaining: plan.contextWasRaining,
+                            desiredFormality: nil, modelVersion: RecoState.currentVersion)
     }
 
     private var journalActions: DayJournalActions {
@@ -151,6 +171,8 @@ struct CalendarLookView: View {
                 DayJournalCard(
                     model: journalModel,
                     actions: journalActions,
+                    exposureEnabled: !showLookEditor && !showCamera && !showDatePicker &&
+                        !showPlanTrip && packingTrip == nil && placePickerEvent == nil,
                     photosPickerItems: $photosPickerItems
                 )
                 .id(selectedDay)
@@ -543,6 +565,10 @@ struct CalendarLookView: View {
         let before = Self.effectiveDayAssignments(for: plan, lookup: garmentsByID)
         plan.setSlotAssignments(assignments, lockedSlots: lockedSlots)
         if plan.slotAssignments != before {
+            if let snapshot = calendarExposure(for: plan,
+                items: Self.dayItems(for: plan, lookup: garmentsByID), lookTime: .day, origin: .manual) {
+                ExposureLog.shared.rememberOrigin(snapshot, session: ExposureLog.shared.sessionToken())
+            }
             plan.applyDayLookWearStatus(nil)
             if timing != .future {
                 learnActualWear(plan: plan, before: before, after: plan.slotAssignments)

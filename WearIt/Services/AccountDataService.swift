@@ -20,6 +20,12 @@ enum AccountDataService {
     /// Call it and reset the gate in the same main-actor turn, so no screen renders a deleted model.
     /// Returns the deleted garments' IDs for `deleteCloudPhotos`.
     static func deleteStoredData(context: ModelContext) -> [UUID] {
+        // Invalidate outstanding dwell sessions and cancel disk writes in this same UI turn.
+        do {
+            try ExposureLog.shared.reset()
+        } catch {
+            logger.error("Exposure log deletion failed: \(error.localizedDescription, privacy: .public)")
+        }
         ShopRankingCoordinator.shared.reset()
         ShopFeedbackStore.shared.reset()
         let garmentIDs = ((try? context.fetch(FetchDescriptor<Garment>())) ?? []).map(\.id)
@@ -85,6 +91,19 @@ enum AccountDataService {
     /// Builds "WearIt Export <date>.zip": `wearit-data.json` (profile, wardrobe, plans, wear history,
     /// look posts and recommendation feedback) plus photos. Returns a temporary zip ready to share.
     static func makeExportArchive(context: ModelContext) throws -> URL {
+        // The worker snapshot includes records whose debounced disk write has not run yet.
+        // A corrupt/unsupported log fails the export instead of reporting false empty history.
+        let exposureSnapshot = try ExposureLog.shared.snapshot()
+        let exposureEncoder = JSONEncoder()
+        exposureEncoder.dateEncodingStrategy = .iso8601
+        var exposureMetadata = try JSONSerialization.jsonObject(
+            with: exposureEncoder.encode(exposureSnapshot)
+        ) as? [String: Any] ?? [:]
+        let exposureRecords = exposureMetadata.removeValue(forKey: "records") ?? []
+        exposureMetadata.removeValue(forKey: "provenance") // Internal bounded bookkeeping; records carry resolved origins.
+        let unattributedWidgetFeedback = try JSONSerialization.jsonObject(
+            with: exposureEncoder.encode(WidgetCommandService.unattributedFeedbackForExport())
+        )
         let fileManager = FileManager.default
         let stamp = exportStamp()
         let root = fileManager.temporaryDirectory.appendingPathComponent("WearIt Export \(stamp)", isDirectory: true)
@@ -128,7 +147,7 @@ enum AccountDataService {
         }
 
         let payload: [String: Any] = [
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "exportedAt": iso(Date()),
             "timeZoneIdentifier": TimeZone.current.identifier,
             "app": "WearIt",
@@ -139,6 +158,9 @@ enum AccountDataService {
             "dayPlans": ((try? context.fetch(FetchDescriptor<DayPlan>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(dayPlanJSON),
             "wearHistory": ((try? context.fetch(FetchDescriptor<WearEvent>(sortBy: [SortDescriptor(\.date)]))) ?? []).map(wearEventJSON),
             "recommendationEvents": recommendationEvents.map(recommendationEventJSON),
+            "lookExposures": exposureRecords,
+            "lookExposureMetadata": exposureMetadata,
+            "unattributedWidgetFeedback": unattributedWidgetFeedback,
             "lookPosts": posts.map { lookPostJSON($0, photo: postPhotoNames[$0.id]) }
         ]
         let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
@@ -279,6 +301,7 @@ enum AccountDataService {
             "rainTolerance": event.rainTolerance,
             "modelVersion": event.modelVersion
         ]
+        json["exposureID"] = event.exposureID?.uuidString
         json["profileID"] = event.profileID?.uuidString
         json["dayPlanID"] = event.dayPlanID?.uuidString
         if event.temperatureC.isFinite { json["temperatureC"] = event.temperatureC }

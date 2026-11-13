@@ -23,7 +23,7 @@ struct LookPostGridSection: View {
                 Button(action: onAdd) {
                     Image(systemName: "camera")
                         .font(.body.weight(.semibold))
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .liquidGlassCircle(interactive: true)
                 }
                 .buttonStyle(.plain)
@@ -52,7 +52,7 @@ struct LookPostGridSection: View {
             }
         }
         .padding(DS.Spacing.sm)
-        .liquidGlassSurface(cornerRadius: DS.Radius.card, castsShadow: true)
+        .contentSurface()
     }
 
     private var emptyState: some View {
@@ -139,12 +139,14 @@ struct LookPostDetailView: View {
     @State private var captionDraft = ""
     @State private var isEditingCaption = false
     @State private var confirmDelete = false
+    @State private var showShare = false
     @FocusState private var captionFocused: Bool
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DS.Spacing.md) {
                 photo
+                shareButton
                 metaRow
                 captionSection
                 if !garments.isEmpty {
@@ -160,6 +162,9 @@ struct LookPostDetailView: View {
         .compactNavBar()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { actionsMenu }
+        }
+        .sheet(isPresented: $showShare) {
+            LookShareView(post: post)
         }
         .confirmationDialog(
             String(localized: "look_post_delete_question"),
@@ -192,6 +197,16 @@ struct LookPostDetailView: View {
     }
 
     // MARK: Parts
+
+    private var shareButton: some View {
+        Button {
+            showShare = true
+        } label: {
+            Label(String(localized: "look_share_title"), systemImage: "square.and.arrow.up")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .dsSecondaryButton()
+    }
 
     private var photo: some View {
         Color(.systemGray6)
@@ -300,9 +315,14 @@ struct LookPostDetailView: View {
                     systemImage: post.isPinned ? "pin.slash" : "pin"
                 )
             }
+            Button {
+                showShare = true
+            } label: {
+                Label(String(localized: "look_share_title"), systemImage: "square.and.arrow.up")
+            }
             if let path = post.photoPath, let url = ImageStore.fileURL(path: path) {
                 ShareLink(item: url) {
-                    Label(String(localized: "action_share"), systemImage: "square.and.arrow.up")
+                    Label(String(localized: "look_share_photo_only"), systemImage: "photo")
                 }
             }
             Divider()

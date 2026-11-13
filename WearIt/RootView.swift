@@ -20,11 +20,13 @@ struct RootView: View {
         TabView(selection: $selected) {
             Tab(LocalizedStringKey("tab_outfits"), systemImage: "sparkles", value: AppTab.planner) {
                 OutfitPlannerView()
+                    .environment(\.exposureSurfaceActive, selected == .planner && !showSignInSheet)
             }
 
             Tab(LocalizedStringKey("tab_calendar"), systemImage: "calendar", value: AppTab.calendar) {
                 NavigationStack {
                     CalendarLookView()
+                        .environment(\.exposureSurfaceActive, selected == .calendar && !showSignInSheet)
                         .withLocalAppBackdrop()
                 }
             }
@@ -77,6 +79,8 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 handleIncomingSystemAction()
+            } else if newPhase == .background {
+                ExposureLog.shared.flush()
             }
         }
         .onChange(of: appIntentRouter.pendingDestination) { _, _ in
