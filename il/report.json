@@ -1,0 +1,72 @@
+{
+  "generatedAt": "2026-11-14T04:58:16+00:00",
+  "stores": {
+    "terminalx": {
+      "name": "Terminal X",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 4024,
+      "productUrls": 94697,
+      "scheduled": 3600,
+      "attempted": 3468,
+      "fetched": 3464,
+      "refreshed": 3464,
+      "added": 1019,
+      "failed": 4,
+      "notProducts": 0,
+      "waitingNew": 81934,
+      "notFetched": 6691,
+      "skipped": {
+        "unavailable": 442,
+        "kids": 1273,
+        "not-wearable": 183,
+        "gone": 18
+      },
+      "outOfTime": true,
+      "verifiedDiscounts": 1983,
+      "missingImages": 0,
+      "seconds": 5401,
+      "log": [
+        "shopify page 1 failed: HTTP Error 404: Not Found; using incremental sitemap fallback",
+        "page failed https://www.terminalx.com/k113850001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r682620002: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r673190001: HTTP Error 404: Not Found",
+        "page failed https://www.terminalx.com/r674110001: HTTP Error 404: Not Found",
+        "time limit reached after 3468 of 3600 pages; the rest wait for the next run"
+      ]
+    },
+    "castro": {
+      "name": "Castro",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 1938,
+      "productUrls": 3187,
+      "scheduled": 1200,
+      "attempted": 959,
+      "fetched": 959,
+      "refreshed": 873,
+      "added": 142,
+      "failed": 0,
+      "notProducts": 86,
+      "waitingNew": 0,
+      "notFetched": 325,
+      "skipped": {
+        "unavailable": 86,
+        "not-wearable": 59,
+        "kids": 682,
+        "not-product": 97
+      },
+      "outOfTime": true,
+      "verifiedDiscounts": 911,
+      "missingImages": 0,
+      "seconds": 5403,
+      "log": [
+        "shopify page 1 failed: Expecting value: line 1 column 1 (char 0); using incremental sitemap fallback",
+        "time limit reached after 959 of 1200 pages; the rest wait for the next run"
+      ]
+    }
+  },
+  "shards": 7,
+  "items": 5962,
+  "legacyItems": 5962
+}
