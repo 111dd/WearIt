@@ -1,0 +1,77 @@
+{
+ "version": 2,
+ "country": "IL",
+ "generatedAt": "2026-11-21T05:39:59+00:00",
+ "stores": [
+  {
+   "id": "terminalx",
+   "name": "Terminal X",
+   "base": "https://www.terminalx.com",
+   "items": 8027
+  },
+  {
+   "id": "castro",
+   "name": "Castro",
+   "base": "https://www.castro.com",
+   "items": 1785
+  }
+ ],
+ "shards": [
+  {
+   "path": "shards/castro-men-0.json",
+   "store": "castro",
+   "audience": "men",
+   "items": 773,
+   "bytes": 1154664,
+   "hash": "793a04026e448f5c"
+  },
+  {
+   "path": "shards/castro-other-0.json",
+   "store": "castro",
+   "audience": "other",
+   "items": 62,
+   "bytes": 60086,
+   "hash": "14a467bb58dc6f9a"
+  },
+  {
+   "path": "shards/castro-women-0.json",
+   "store": "castro",
+   "audience": "women",
+   "items": 950,
+   "bytes": 1441084,
+   "hash": "d26d9409944f32bd"
+  },
+  {
+   "path": "shards/terminalx-men-0.json",
+   "store": "terminalx",
+   "audience": "men",
+   "items": 2138,
+   "bytes": 4258415,
+   "hash": "0ae11321e69226b2"
+  },
+  {
+   "path": "shards/terminalx-other-0.json",
+   "store": "terminalx",
+   "audience": "other",
+   "items": 889,
+   "bytes": 1685505,
+   "hash": "9480c3e85ac0ad8a"
+  },
+  {
+   "path": "shards/terminalx-women-0.json",
+   "store": "terminalx",
+   "audience": "women",
+   "items": 2471,
+   "bytes": 4806331,
+   "hash": "809c7b2185b795bf"
+  },
+  {
+   "path": "shards/terminalx-women-1.json",
+   "store": "terminalx",
+   "audience": "women",
+   "items": 2529,
+   "bytes": 4925468,
+   "hash": "b01e887a9557f115"
+  }
+ ]
+}

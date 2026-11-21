@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-11-21T05:39:59+00:00",
+  "stores": {
+    "terminalx": {
+      "name": "Terminal X",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 8027,
+      "productUrls": 99829,
+      "scheduled": 3600,
+      "attempted": 3465,
+      "fetched": 3464,
+      "refreshed": 3464,
+      "added": 860,
+      "failed": 1,
+      "notProducts": 0,
+      "waitingNew": 81392,
+      "notFetched": 7274,
+      "skipped": {
+        "kids": 2226,
+        "not-wearable": 172,
+        "gone": 18,
+        "unavailable": 585
+      },
+      "outOfTime": true,
+      "verifiedDiscounts": 5052,
+      "missingImages": 0,
+      "seconds": 5401,
+      "log": [
+        "shopify page 1 failed: HTTP Error 404: Not Found; using incremental sitemap fallback",
+        "page failed https://www.terminalx.com/r248530001: HTTP Error 404: Not Found",
+        "time limit reached after 3465 of 3600 pages; the rest wait for the next run"
+      ]
+    },
+    "castro": {
+      "name": "Castro",
+      "status": "ok",
+      "source": "sitemap",
+      "items": 1785,
+      "productUrls": 3072,
+      "scheduled": 1200,
+      "attempted": 1200,
+      "fetched": 1200,
+      "refreshed": 1196,
+      "added": 0,
+      "failed": 0,
+      "notProducts": 4,
+      "waitingNew": 0,
+      "notFetched": 331,
+      "skipped": {
+        "not-wearable": 59,
+        "kids": 651,
+        "not-product": 159,
+        "unavailable": 87
+      },
+      "outOfTime": false,
+      "verifiedDiscounts": 1388,
+      "missingImages": 0,
+      "seconds": 5166,
+      "log": [
+        "shopify page 1 failed: Expecting value: line 1 column 1 (char 0); using incremental sitemap fallback"
+      ]
+    }
+  },
+  "shards": 7,
+  "items": 9812,
+  "legacyItems": 8000
+}
